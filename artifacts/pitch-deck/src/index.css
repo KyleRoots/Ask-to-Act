@@ -3,23 +3,28 @@
 @theme inline {
   --color-primary: var(--slide-primary);
   --color-accent: var(--slide-accent);
+  --color-gold: var(--slide-gold);
   --color-bg: var(--slide-bg);
+  --color-surface: var(--slide-surface);
   --color-text: var(--slide-text);
   --color-muted: var(--slide-muted);
+  --color-line: var(--slide-line);
   --font-display: var(--font-display-family);
   --font-body: var(--font-body-family);
 }
 
 :root {
-  /* Replace these with brand colors */
-  --slide-primary: #4f46e5;
-  --slide-accent: #06b6d4;
-  --slide-bg: #f8fafc;
-  --slide-text: #0f172a;
-  --slide-muted: #64748b;
-  --font-display-family: "Inter", system-ui, sans-serif;
-  --font-body-family: "Inter", system-ui, sans-serif;
-  color-scheme: light;
+  --slide-primary: #38bdf8;
+  --slide-accent: #38bdf8;
+  --slide-gold: #fbbf24;
+  --slide-bg: #0b1a2e;
+  --slide-surface: #102541;
+  --slide-text: #f8fafc;
+  --slide-muted: #94a3b8;
+  --slide-line: #1e3a5f;
+  --font-display-family: "Sora", system-ui, sans-serif;
+  --font-body-family: "DM Sans", system-ui, sans-serif;
+  color-scheme: dark;
 }
 
 html,
@@ -33,6 +38,7 @@ body,
 body {
   background: var(--slide-bg);
   color: var(--slide-text);
+  font-family: var(--font-body-family);
 }
 
 .slide {

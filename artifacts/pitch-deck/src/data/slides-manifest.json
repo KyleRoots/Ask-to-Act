@@ -1,1 +1,50 @@
-[]
+[
+  {
+    "id": "8a3c1e2f-1a01-4f7b-9a01-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Cover.tsx",
+    "title": "Cover",
+    "description": "Relay — internal stakeholder briefing cover slide",
+    "speakerNotes": ""
+  },
+  {
+    "id": "8a3c1e2f-1a01-4f7b-9a01-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Problem.tsx",
+    "title": "The Problem",
+    "description": "Recruiters lose hours daily moving data between AI tools and their ATS",
+    "speakerNotes": ""
+  },
+  {
+    "id": "8a3c1e2f-1a01-4f7b-9a01-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Solution.tsx",
+    "title": "What Relay Does",
+    "description": "Three-box bridge: AI model → Relay → ATS/CRM stack",
+    "speakerNotes": ""
+  },
+  {
+    "id": "8a3c1e2f-1a01-4f7b-9a01-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/BusinessModel.tsx",
+    "title": "How It Makes Money",
+    "description": "Three recurring revenue streams plus one-time onboarding, with worked pricing examples",
+    "speakerNotes": ""
+  },
+  {
+    "id": "8a3c1e2f-1a01-4f7b-9a01-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Moat.tsx",
+    "title": "Why Relay Wins",
+    "description": "Four-pillar moat: model-agnostic, domain-deep, governance built in, first-mover on the standard",
+    "speakerNotes": ""
+  },
+  {
+    "id": "8a3c1e2f-1a01-4f7b-9a01-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/TheAsk.tsx",
+    "title": "What We Need",
+    "description": "Three asks from the room: resource alignment, timeline approval, go/no-go decision",
+    "speakerNotes": ""
+  }
+]
