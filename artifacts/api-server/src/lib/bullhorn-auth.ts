@@ -253,20 +253,26 @@ export async function getSession(): Promise<Session> {
     }
 
     logger.info("Bullhorn: session invalid, refreshing");
-    authInProgress = refreshSession(session).then((s) => {
-      session = s;
-      authInProgress = null;
-      return s;
-    });
+    authInProgress = refreshSession(session)
+      .then((s) => {
+        session = s;
+        return s;
+      })
+      .finally(() => {
+        authInProgress = null;
+      });
     return authInProgress;
   }
 
-  authInProgress = createSession().then((s) => {
-    session = s;
-    authInProgress = null;
-    logger.info({ restUrl: s.restUrl }, "Bullhorn: session established");
-    return s;
-  });
+  authInProgress = createSession()
+    .then((s) => {
+      session = s;
+      logger.info({ restUrl: s.restUrl }, "Bullhorn: session established");
+      return s;
+    })
+    .finally(() => {
+      authInProgress = null;
+    });
   return authInProgress;
 }
 

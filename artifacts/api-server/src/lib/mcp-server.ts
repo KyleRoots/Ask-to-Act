@@ -44,11 +44,21 @@ function withLogging<T>(
   );
 }
 
+const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const PHONE_RE = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g;
+
+function redactString(value: string): string {
+  return value
+    .replace(EMAIL_RE, "[EMAIL]")
+    .replace(PHONE_RE, "[PHONE]");
+}
+
 function sanitizeParams(params: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params)) {
-    if (typeof v === "string" && v.length > 200) {
-      out[k] = v.slice(0, 200) + "…";
+    if (typeof v === "string") {
+      const truncated = v.length > 500 ? v.slice(0, 500) + "…" : v;
+      out[k] = redactString(truncated);
     } else {
       out[k] = v;
     }
