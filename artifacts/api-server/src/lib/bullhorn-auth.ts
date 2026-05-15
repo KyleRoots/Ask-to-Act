@@ -1,8 +1,8 @@
 import { logger } from "./logger.js";
 
 const BULLHORN_AUTH_URL = "https://auth.bullhornstaffing.com/oauth/token";
-const BULLHORN_LOGIN_URL =
-  "https://rest.bullhornstaffing.com/rest-services/login";
+const BULLHORN_LOGIN_INFO_URL =
+  "https://rest.bullhornstaffing.com/rest-services/loginInfo";
 
 interface TokenResponse {
   access_token: string;
@@ -10,9 +10,18 @@ interface TokenResponse {
   expires_in: number;
 }
 
+interface LoginInfoResponse {
+  loginUrl?: string;
+  apiUrl?: string;
+}
+
 interface LoginResponse {
   BhRestToken: string;
   restUrl: string;
+}
+
+interface PingResponse {
+  sessionExpires?: number;
 }
 
 interface Session {
@@ -21,6 +30,7 @@ interface Session {
   accessToken: string;
   refreshToken: string;
   tokenExpiresAt: number;
+  sessionExpiresAt: number;
 }
 
 let session: Session | null = null;
@@ -32,6 +42,33 @@ function getEnv(key: string): string {
     throw new Error(`Missing required environment variable: ${key}`);
   }
   return val;
+}
+
+async function discoverSwimlanLoginUrl(): Promise<string> {
+  const username = getEnv("BULLHORN_USERNAME");
+  const url = new URL(BULLHORN_LOGIN_INFO_URL);
+  url.searchParams.set("username", username);
+
+  logger.info({ url: url.toString() }, "Bullhorn: discovering swimlane via loginInfo");
+
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    logger.warn(
+      { status: res.status },
+      "Bullhorn: loginInfo failed, falling back to default login URL",
+    );
+    return "https://rest.bullhornstaffing.com/rest-services/login";
+  }
+
+  const data = (await res.json()) as LoginInfoResponse;
+  if (data.apiUrl) {
+    const loginUrl = `${data.apiUrl.replace(/\/$/, "")}/rest-services/login`;
+    logger.info({ apiUrl: data.apiUrl, loginUrl }, "Bullhorn: swimlane discovered");
+    return loginUrl;
+  }
+
+  logger.warn("Bullhorn: loginInfo did not return apiUrl, using default");
+  return "https://rest.bullhornstaffing.com/rest-services/login";
 }
 
 async function fetchTokenWithPassword(): Promise<TokenResponse> {
@@ -84,8 +121,11 @@ async function fetchTokenWithRefresh(
   return (await res.json()) as TokenResponse;
 }
 
-async function login(accessToken: string): Promise<LoginResponse> {
-  const url = new URL(BULLHORN_LOGIN_URL);
+async function login(
+  accessToken: string,
+  loginUrl: string,
+): Promise<LoginResponse> {
+  const url = new URL(loginUrl);
   url.searchParams.set("version", "*");
   url.searchParams.set("access_token", accessToken);
 
@@ -99,30 +139,90 @@ async function login(accessToken: string): Promise<LoginResponse> {
   return (await res.json()) as LoginResponse;
 }
 
+async function pingSession(s: Session): Promise<boolean> {
+  try {
+    const url = new URL("ping", s.restUrl);
+    url.searchParams.set("BhRestToken", s.BhRestToken);
+    const res = await fetch(url.toString(), { redirect: "follow" });
+    if (!res.ok) {
+      logger.info({ status: res.status }, "Bullhorn: ping returned non-ok, session invalid");
+      return false;
+    }
+    const data = (await res.json()) as PingResponse;
+    if (data.sessionExpires) {
+      const expiresAt = data.sessionExpires;
+      if (expiresAt <= Date.now()) {
+        logger.info("Bullhorn: ping reports session already expired");
+        return false;
+      }
+    }
+    return true;
+  } catch (err) {
+    logger.warn({ err }, "Bullhorn: ping failed, treating session as invalid");
+    return false;
+  }
+}
+
 async function createSession(): Promise<Session> {
   logger.info("Bullhorn: initiating new session with password grant");
-  const tokens = await fetchTokenWithPassword();
-  const loginData = await login(tokens.access_token);
+  const [tokens, loginUrl] = await Promise.all([
+    fetchTokenWithPassword(),
+    discoverSwimlanLoginUrl(),
+  ]);
+  const loginData = await login(tokens.access_token, loginUrl);
+
+  const pingUrl = new URL("ping", loginData.restUrl);
+  pingUrl.searchParams.set("BhRestToken", loginData.BhRestToken);
+  let sessionExpiresAt = Date.now() + 10 * 60 * 1000;
+  try {
+    const pingRes = await fetch(pingUrl.toString(), { redirect: "follow" });
+    if (pingRes.ok) {
+      const pingData = (await pingRes.json()) as PingResponse;
+      if (pingData.sessionExpires) {
+        sessionExpiresAt = pingData.sessionExpires - 30_000;
+      }
+    }
+  } catch {
+  }
+
   return {
     BhRestToken: loginData.BhRestToken,
     restUrl: loginData.restUrl,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
     tokenExpiresAt: Date.now() + tokens.expires_in * 1000 - 60_000,
+    sessionExpiresAt,
   };
 }
 
 async function refreshSession(current: Session): Promise<Session> {
   logger.info("Bullhorn: refreshing session with refresh token");
   try {
+    const loginUrl = await discoverSwimlanLoginUrl();
     const tokens = await fetchTokenWithRefresh(current.refreshToken);
-    const loginData = await login(tokens.access_token);
+    const loginData = await login(tokens.access_token, loginUrl);
+
+    let sessionExpiresAt = Date.now() + 10 * 60 * 1000;
+    try {
+      const pingUrl = new URL("ping", loginData.restUrl);
+      pingUrl.searchParams.set("BhRestToken", loginData.BhRestToken);
+      const pingRes = await fetch(pingUrl.toString(), { redirect: "follow" });
+      if (pingRes.ok) {
+        const pingData = (await pingRes.json()) as PingResponse;
+        if (pingData.sessionExpires) {
+          sessionExpiresAt = pingData.sessionExpires - 30_000;
+        }
+      }
+    } catch {
+    }
+
     return {
       BhRestToken: loginData.BhRestToken,
       restUrl: loginData.restUrl,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       tokenExpiresAt: Date.now() + tokens.expires_in * 1000 - 60_000,
+      sessionExpiresAt,
     };
   } catch (err) {
     logger.warn({ err }, "Bullhorn: refresh failed, falling back to password grant");
@@ -136,10 +236,23 @@ export async function getSession(): Promise<Session> {
   }
 
   if (session) {
-    if (Date.now() < session.tokenExpiresAt) {
+    const tokenExpired = Date.now() >= session.tokenExpiresAt;
+    const sessionExpired = Date.now() >= session.sessionExpiresAt;
+
+    if (!tokenExpired && !sessionExpired) {
       return session;
     }
-    logger.info("Bullhorn: access token expired, refreshing");
+
+    if (sessionExpired) {
+      logger.info("Bullhorn: BhRestToken session expired, re-authenticating via ping check");
+      const still_valid = await pingSession(session);
+      if (still_valid) {
+        session.sessionExpiresAt = Date.now() + 10 * 60 * 1000;
+        return session;
+      }
+    }
+
+    logger.info("Bullhorn: session invalid, refreshing");
     authInProgress = refreshSession(session).then((s) => {
       session = s;
       authInProgress = null;
@@ -151,10 +264,7 @@ export async function getSession(): Promise<Session> {
   authInProgress = createSession().then((s) => {
     session = s;
     authInProgress = null;
-    logger.info(
-      { restUrl: s.restUrl },
-      "Bullhorn: session established",
-    );
+    logger.info({ restUrl: s.restUrl }, "Bullhorn: session established");
     return s;
   });
   return authInProgress;
