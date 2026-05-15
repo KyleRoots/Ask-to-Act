@@ -7,10 +7,10 @@ export default function Solution() {
         <div className="flex items-center gap-[1vw]">
           <div className="w-[0.8vw] h-[0.8vw] rounded-full bg-accent" />
           <span className="font-display text-[1.2vw] tracking-[0.3em] uppercase text-muted">
-            02 · What Relay Does
+            02 · What AskToAct Does
           </span>
         </div>
-        <span className="font-body text-[1.2vw] text-muted">Relay</span>
+        <span className="font-body text-[1.2vw] text-muted">AskToAct</span>
       </div>
 
       <div className="absolute top-[16vh] left-[6vw] right-[6vw]">
@@ -41,7 +41,7 @@ export default function Solution() {
 
           <div className="bg-accent/10 border-2 border-accent rounded-[1.2vw] p-[3vh_2vw] flex flex-col justify-center relative">
             <div className="absolute -top-[2vh] left-[2vw] bg-accent text-bg font-display font-bold text-[1vw] tracking-[0.25em] uppercase px-[1.2vw] py-[0.6vh] rounded-full">
-              Relay
+              AskToAct
             </div>
             <div className="font-display text-[1.1vw] tracking-[0.25em] uppercase text-accent mt-[1vh]">
               The action layer

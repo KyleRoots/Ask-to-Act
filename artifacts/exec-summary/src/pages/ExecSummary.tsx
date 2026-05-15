@@ -6,7 +6,7 @@ export default function ExecSummary() {
       <div style={{ borderBottom: '1px solid #1e3a5f', padding: '1.5rem 4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{ width: '0.6rem', height: '0.6rem', borderRadius: '50%', background: '#38bdf8' }} />
-          <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1.25rem', letterSpacing: '-0.01em' }}>Relay</span>
+          <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1.25rem', letterSpacing: '-0.01em' }}>AskToAct</span>
         </div>
         <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
           <span style={{ fontSize: '0.8rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase' }}>Internal · Confidential</span>
@@ -21,7 +21,7 @@ export default function ExecSummary() {
           We sell the rails,<br /><span style={{ color: '#38bdf8' }}>not the chatbot.</span>
         </h1>
         <p style={{ fontSize: '1.2rem', color: '#cbd5e1', lineHeight: 1.6, maxWidth: '680px', margin: 0 }}>
-          Relay is the AI action layer for the recruiting and staffing stack — a model-agnostic middleware
+          AskToAct is the AI action layer for the recruiting and staffing stack — a model-agnostic middleware
           that lets any AI assistant read and write to Bullhorn, Salesforce, LinkedIn, and the rest, with
           role-based permissions and a full audit trail baked in from day one.
         </p>
@@ -57,11 +57,11 @@ export default function ExecSummary() {
         <Divider />
 
         {/* Section: The Solution */}
-        <Section title="What Relay Does" index="02">
+        <Section title="What AskToAct Does" index="02">
           <p style={bodyStyle}>
-            Relay is a remote MCP (Model Context Protocol) server — a standardized interface that connects any
+            AskToAct is a remote MCP (Model Context Protocol) server — a standardized interface that connects any
             MCP-compatible AI to any system we've built a connector for. The AI issues a natural-language intent;
-            Relay translates it into a validated, permissioned API call; the system of record does the work.
+            AskToAct translates it into a validated, permissioned API call; the system of record does the work.
           </p>
           <p style={bodyStyle}>
             From the recruiter's perspective: they type in ChatGPT. The right thing happens in Bullhorn.
@@ -70,12 +70,12 @@ export default function ExecSummary() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', margin: '2rem 0' }}>
             <FlowBox label="AI" sub="ChatGPT, Claude, Gemini — whatever the customer uses" highlight={false} />
-            <FlowBox label="Relay" sub="Permissions · Translation · Audit" highlight={true} />
+            <FlowBox label="AskToAct" sub="Permissions · Translation · Audit" highlight={true} />
             <FlowBox label="Systems" sub="Bullhorn, Salesforce, LinkedIn, HRIS" highlight={false} />
           </div>
 
           <p style={bodyStyle}>
-            Relay is model-agnostic by design. It does not sell an AI — it assumes the customer already has one.
+            AskToAct is model-agnostic by design. It does not sell an AI — it assumes the customer already has one.
             This is a durable architectural bet: AI providers will continue to commoditize while the value of
             clean, permissioned access to complex enterprise systems compounds.
           </p>
@@ -90,7 +90,7 @@ export default function ExecSummary() {
         <Divider />
 
         {/* Section: Why We Win */}
-        <Section title="Why Relay Wins" index="03">
+        <Section title="Why AskToAct Wins" index="03">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '1rem 0 2rem' }}>
             <MoatCard number="01" title="Model-agnostic" body="Works with whichever AI the customer already pays for. No vendor dependency. As models commoditize, the bridge becomes more valuable, not less." />
             <MoatCard number="02" title="Domain-deep" body="Built specifically for recruiting and staffing workflows — not generic CRUD wrappers. The vocabulary, entity model, and permission structures map to how the industry actually operates." />
@@ -99,7 +99,7 @@ export default function ExecSummary() {
           </div>
           <p style={bodyStyle}>
             The horizontal players (Zapier, Unified.to, Merge.dev) solve generic connectivity. They are
-            strategically valuable as backbone infrastructure for building connectors — Relay will compose
+            strategically valuable as backbone infrastructure for building connectors — AskToAct will compose
             on top of these where they cover a system well, building custom connectors only where domain depth
             demands it. This keeps connector cost low while preserving the differentiation layer that horizontal
             players cannot replicate: deep recruiting domain logic and governance rails.
@@ -111,7 +111,7 @@ export default function ExecSummary() {
         {/* Section: Business Model */}
         <Section title="How It Makes Money" index="04">
           <p style={bodyStyle}>
-            Relay runs on recurring SaaS revenue across three stacked streams, plus a one-time onboarding fee
+            AskToAct runs on recurring SaaS revenue across three stacked streams, plus a one-time onboarding fee
             per customer firm. All pricing is illustrative at this stage and will be tested against early
             customer conversations.
           </p>
@@ -119,7 +119,7 @@ export default function ExecSummary() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '2rem 0' }}>
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Recurring Streams</div>
-              <RevenueRow label="Platform fee" desc="Base subscription — access to the Relay layer" />
+              <RevenueRow label="Platform fee" desc="Base subscription — access to the AskToAct layer" />
               <RevenueRow label="Per-system fee" desc="Each connected system (Bullhorn, Salesforce, etc.)" />
               <RevenueRow label="Per-active-seat" desc="Billed only when the seat actively uses the bridge" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
@@ -133,7 +133,7 @@ export default function ExecSummary() {
               <PricingRow seats="50 seats" range="$4,500–$6,000 / mo" />
               <PricingRow seats="100 seats" range="$8,000–$12,000 / mo" />
               <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.5 }}>
-                Margin stays high because Relay does not pay for the AI — the customer does.
+                Margin stays high because AskToAct does not pay for the AI — the customer does.
                 Infrastructure cost per seat is low and falls as volume grows.
               </p>
             </div>
@@ -154,7 +154,7 @@ export default function ExecSummary() {
             The global staffing and recruiting market is a multi-hundred-billion dollar industry running on
             legacy systems. Bullhorn alone serves over 10,000 staffing and recruiting firms worldwide.
             The AI adoption curve in this sector is early but accelerating — every desk that adds a ChatGPT
-            subscription is a potential Relay customer.
+            subscription is a potential AskToAct customer.
           </p>
           <p style={bodyStyle}>
             Near-term addressable market: the mid-market staffing firm (20–500 desks) that has adopted AI
@@ -162,7 +162,7 @@ export default function ExecSummary() {
             on recruitment technology and have clear line-of-sight to ROI from reducing manual transfer work.
           </p>
           <p style={bodyStyle}>
-            Longer-term, Relay is positioned as infrastructure for the recruiting stack — the layer every
+            Longer-term, AskToAct is positioned as infrastructure for the recruiting stack — the layer every
             AI tool in the vertical routes through. As the standard matures, the value shifts from "nice
             connector" to "required middleware," compounding the switching cost for customers and expanding
             the wedge for additional connected systems.
@@ -204,7 +204,7 @@ export default function ExecSummary() {
             <AskCard number="3" title="Go / No-go" body="A clear green light to begin commercializing — or the specific objections the team needs addressed before that decision can be made." />
           </div>
           <p style={bodyStyle}>
-            Relay does not need a finished product to start selling. The working Bullhorn connector is a
+            AskToAct does not need a finished product to start selling. The working Bullhorn connector is a
             fundable, demonstrable proof. The next milestone is one paying customer and one second-connector
             in flight. We are asking for alignment on that scope.
           </p>
@@ -214,7 +214,7 @@ export default function ExecSummary() {
         <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '4rem', paddingTop: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <div style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#38bdf8' }} />
-            <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1rem' }}>Relay</span>
+            <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1rem' }}>AskToAct</span>
           </div>
           <span style={{ fontSize: '0.8rem', color: '#475569' }}>Internal · Confidential · 2026</span>
         </div>

@@ -10,7 +10,7 @@ export default function Problem() {
             01 · The Problem
           </span>
         </div>
-        <span className="font-body text-[1.2vw] text-muted">Relay</span>
+        <span className="font-body text-[1.2vw] text-muted">AskToAct</span>
       </div>
 
       <div className="absolute top-[18vh] left-[6vw] right-[6vw]">

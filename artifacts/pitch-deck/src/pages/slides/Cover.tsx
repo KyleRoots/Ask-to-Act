@@ -16,8 +16,8 @@ export default function Cover() {
       </div>
 
       <div className="absolute left-[6vw] top-[34vh] max-w-[80vw]">
-        <div className="font-display font-extrabold text-[12vw] leading-[0.92] tracking-tight text-text">
-          Relay
+        <div className="font-display font-extrabold text-[9vw] leading-[0.92] tracking-tight text-text">
+          AskToAct
         </div>
         <div className="mt-[3vh] font-display font-medium text-[3.4vw] leading-tight tracking-tight text-text max-w-[70vw]">
           We sell the rails,

@@ -11,7 +11,7 @@ export default function TheAsk() {
             05 · What We Need
           </span>
         </div>
-        <span className="font-body text-[1.2vw] text-muted">Relay</span>
+        <span className="font-body text-[1.2vw] text-muted">AskToAct</span>
       </div>
 
       <div className="absolute top-[20vh] left-[6vw] right-[6vw]">
@@ -54,7 +54,7 @@ export default function TheAsk() {
 
       <div className="absolute bottom-[5vh] left-[6vw] right-[6vw] flex items-end justify-between">
         <div className="font-display font-bold text-[3.6vw] text-text leading-tight max-w-[70vw]">
-          Relay
+          AskToAct
           <span className="text-muted font-display font-medium text-[2.2vw]"> · We sell the rails, not the chatbot.</span>
         </div>
         <div className="font-body text-[1.3vw] text-muted">

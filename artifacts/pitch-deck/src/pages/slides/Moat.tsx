@@ -7,10 +7,10 @@ export default function Moat() {
         <div className="flex items-center gap-[1vw]">
           <div className="w-[0.8vw] h-[0.8vw] rounded-full bg-accent" />
           <span className="font-display text-[1.2vw] tracking-[0.3em] uppercase text-muted">
-            04 · Why Relay Wins
+            04 · Why AskToAct Wins
           </span>
         </div>
-        <span className="font-body text-[1.2vw] text-muted">Relay</span>
+        <span className="font-body text-[1.2vw] text-muted">AskToAct</span>
       </div>
 
       <div className="absolute top-[16vh] left-[6vw] right-[6vw]">
