@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "tS_7aDKBvaydv3WDKXCpX"
+uri = "file://.local/outputs/AskToAct-Stakeholder-Pitch-Deck.pptx"
+type = "slides"
+title = "AskToAct — Stakeholder Pitch Deck (PPTX)"
+
+[[outputs]]
+id = "MpuBFFQEIPSr-lXe538Mf"
+uri = "file://.local/outputs/AskToAct-Executive-Summary.zip"
+type = "unspecified"
+title = "AskToAct — Executive Summary (HTML)"
