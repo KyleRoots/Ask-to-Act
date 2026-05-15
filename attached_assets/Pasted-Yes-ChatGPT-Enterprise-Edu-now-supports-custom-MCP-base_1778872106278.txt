@@ -1,0 +1,47 @@
+Yes — ChatGPT Enterprise/Edu now supports **custom MCP-based apps/connectors**, so in principle your Bullhorn ATS use case is feasible even without a native Bullhorn integration. OpenAI’s current documentation says you can build your own custom app using MCP, connect it to your internal tools and data, and — in beta for Business/Enterprise/Edu — support both read/fetch and write/modify actions with admin controls and user confirmations for writes.[1][2]
+
+## What exists today
+
+OpenAI has renamed “connectors” to “apps,” but the key capability remains: custom apps can be built with Model Context Protocol so ChatGPT can retrieve information and call approved tools against external systems. Their help docs explicitly say custom apps can connect ChatGPT to your own tools and internal data, and their developer-mode article says full MCP support includes write/modify actions for Business, Enterprise, and Edu on ChatGPT web.[2][1]
+
+For Enterprise/Edu, apps are disabled by default and must be enabled and published by admins; after that, admins can control access with RBAC and can configure which actions are allowed. OpenAI also says write actions require explicit user confirmation before execution, which is important for any Bullhorn field updates or record changes.[1][2]
+
+## How Bullhorn fits
+
+Bullhorn appears technically suitable for this pattern because its REST API supports OAuth-based authentication and then a REST session login flow returning a `BhRestToken` and a `restUrl` for subsequent API calls. Bullhorn’s docs also note production integrations should expect session expiry and handle refresh/re-auth flows, which aligns with OpenAI’s guidance that OAuth/OIDC setups for custom apps should be configured to issue refresh tokens when possible.[3][2]
+
+That means the likely architecture is: ChatGPT Enterprise ↔ your custom remote MCP server ↔ Bullhorn API. The MCP server would expose controlled tools like “get candidate,” “search job orders,” “read placement,” and later “update candidate custom field” or “append note,” while your server handles Bullhorn auth, validation, logging, and safe translation between natural-language requests and Bullhorn API operations.[2][3][1]
+
+## Likely implementation path
+
+This does **not** look like a simple “paste API credentials into a wizard and Bullhorn just works” setup unless a third party has already built a Bullhorn MCP app for you. OpenAI’s setup flow for custom apps requires you to provide an MCP server endpoint plus metadata and authentication configuration, which strongly suggests you need either an internal engineering build or an integration partner rather than only a no-code form.[2]
+
+A realistic phased rollout would be:
+- Phase 1: Read-only tools, such as retrieving records, summarizing candidate/job history, and answering operational questions from Bullhorn data.[3][2]
+- Phase 2: Narrow write actions, such as updating a small set of approved fields, creating notes, or changing statuses with confirmation prompts.[2]
+- Phase 3: Broader workflow actions, with admin action controls, parameter constraints, and RBAC to limit who can do what. OpenAI says Enterprise/Edu admins can configure allowed actions and, for non-sync apps, apply parameter constraints to action arguments.[1]
+
+## Practical opinion
+
+From a research standpoint, your idea is **viable**, but the answer is “yes, with custom integration work,” not “yes, out of the box for Bullhorn.” OpenAI’s current platform gives the missing piece you were asking about — a custom MCP connector/app capability with both read and eventual write support — but Bullhorn access would still need to be packaged behind a remote MCP server and governed carefully by your Enterprise admins.[3][1][2]
+
+The strongest production approach would be to start with read-only Bullhorn tools, prove value, then add a very small number of write actions with confirmation, auditability, and strict parameter validation. That lines up with OpenAI’s current controls and reduces the operational risk of letting ChatGPT modify ATS records too broadly too soon.[1][2]
+
+Would you like a concrete reference architecture for “ChatGPT Enterprise + custom MCP server + Bullhorn ATS,” including the exact tool set I’d expose first?
+
+Sources
+[1] Apps in ChatGPT https://help.openai.com/en/articles/11487775-connectors-in-chatgpt
+[2] Is it possible to add custom connectors to ChatGPT like ... https://www.reddit.com/r/mcp/comments/1r39wb7/is_it_possible_to_add_custom_connectors_to/
+[3] rest-api-docs/source/includes/_login.md at master · bullhorn/rest-api-docs https://github.com/bullhorn/rest-api-docs/blob/master/source/includes/_login.md
+[4] Integrating Third Party Agents with ChatGPT Enterprise https://credal.ai/integrating-third-party-agents-with-chatgpt-enterprise
+[5] Custom MCP connector only works for person who set it up https://community.openai.com/t/custom-mcp-connector-only-works-for-person-who-set-it-up/1335021
+[6] Build a ChatGPT Connector (MCP server) https://vercel.com/kb/guide/mcp-server-chatgpt-connector
+[7] Building MCP servers for ChatGPT Apps and API integrations https://developers.openai.com/api/docs/mcp
+[8] How ChatGPT works with Teamwork.com via the MCP ... https://www.teamwork.com/blog/chatgpt-mcp-connector-teamwork/
+[9] MCP and Connectors | OpenAI API https://developers.openai.com/api/docs/guides/tools-connectors-mcp
+[10] Updated Notation of 'BHRestToken' in API Docs - Session Key https://kb.bullhorn.com/release/Content/2025/2025_6/ATS%20CRM/External_ATS_Fix_DOC-6886.htm?TocPath=Bullhorn+Onboarding+365+Release+Notes%7CDuplicate+Quiz+or+Assessment+Attempts+Through+Multiple+Browser+Tabs%7C%7C%7CResolved+Issues%7C_____2
+[11] ChatGPT Custom MCP Connectors with Developer Mode - Medium https://medium.com/@alexeylark/chatgpt-custom-mcp-connectors-with-developer-mode-d791fde17d25
+[12] Developer mode, and MCP apps in ChatGPT [beta] https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt-beta
+[13] Bullhorn REST API - Context7 https://context7.com/bullhorn/rest-api-docs
+[14] Integrating Third Party Agents with ChatGPT Enterprise https://www.credal.ai/blog/integrating-third-party-agents-with-chatgpt-enterprise
+[15] build mcp-enabled apps with ChatGPT integration https://www.mintmcp.com/blog/build-mcp-enable-apps-with-chatgpt
