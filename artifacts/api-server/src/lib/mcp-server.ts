@@ -29,14 +29,18 @@ function withLogging<T>(
   return fn().then(
     (result) => {
       logger.info(
-        { tool: toolName, durationMs: Date.now() - start, status: "ok" },
+        { tool: toolName, durationMs: Date.now() - start, statusCode: 200, status: "ok" },
         "MCP tool succeeded",
       );
       return result;
     },
     (err: unknown) => {
+      const statusCode =
+        err instanceof Error && err.message.includes("429") ? 429
+        : err instanceof Error && err.message.includes("401") ? 401
+        : 500;
       logger.error(
-        { tool: toolName, durationMs: Date.now() - start, err },
+        { tool: toolName, durationMs: Date.now() - start, statusCode, status: "error", err },
         "MCP tool failed",
       );
       throw err;
