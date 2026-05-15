@@ -78,7 +78,7 @@ export default function BusinessModel() {
           </div>
 
           <div className="mt-[3vh] font-body text-[1.3vw] text-muted leading-snug">
-            Pricing scales with usage and breadth. Margin stays high — we don't pay for the AI, the customer does.
+            Pricing scales with usage and breadth. Margin stays high: we don't pay for the AI, the customer does.
           </div>
         </div>
 

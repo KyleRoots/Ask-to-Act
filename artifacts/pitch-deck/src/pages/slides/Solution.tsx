@@ -66,7 +66,7 @@ export default function Solution() {
               ATS, CRM, HRIS
             </div>
             <div className="mt-[1.5vh] font-body text-[1.3vw] text-muted leading-snug">
-              Bullhorn first. Then Salesforce, LinkedIn, the rest.
+              Bullhorn first. Then Salesforce, Workday, ADP, and more.
             </div>
           </div>
 

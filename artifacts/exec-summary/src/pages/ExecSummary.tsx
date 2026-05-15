@@ -21,8 +21,8 @@ export default function ExecSummary() {
           We sell the rails,<br /><span style={{ color: '#38bdf8' }}>not the chatbot.</span>
         </h1>
         <p style={{ fontSize: '1.2rem', color: '#cbd5e1', lineHeight: 1.6, maxWidth: '680px', margin: 0 }}>
-          AskToAct is the AI action layer for the recruiting and staffing stack — a model-agnostic middleware
-          that lets any AI assistant read and write to Bullhorn, Salesforce, LinkedIn, and the rest, with
+          AskToAct is the AI action layer for the recruiting and staffing stack: a model-agnostic middleware
+          that lets any AI assistant read and write to Bullhorn, Salesforce, Workday, and the rest, with
           role-based permissions and a full audit trail baked in from day one.
         </p>
       </div>
@@ -32,14 +32,14 @@ export default function ExecSummary() {
         {/* Key stats row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
           <Stat number="5–8h" label="Recruiter time lost per week to manual copy-paste between AI and ATS" />
-          <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do" accent="#fbbf24" />
+          <Stat number="$0" label="Audit trail at competing firms: no system captures what the AI was asked to do" accent="#fbbf24" />
           <Stat number="2026" label="First mover on the open protocol now adopted by ChatGPT, Claude, and Gemini" />
         </div>
 
         {/* Section: The Problem */}
         <Section title="The Problem" index="01">
           <p style={bodyStyle}>
-            Recruiting and staffing teams are adopting AI tools — but every tool they add creates a new friction point.
+            Recruiting and staffing teams are adopting AI tools, but every tool they add creates a new friction point.
             The AI lives on one side of the screen; the ATS, CRM, and HRIS live on the other. The recruiter bridges
             the gap manually: read output, switch tab, copy data, find the right record, paste, save, repeat.
           </p>
@@ -50,7 +50,7 @@ export default function ExecSummary() {
           <p style={bodyStyle}>
             There's a second problem: governance. When a recruiter uses ChatGPT to draft an outreach sequence and
             manually inputs those candidates into Bullhorn, there's no record of what prompt produced what data,
-            what the AI recommended, or who changed what. Enterprise buyers increasingly ask for this — and have no answer.
+            what the AI recommended, or who changed what. Enterprise buyers increasingly ask for this, and have no answer.
           </p>
         </Section>
 
@@ -59,7 +59,7 @@ export default function ExecSummary() {
         {/* Section: The Solution */}
         <Section title="What AskToAct Does" index="02">
           <p style={bodyStyle}>
-            AskToAct is a remote MCP (Model Context Protocol) server — a standardized interface that connects any
+            AskToAct is a remote MCP (Model Context Protocol) server: a standardized interface that connects any
             MCP-compatible AI to any system we've built a connector for. The AI issues a natural-language intent;
             AskToAct translates it into a validated, permissioned API call; the system of record does the work.
           </p>
@@ -69,13 +69,13 @@ export default function ExecSummary() {
           </p>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', margin: '2rem 0' }}>
-            <FlowBox label="AI" sub="ChatGPT, Claude, Gemini — whatever the customer uses" highlight={false} />
+            <FlowBox label="AI" sub="ChatGPT, Claude, Gemini (whatever the customer uses)" highlight={false} />
             <FlowBox label="AskToAct" sub="Permissions · Translation · Audit" highlight={true} />
-            <FlowBox label="Systems" sub="Bullhorn, Salesforce, LinkedIn, HRIS" highlight={false} />
+            <FlowBox label="Systems" sub="Bullhorn, Salesforce, Workday, ADP" highlight={false} />
           </div>
 
           <p style={bodyStyle}>
-            AskToAct is model-agnostic by design. It does not sell an AI — it assumes the customer already has one.
+            AskToAct is model-agnostic by design. It does not sell an AI; it assumes the customer already has one.
             This is a durable architectural bet: AI providers will continue to commoditize while the value of
             clean, permissioned access to complex enterprise systems compounds.
           </p>
@@ -93,13 +93,13 @@ export default function ExecSummary() {
         <Section title="Why AskToAct Wins" index="03">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '1rem 0 2rem' }}>
             <MoatCard number="01" title="Model-agnostic" body="Works with whichever AI the customer already pays for. No vendor dependency. As models commoditize, the bridge becomes more valuable, not less." />
-            <MoatCard number="02" title="Domain-deep" body="Built specifically for recruiting and staffing workflows — not generic CRUD wrappers. The vocabulary, entity model, and permission structures map to how the industry actually operates." />
-            <MoatCard number="03" title="Governance from day one" body="Role-based access control and immutable audit logs are core architecture, not bolt-ons. This is the feature enterprise procurement teams demand first — and almost no AI tooling offers it." />
+            <MoatCard number="02" title="Domain-deep" body="Built specifically for recruiting and staffing workflows, not generic CRUD wrappers. The vocabulary, entity model, and permission structures map to how the industry actually operates." />
+            <MoatCard number="03" title="Governance from day one" body="Role-based access control and immutable audit logs are core architecture, not bolt-ons. This is the feature enterprise procurement teams demand first, and almost no AI tooling offers it." />
             <MoatCard number="04" title="First-mover on the standard" body="MCP is the open protocol that ChatGPT, Claude, Anthropic, and Google have all adopted. Building now means owning the standard in this vertical before the horizontal players notice it." />
           </div>
           <p style={bodyStyle}>
             The horizontal players (Zapier, Unified.to, Merge.dev) solve generic connectivity. They are
-            strategically valuable as backbone infrastructure for building connectors — AskToAct will compose
+            strategically valuable as backbone infrastructure for building connectors. AskToAct will compose
             on top of these where they cover a system well, building custom connectors only where domain depth
             demands it. This keeps connector cost low while preserving the differentiation layer that horizontal
             players cannot replicate: deep recruiting domain logic and governance rails.
@@ -119,7 +119,7 @@ export default function ExecSummary() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '2rem 0' }}>
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Recurring Streams</div>
-              <RevenueRow label="Platform fee" desc="Base subscription — access to the AskToAct layer" />
+              <RevenueRow label="Platform fee" desc="Base subscription for access to the AskToAct layer" />
               <RevenueRow label="Per-system fee" desc="Each connected system (Bullhorn, Salesforce, etc.)" />
               <RevenueRow label="Per-active-seat" desc="Billed only when the seat actively uses the bridge" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
@@ -133,7 +133,7 @@ export default function ExecSummary() {
               <PricingRow seats="50 seats" range="$4,500–$6,000 / mo" />
               <PricingRow seats="100 seats" range="$8,000–$12,000 / mo" />
               <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.5 }}>
-                Margin stays high because AskToAct does not pay for the AI — the customer does.
+                Margin stays high because AskToAct does not pay for the AI; the customer does.
                 Infrastructure cost per seat is low and falls as volume grows.
               </p>
             </div>
@@ -153,7 +153,7 @@ export default function ExecSummary() {
           <p style={bodyStyle}>
             The global staffing and recruiting market is a multi-hundred-billion dollar industry running on
             legacy systems. Bullhorn alone serves over 10,000 staffing and recruiting firms worldwide.
-            The AI adoption curve in this sector is early but accelerating — every desk that adds a ChatGPT
+            The AI adoption curve in this sector is early but accelerating: every desk that adds a ChatGPT
             subscription is a potential AskToAct customer.
           </p>
           <p style={bodyStyle}>
@@ -162,7 +162,7 @@ export default function ExecSummary() {
             on recruitment technology and have clear line-of-sight to ROI from reducing manual transfer work.
           </p>
           <p style={bodyStyle}>
-            Longer-term, AskToAct is positioned as infrastructure for the recruiting stack — the layer every
+            Longer-term, AskToAct is positioned as infrastructure for the recruiting stack, serving as the layer every
             AI tool in the vertical routes through. As the standard matures, the value shifts from "nice
             connector" to "required middleware," compounding the switching cost for customers and expanding
             the wedge for additional connected systems.
@@ -178,7 +178,7 @@ export default function ExecSummary() {
             <p style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: 1.7, margin: 0 }}>
               The Bullhorn connector was built and tested against a live Bullhorn environment at Myticas Consulting,
               a staffing firm currently using Bullhorn ATS. The implementation is working: it supports natural-language
-              candidate search, profile lookup, job management, submission tracking, and placement recording — the
+              candidate search, profile lookup, job management, submission tracking, and placement recording: the
               complete core workflow of a recruiting desk. This is not a prototype against a sandbox. It is a
               functioning tool on a real ATS.
             </p>
@@ -201,7 +201,7 @@ export default function ExecSummary() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', margin: '1.75rem 0' }}>
             <AskCard number="1" title="Resource alignment" body="Confirm the budget envelope and engineering hours required to take the current implementation to a paid commercial deployment with the first customer firm." />
             <AskCard number="2" title="Timeline approval" body="Sign off on the roadmap from Bullhorn connector to multi-system support and the first three commercial customers." />
-            <AskCard number="3" title="Go / No-go" body="A clear green light to begin commercializing — or the specific objections the team needs addressed before that decision can be made." />
+            <AskCard number="3" title="Go / No-go" body="A clear green light to begin commercializing, or the specific objections the team needs addressed before that decision can be made." />
           </div>
           <p style={bodyStyle}>
             AskToAct does not need a finished product to start selling. The working Bullhorn connector is a

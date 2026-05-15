@@ -46,7 +46,7 @@ export default function TheAsk() {
             Go / No-go
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            A clear green light to begin commercializing — or the specific objections to address first.
+            A clear green light to begin commercializing, or the specific objections to address first.
           </div>
         </div>
 

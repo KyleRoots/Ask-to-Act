@@ -38,7 +38,7 @@ export default function Moat() {
             Domain-deep
           </div>
           <div className="font-body text-[1.4vw] text-muted leading-snug">
-            Built around how recruiters actually work — not generic API wrappers like the horizontal players ship.
+            Built around how recruiters actually work, not generic API wrappers like the horizontal players ship.
           </div>
         </div>
 
@@ -66,7 +66,7 @@ export default function Moat() {
 
       <div className="absolute bottom-[5vh] left-[6vw] right-[6vw] flex items-center justify-between border-t border-line pt-[2.5vh]">
         <div className="font-body text-[1.4vw] text-muted">
-          <span className="text-text font-display font-semibold">Customer zero:</span> Myticas Consulting — staffing firm on Bullhorn, already in motion.
+          <span className="text-text font-display font-semibold">Customer zero:</span> Myticas Consulting, a staffing firm on Bullhorn, already in motion.
         </div>
         <div className="font-display text-[1.2vw] tracking-[0.25em] uppercase text-gold">
           Real desk · Real ATS
