@@ -1,0 +1,86 @@
+Short answer: **you do not have to be Enterprise**. Plus and Pro users also get MCP support via Developer Mode, but the way you’d package your product will differ between “individual” plans (Plus/Pro) and org plans (Business/Enterprise/Edu).[1][2]
+
+***
+
+## What ChatGPT Plus/Pro can do with MCP
+
+OpenAI’s docs and public comms say that **ChatGPT Developer Mode provides full MCP client support** (read and write tools) and that it’s available in beta to **Pro, Plus, Business, Enterprise, and Education accounts** on the web.[2][3]
+
+Key points for Plus/Pro:
+
+- Eligibility: Developer Mode is explicitly listed as available to **Plus and Pro** users (along with Business/Enterprise/Edu).[3][4][2]
+- Capabilities: In Developer Mode, users can add remote MCP servers, which means they can connect to *any* MCP server that exposes tools (including one you build, or third-party MCP servers like CData’s Bullhorn CRM MCP).[5][6][2]
+- Actions: MCP tools can be read or write; OpenAI flags this as “powerful but dangerous,” and ChatGPT will require explicit confirmation for write actions.[2][3]
+
+Practically, that means an individual recruiter with ChatGPT Plus/Pro can:
+
+1. Enable Developer Mode in settings.  
+2. Add your Bullhorn MCP server URL (or a third-party Bullhorn MCP, e.g. CData/StackOne/Zapier-style MCP endpoints).[6][7][8][5]
+3. Use natural language in ChatGPT and have tools call Bullhorn to read/update data, subject to whatever constraints you define.
+
+***
+
+## When Enterprise/Business *does* matter
+
+Where Enterprise (or at least Business) becomes important is not **basic connectivity**, but **governance and rollout at scale**:
+
+- Business and Enterprise add shared workspaces, admin controls, SSO, RBAC, and more robust security/compliance features.[1]
+- For org-level MCP apps (vs. one-off connectors in Developer Mode), admins can configure which tools are available, enforce org-wide policies, and manage access centrally.[9][10]
+
+So for your product:
+
+- **Yes**, you can support a “self‑serve” path for any recruiter with Plus/Pro:  
+  “Have ChatGPT Plus/Pro? Enable Developer Mode, paste this MCP URL, and you’re connected to Bullhorn.”  
+- But the **high-value, security-sensitive deployments** (larger agencies, corporate teams) will almost certainly want **Business or Enterprise** so their security/admin folks can control:  
+  - Which MCP apps are allowed  
+  - Which Bullhorn actions are exposed  
+  - Who can use what, and with which permissions  
+  - Logging and auditability
+
+That maps nicely to your earlier vision: small/mid customers can get started on Plus/Pro with minimal friction; serious orgs buy your platform + Business/Enterprise to get real governance.
+
+***
+
+## Implications for your solution design
+
+For your product strategy, this implies two tiers:
+
+1. **Individual mode (Plus/Pro)**  
+   - Target: power users, solo recruiters, small teams.  
+   - Experience: “Bring your own ChatGPT Plus/Pro, flip on Developer Mode, add our MCP URL, and you’re talking to Bullhorn.”[4][2]
+   - You handle the Bullhorn side (auth, tools, safety), they handle their own ChatGPT subscription.
+
+2. **Org mode (Business/Enterprise/Edu)**  
+   - Target: mid-size + enterprise agencies.  
+   - Experience: admins configure the MCP app centrally, wire it to Bullhorn once, and then users just “click to connect” inside ChatGPT with appropriate guardrails.[10][9][1]
+   - Your value prop is governance, templates, field mapping, and security posture, not just connectivity.
+
+Given what you want—“I can fire up my ChatGPT or Claude account, click a button, it’s synced to my ATS end-to-end, and I explain what to do”—this is actually ideal: you can support **Plus/Pro users today via Developer Mode** and still build a more sophisticated story for Enterprise without changing your core architecture.[3][2]
+
+Do you want to prioritize designing for the “individual power user on Plus/Pro” motion first, or are you leaning toward anchoring the product around Business/Enterprise-style centralized control from day one?
+
+Sources
+[1] ChatGPT Plan Comparison: Free, Plus, Pro, Business ... - Data Studios https://www.datastudios.org/post/chatgpt-plan-comparison-free-plus-pro-business-and-enterprise-features-limits-and-access-diff
+[2] ChatGPT Developer mode https://platform.openai.com/docs/guides/developer-mode
+[3] OpenAI Adds Full MCP Support to ChatGPT Developer Mode https://www.infoq.com/news/2025/10/chat-gpt-mcp/
+[4] ChatGPT added full support for MCP tools ( Finally) : r ... https://www.reddit.com/r/MCPservers/comments/1ndqn3f/chatgpt_added_full_support_for_mcp_tools_finally/
+[5] MCP Server for Bullhorn CRM - CData Software https://cdn.cdata.com/help/HAK/mcp/
+[6] Bullhorn CRM MCP Server | Ask your AI for ... - CData Software https://www.cdata.com/drivers/bullhorncrm/mcp/
+[7] Bullhorn CRM MCP Server - MCP AI - Zapier https://zapier.com/mcp/bullhorn-crm
+[8] Bullhorn Integration for AI Agents (47 Actions) - StackOne https://www.stackone.com/connectors/bullhorn/
+[9] Developer mode, and MCP apps in ChatGPT [beta] https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt-beta
+[10] MCP and Connectors | OpenAI API https://developers.openai.com/api/docs/guides/tools-connectors-mcp
+[11] Use ChatGPT to Talk to Your Bullhorn CRM Data via CData Connect ... https://www.cdata.com/kb/tech/bullhorncrm-cloud-chatgpt.rst
+[12] Bullhorn CRM ChatGPT (OpenAI) Integration - Quick Connect - Zapier https://zapier.com/apps/bullhorn-crm/integrations/chatgpt
+[13] How ChatGPT's Agent can boost your work with Bullhorn's AI https://www.linkedin.com/posts/simoncurtisrec_if-you-do-only-1-thing-work-related-this-activity-7354459911864340482-wFmf
+[14] Enabling Bullhorn AI Assistant (formerly Copilot) for Bullhorn ... https://kb.bullhorn.com/bh4sf/Content/BH4SF/Topics/enablingCopilotForBH4SF.htm
+[15] bullhorn-crm-mcp-server-by-cdata - GitHub https://github.com/CDataSoftware/bullhorn-crm-mcp-server-by-cdata
+[16] MCP server tools now in ChatGPT -- developer mode - Codex https://community.openai.com/t/mcp-server-tools-now-in-chatgpt-developer-mode/1357233
+[17] OpenAI introduces Developer mode for ChatGPT with MCP client ... https://www.linkedin.com/posts/analytics-india-magazine_openai-has-rolled-out-a-new-developer-mode-activity-7371805092037115911-x4-c
+[18] Building MCP servers for ChatGPT Apps and API integrations https://developers.openai.com/api/docs/mcp
+[19] OpenAI adds MCP server support to ChatGPT | Brandon ... https://www.linkedin.com/posts/brandon-charleson_openai-has-finally-released-full-support-activity-7371880645288976384-Vfn9
+[20] ChatGPT Business - Models & Limits | OpenAI Help Center https://help.openai.com/en/articles/12003714-chatgpt-business-models-limits
+[21] OpenAI now supports MCP via ChatGPT Developer Mode - Reddit https://www.reddit.com/r/ChatGPT/comments/1ndpx0y/openai_now_supports_mcp_via_chatgpt_developer_mode/
+[22] ChatGPT Plans Compared: Free vs Plus ($20) vs Pro ($200) vs ... https://intuitionlabs.ai/articles/chatgpt-plans-comparison
+[23] How to use MCP with ChatGPT, Agents and its API - YouTube https://www.youtube.com/watch?v=rhxya9GNgs8
+[24] ChatGPT Plus vs Business: Which Plan Does Your Team Actually ... https://tactiq.io/learn/chatgpt-plus-vs-team

@@ -1,0 +1,64 @@
+#5 - Stakeholder Pitch Deck & Executive Summary
+What & Why
+Produce two deliverables that communicate the MCP connector business to non-technical business partner stakeholders (already part of the organization, not outside investors): (1) a polished slide deck presentation and (2) a plain-English executive summary. Both should reflect the fully refined business narrative, incorporating the Perplexity analysis and all strategic context from planning discussions.
+
+The product name is TBD — use [PRODUCT NAME] as a placeholder throughout, or whichever name the user confirms before execution (leading candidates: Relay, Conduit, Switchboard). Do not reference Bullhorn or ChatGPT in the product name or tagline.
+
+Done looks like
+A slide deck artifact rendered in the browser, covering the full business narrative, designed for a non-technical internal business partner audience (10–15 minute walkthrough)
+A multi-page executive summary (rendered as a clean web page with a print-friendly layout) written in plain English, covering what, how, money, and valuation — matching the four things internal partners need to hear
+Both outputs are self-contained and can be presented without the author needing to explain context
+Customer zero context (Myticas Consulting, ~20-person staffing firm using Bullhorn) is referenced as a concrete proof point, not as a market definition
+Out of scope
+Legal or financial projections requiring CPA/attorney input
+Outside investor materials (cap table, term sheets, pitch competition formatting)
+Product build or technical implementation
+Context & Framing Notes
+Audience: Internal business partners who are already bought in at the organization level — they need scope clarity, not persuasion from scratch. The tone is confident and direct, not a fundraising pitch.
+The four things they need: (1) What we're doing and why, (2) How it works, (3) How we make money, (4) How this adds valuation if we sell the solution.
+Market approach: All-market from day one — SMB through enterprise. The product architecture and pricing tiers support both without custom builds. Don't narrow the story to one segment.
+Customer zero: Myticas Consulting (staffing, ~15–25 people, Bullhorn). Reference as validation that real-world use exists, not as a ceiling on ambition.
+Competitive honesty: Acknowledge Bullhorn Amplify and native vendor tools. Position clearly: we work alongside or instead of them, we're model-agnostic, and we're cheaper per seat.
+Tagline direction: "We sell the rails, not the chatbot." or similar infrastructure-first framing.
+Steps
+Set the narrative spine — Establish the story arc used across both deliverables, mapped to the four partner questions:
+
+What & Why → Problem + Solution slides
+How It Works → Mechanism slide (three-box diagram: AI model → Connector → ATS/CRM)
+How We Make Money → Business model + pricing slide
+Valuation / Exit → Market size + why this is sellable slide
+Build the slide deck — Create a slides artifact. One idea per slide, minimal text, designed to be walked through verbally. Slides:
+
+Cover: [PRODUCT NAME] + tagline
+The Problem: recruiters (and any knowledge worker) copy-paste between AI tools and business systems daily — hours lost, no audit trail, no scale
+The Solution: a universal connector layer that lets any AI model take action inside any business system via plain English
+How It Works: three-box visual — User's AI (ChatGPT/Claude/etc.) → [PRODUCT NAME] Connector → Their System (Bullhorn, Salesforce, etc.)
+The Moat: four pillars — (1) model-agnostic, (2) deep domain adapters per platform, (3) governance & audit as a product feature, (4) first-mover on MCP protocol becoming the industry standard
+Competitive Landscape: native tools like Bullhorn Amplify vs. us — they lock you to one AI and one system; we connect any AI to any system
+Business Model: base platform fee + per-connector fee + per-active-seat fee + one-time onboarding; enterprise compliance tier as premium
+Market Opportunity: starts with ATS/recruiting, expands to any CRM, any vertical, any AI model — the TAM grows with AI adoption
+Why Now: MCP is the emerging standard; enterprises are buying AI action layers now; first-mover positioning is available today
+Cost to Scale: no AI model to train, no data to store, minimal infrastructure — small team, high margin, self-serve model
+Proof Point: Myticas Consulting — real staffing firm, real Bullhorn environment, already in motion
+Valuation / Exit: infrastructure and integration layers command strong multiples; comparable exits in the API/integration space; acquirers include ATS vendors, AI platforms, and enterprise software consolidators
+What We Need: clear, direct statement of what the partners are being asked to align on (resources, timeline, go/no-go)
+Build the executive summary — A clean, multi-section web page with a print-friendly layout. Sections:
+
+One-paragraph plain-English description (repeatable by a non-technical person)
+The problem, quantified (time lost per recruiter per week, cost of manual entry)
+How it works, in three steps
+Pricing model with worked examples:
+10-seat firm: estimated ~$1,500–$2,000/month total
+50-seat firm: estimated ~$4,500–$6,000/month total
+100-seat firm: estimated ~$8,000–$12,000/month total
+One-time onboarding: $2,500–$5,000
+Enterprise compliance tier: add-on
+Our cost to deliver (low infrastructure, no AI API costs on our end, lean team)
+Competitive comparison table: [PRODUCT NAME] vs. Bullhorn Amplify vs. building in-house
+Risks and mitigations (shows diligence — permissions/security, platform risk, "build vs. buy" objection)
+The exit / valuation story: what makes this sellable and to whom
+One-sentence pitch + elevator version
+Style and polish — Professional, boardroom-ready design. Slide deck: clean typography, restrained color palette (suggest dark navy / white / one accent color), no decorative clip art. Executive summary: well-structured memo aesthetic — readable on screen, clean when printed.
+
+Relevant files
+attached_assets/Pasted-You-re-thinking-about-the-product-the-right-way-the-moa_1778875597667.txt

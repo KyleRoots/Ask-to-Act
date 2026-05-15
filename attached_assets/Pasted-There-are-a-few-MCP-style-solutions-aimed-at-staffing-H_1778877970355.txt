@@ -1,0 +1,152 @@
+There are a **few MCP-style solutions aimed at staffing/HR**, but most of what you’re describing (one layer, many ATS/CRMs, strong RBAC + audit) is still early and fragmented. Today you mostly see: (1) point MCP servers tied to a single ATS, and (2) horizontal “unified API + MCP gateway” players that cover many systems including ATS/CRM/HRIS but aren’t staffing‑specific.[1][2][3][4]
+
+Below is a realistic landscape snapshot.
+
+***
+
+## 1. Single‑ATS MCP servers (vertical, narrow)
+
+These are “one system, one MCP server” plays – good signals of demand, but not your multi‑ATS vision.
+
+- **Pinpoint (ATS) MCP server**  
+  - What it does: MCP server for Pinpoint’s ATS so AI assistants can query hiring data, generate insights, and automate workflows while Pinpoint stays the system of record.[1]
+  - Scope: One ATS only (Pinpoint), not a hub for multiple ATS/CRMs.  
+  - Access control: Pinpoint already has user roles; the MCP layer essentially respects those underlying permissions, but there’s no public detail about cross‑org RBAC policies within the MCP server itself.[1]
+  - Maturity: Early but credible; it’s a feature of a production ATS, not a side project.  
+  - Pricing: MCP support is treated as part of Pinpoint’s higher tiers rather than a separately priced MCP gateway, so no clear standalone MCP pricing is listed.[1]
+
+- **Manatal ATS MCP integration**  
+  - What it does: Manatal exposes an MCP server so AI assistants can read/write its ATS data; again, focused on Manatal as a single system.[5]
+  - Scope: Not a multi‑ATS hub; it’s “MCP for our own ATS.”  
+  - RBAC/audit: Manatal’s own roles/logging apply; documentation emphasizes secure connection but doesn’t highlight a dedicated, cross‑system IAM layer.[5]
+  - Pricing: Bundled into existing Manatal plans; no separate MCP gateway pricing published.[5]
+
+These prove that ATS vendors see value in MCP connectors, but they don’t yet solve “connect my *entire* recruiting stack across multiple systems.”
+
+***
+
+## 2. Vertical talent platforms exposing MCP (talent search vs. core ATS)
+
+- **SeekOut MCP**  
+  - What it does: Lets you use SeekOut’s sourcing platform inside any MCP‑compatible assistant (ChatGPT, Claude, Gemini, Copilot, etc.) for talent search, evaluation, outreach.[3]
+  - Scope: It connects AI models to **SeekOut’s own data and tools**, not to third‑party ATS/CRMs; you can combine it with your ATS manually, but it’s not a unified “all ATS/CRMs” hub.[3]
+  - RBAC/audit: It piggybacks on SeekOut’s existing account controls, and the marketing emphasizes “works with any assistant” more than complex role hierarchies or cross‑app auditing.[3]
+  - Pricing: SeekOut tends to price per seat for recruiters; MCP integration is marketed as part of their enterprise offering, not a separately metered SKU.[3]
+
+- **Leonar (recruiting stack MCP API)**  
+  - What it does: Leonar positions itself as a way to connect AI agents (Claude, ChatGPT, etc.) to your recruiting CRM/stack via an API and MCP, with a focus on workflows like outreach, screening, and pipeline management.[4]
+  - Scope: Multi‑system in the recruiting stack, but details on exactly which ATS/CRMs are covered are still sparse; it reads more like “agent‑ready recruiting platform” than a pure neutral hub.[4]
+  - RBAC/audit: They highlight secure access and suitability for recruiting teams, but there’s not yet public, detailed documentation on fine‑grained RBAC per tool or per field; think early‑stage.[4]
+  - Pricing: Not public; likely SaaS seat + usage pricing targeted at recruiting teams (typical range for similar tools: roughly \$50–\$150/user/month with volume and implementation variation).[6][7]
+
+These are “AI‑enabled recruiting products” with MCP support, not “neutral middleware” that simultaneously spans Bullhorn, Greenhouse, Salesforce, HubSpot, etc.
+
+***
+
+## 3. Horizontal unified‑API + MCP platforms (closest to what you described)
+
+This is where your idea overlaps most: vendors who already have a **unified API across hundreds of SaaS apps**, now adding MCP so any AI agent can use that unified layer.
+
+- **Unified.to – real‑time unified API + MCP platform**  
+  - What it does: Provides a single API across 400+ sources and 27 categories (including CRMs, ATS, HR systems), plus **unified MCP write endpoints** so AI agents can trigger actions, update records, and handle business logic securely.[2]
+  - Scope: Very broad – it explicitly mentions CRMs, ATS, HR systems, and more. A single MCP integration can give your model access to many tools simultaneously.[2]
+  - RBAC and audit:  
+    - They heavily emphasize “built for B2B SaaS and AI agents,” with real‑time data, careful cleaning, and strong security posture.  
+    - They talk about secure write actions and business‑logic enforcement, but detailed public docs on **per‑user role mapping and audit log exports** are thinner than a full, staffing‑specific governance story.[2]
+  - Maturity: High on the integration/unified API side (hundreds of connectors); MCP capabilities are relatively new but sit on a mature base.[2]
+  - Pricing:  
+    - Not fully public; typical unified‑API players charge a **base platform fee** plus tiers based on number of connected accounts/integrations and request volume.  
+    - Market benchmarks for similar tools (integration platforms + AI gateway) cluster around **low thousands per month** at the low end, scaling up with volume and connectors.[8][9]
+
+- **Merge.dev (CRM / ATS unified API + MCP servers)**  
+  - What it does: Merge offers a unified API for many SaaS categories, including CRM and ATS, and has started publishing guidance and code for **CRM MCP servers** so AI assistants can work through Merge rather than integrating with each system individually.[10]
+  - Scope: Multi‑system, multi‑category; for ATS/CRM they cover a range of vendors via one unified schema.[10]
+  - RBAC/audit: Merge focuses on data security and compliance (SOC2, etc.) and tenancy; they provide webhooks, logs, and admin controls, but they’re not specifically staffing‑only, so their RBAC is more “integration platform” than “recruiter‑desk‑aware.”[10]
+  - Maturity: Unified API is mature; MCP server guides and tooling are relatively recent but backed by a stable product.[8][10]
+  - Pricing: Similar to other unified APIs – it’s typically **usage‑based plus per‑connected‑account**, with custom enterprise deals. Public ballpark ranges: low‑hundreds/month for small usage up to enterprises paying thousands+ per month.[9][8]
+
+These two are probably the most “ready‑made spine” if you wanted to quickly support **multiple ATS/CRMs** via MCP without building every connector yourself, but they are horizontal: you would still need to add **staffing‑specific RBAC semantics, workflows, and UX** on top.
+
+***
+
+## 4. How mature is the staffing‑specific, multi‑system, RBAC+audit space?
+
+Right now:
+
+- **Staffing‑specific, multi‑ATS/CRM, MCP‑native platforms with serious RBAC and auditing are very early.** Most recruitment/HR AI tool rankings still list traditional automation and chatbots, not “MCP gateways for recruiting.”[7][11][12][6]
+- What *does* exist is:
+  - Single‑vendor ATS MCP connectors (Pinpoint, Manatal).[5][1]
+  - Vertical AI recruiting tools that integrate with one or a few systems and sometimes experiment with MCP.[11][6][4]
+  - Horizontal integration + MCP platforms (Unified.to, Merge) that are ATS/CRM/HR‑capable but not recruiting‑specific.[8][10][2]
+
+In other words, **the primitives are mature**, but “the exact product you described” — one layer that understands recruiters’ workflows, connects to *many* ATS/CRMs via MCP, and exposes staffing‑aware RBAC + audit — is not obviously filled by a big, defensible incumbent yet.
+
+***
+
+## 5. Rough pricing bands you’re likely to see
+
+Based on current unified‑API and AI‑gateway pricing patterns:[13][9][8]
+
+- **Single ATS MCP as a feature** (Pinpoint, Manatal):  
+  - Effectively bundled; customers pay standard ATS license (often \$50–\$150/user/month) plus implementation, with MCP as an included “AI connector” feature.[14][15][1][5]
+
+- **Vertical AI recruiting platforms with MCP** (Leonar, etc.):  
+  - Likely priced per recruiter seat, commonly **\$50–\$150 per seat/month**, sometimes plus usage.[6][7]
+  - Implementation/white‑glove onboarding for mid‑market/enterprise.
+
+- **Horizontal unified‑API + MCP hubs** (Unified.to, Merge.dev):  
+  - Base platform fee (low hundreds to low thousands per month).[9][10][2]
+  - Charges scale with:  
+    - Number of connected customer accounts/integrations  
+    - API volume/AI agent calls  
+    - Possibly categories unlocked (CRM, ATS, HRIS, etc.).[8][2]
+
+If you build what you’re envisioning (multi‑ATS/CRM, MCP, staffing‑centric RBAC and audit) you’ll most likely be priced:
+
+- Above “a single ATS plugin,” because you’re cross‑system and multi‑assistant;  
+- But **below** a full‑blown iPaaS in perceived complexity, if you keep setup simple and target recruiting outcomes.
+
+***
+
+## 6. What this means for your opportunity
+
+Given the landscape:
+
+- There is **clear demand** and credible primitives (MCP support, unified APIs).[4][10][2][3]
+- But there is **no obvious, dominant staffing‑specific MCP “hub”** that:  
+  - Connects to multiple ATS + CRM systems at once,  
+  - Is designed around recruiter workflows,  
+  - And ships role‑aware, audit‑first governance out of the box.
+
+That gap is essentially the product you’ve been describing.
+
+If you wanted to move quickly, the most pragmatic route might be to **compose** rather than reinvent:
+
+- Use a Unified.to / Merge‑style backbone for generic connectivity to many ATS/CRMs.[10][2]
+- Layer on top:  
+  - Staffing‑aware workflow templates (search, shortlist, update statuses, write notes).  
+  - A clear permission model that maps recruiter roles to allowed actions.  
+  - Strong audit trails and approval patterns tuned to staffing use cases.
+
+Would it help if I laid out two architectures for you next: (1) “build all connectors yourself,” and (2) “build on top of a unified‑API + MCP provider,” along with pros/cons and what each would imply for your time‑to‑market and differentiation?
+
+Sources
+[1] MCP for ATS: Connect Hiring Data to AI - Pinpoint https://www.pinpointhq.com/features/mcp
+[2] Unified.to — Real-time Unified API & MCP Platform | Unified.to ... https://unified.to
+[3] SeekOut MCP — Use SeekOut in Claude, ChatGPT & Any AI Assistant https://www.seekout.com/solutions/mcp/
+[4] Connect Any AI to Your Recruiting Stack | Leonar https://www.leonar.app/blog/connect-ai-agents-recruiting-stack-mcp-api/
+[5] Integrate MCP Server with Manatal ATS https://www.manatal.com/integrations/mcp-server
+[6] 47 HR AI Tools: The Ultimate List for HR Leaders - AIHR https://www.aihr.com/blog/hr-ai-tools/
+[7] Best AI Tools for HR Task Management in 2026: Agentic Automation ... https://sanalabs.com/agents-blog/ai-tools-work-productivity-hr
+[8] Top AI Integration Platforms for 2026 - DEV Community https://dev.to/composiodev/top-ai-integration-platforms-for-2026-32pm
+[9] AI Pricing: What's the True AI Cost for Businesses in 2026? - Zylo https://zylo.com/blog/ai-cost/
+[10] CRM MCP servers: overview, examples, and use cases - Merge.dev https://www.merge.dev/blog/crm-mcp-server
+[11] The Best AI Tools for HR in 2026 - HR Acuity https://www.hracuity.com/blog/best-ai-tools-for-hr-in-2026/
+[12] Best 9 AI Tools for HR Automation in 2025 - Rippling https://www.rippling.com/blog/hr-ai-tools
+[13] Enterprise AI Pricing Compared: 2026 Guide | Coworker https://coworker.ai/blog/enterprise-ai-pricing-comparison-2026
+[14] Bullhorn pricing 2024: what does it cost you https://www.herohunt.ai/blog/bullhorn-pricing/
+[15] Bullhorn Pricing: Recruitment Software Plans for Staffing ... https://www.bullhorn.com/pricing/
+[16] What MCP Means for Recruitment Agencies - Spott https://spott.io/resources/what-mcp-means-for-recruitment-agencies
+[17] HubSpot CRM Integrates with Claude Anthropics Conversation AI https://www.wedocrm.co/blog/hubspot-crm-integrates-with-claude-anthropics-conversation-ai/
+[18] What Is Lever (ATS) MCP? Exploring the Model Context Protocol ... https://www.getguru.com/reference/lever-ats-mcp
+[19] The AI Advantage: 10 Step Guide to HubSpot's Integration with ... https://offers.hubspot.com/the-ai-advantage-your-guide-to-hubspots-integration-with-chatgpt
