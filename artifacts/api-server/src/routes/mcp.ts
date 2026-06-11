@@ -6,14 +6,14 @@ import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
-router.post("/mcp", bearerAuth, async (req: Request, res: Response) => {
+async function handleMcpRequest(req: Request, res: Response, body?: unknown) {
   try {
     const server = createMcpServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
     await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    await transport.handleRequest(req, res, body);
     res.on("finish", () => {
       server.close().catch((err: unknown) => {
         logger.warn({ err }, "MCP server close error");
@@ -25,27 +25,14 @@ router.post("/mcp", bearerAuth, async (req: Request, res: Response) => {
       res.status(500).json({ error: "Internal server error" });
     }
   }
-});
+}
 
-router.get("/mcp", bearerAuth, async (req: Request, res: Response) => {
-  try {
-    const server = createMcpServer();
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
-    res.on("finish", () => {
-      server.close().catch((err: unknown) => {
-        logger.warn({ err }, "MCP server close error (GET)");
-      });
-    });
-  } catch (err) {
-    logger.error({ err }, "MCP GET handler error");
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Internal server error" });
-    }
-  }
-});
+router.post("/mcp", bearerAuth, (req, res) => handleMcpRequest(req, res, req.body));
+router.get("/mcp", bearerAuth, (req, res) => handleMcpRequest(req, res));
+
+router.post("/mcp/:token", bearerAuth, (req, res) =>
+  handleMcpRequest(req, res, req.body),
+);
+router.get("/mcp/:token", bearerAuth, (req, res) => handleMcpRequest(req, res));
 
 export default router;
