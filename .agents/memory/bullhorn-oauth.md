@@ -34,3 +34,20 @@ store the rotated refresh token in Postgres), then refresh-token renewals for al
 headless calls. Treat the persisted refresh token as the source of truth on
 re-auth (it's rotated and re-persisted on every refresh). Do NOT send username/
 password from the server in the authorize request — the user logs in interactively.
+
+## Symptom: "Agree" bounces back to login, no code reaches the callback
+If the user reaches the genuine "Get Consent" screen, clicks **Agree**, and is
+returned to the Bullhorn login page while NO request hits `/callback` (verify in
+workflow logs — only `/login` 302s appear), Bullhorn silently failed the
+post-consent redirect. Consent is also NOT recorded (the consent screen reappears
+on the next attempt). This is a **Bullhorn-server-side redirect_uri validation
+failure at redirect time**, even when our authorize request sends the exact
+whitelisted value and our callback is reachable from a browser.
+**Why:** Bullhorn validates the stored redirect_uri when issuing the code; a
+mismatch (trailing slash, scheme, or the whitelist applied to a different/duplicate
+client record, or not yet propagated) makes it abort to login instead of erroring.
+**How to apply:** don't keep changing our code — it's correct if the authorize URL
+decodes to the exact whitelisted `redirect_uri` and a browser GET to `/callback`
+returns our HTML. Rule out the browser (clean profile, extensions off), then send
+the symptom back to Bullhorn Support and have them re-confirm the redirect_uri is
+active on THAT client_id and the login user is entitled to it.
