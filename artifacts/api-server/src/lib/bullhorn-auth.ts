@@ -1,9 +1,11 @@
-import { request as httpsRequest } from "node:https";
-import { randomBytes } from "node:crypto";
+import { db, bullhornTokensTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 
 const BULLHORN_LOGIN_INFO_URL =
   "https://rest.bullhornstaffing.com/rest-services/loginInfo";
+
+const CONNECTION_ID = "default";
 
 interface TokenResponse {
   access_token: string;
@@ -39,6 +41,20 @@ interface Session {
   sessionExpiresAt: number;
 }
 
+/**
+ * Thrown when no Bullhorn refresh token is available yet. The user must
+ * complete the one-time browser authorization at /api/auth/bullhorn/login.
+ */
+export class BullhornNotAuthorizedError extends Error {
+  constructor() {
+    super(
+      "Bullhorn is not connected yet. An administrator must complete the " +
+        "one-time authorization by visiting /api/auth/bullhorn/login in a browser.",
+    );
+    this.name = "BullhornNotAuthorizedError";
+  }
+}
+
 let session: Session | null = null;
 let authInProgress: Promise<Session> | null = null;
 let endpoints: Endpoints | null = null;
@@ -49,6 +65,25 @@ function getEnv(key: string): string {
     throw new Error(`Missing required environment variable: ${key}`);
   }
   return val;
+}
+
+async function loadRefreshToken(): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(bullhornTokensTable)
+    .where(eq(bullhornTokensTable.id, CONNECTION_ID))
+    .limit(1);
+  return rows[0]?.refreshToken ?? null;
+}
+
+async function saveRefreshToken(refreshToken: string): Promise<void> {
+  await db
+    .insert(bullhornTokensTable)
+    .values({ id: CONNECTION_ID, refreshToken, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: bullhornTokensTable.id,
+      set: { refreshToken, updatedAt: new Date() },
+    });
 }
 
 async function discoverEndpoints(): Promise<Endpoints> {
@@ -80,62 +115,19 @@ async function discoverEndpoints(): Promise<Endpoints> {
 }
 
 /**
- * Performs the headless OAuth Authorization Code request. Bullhorn responds
- * with a 302 whose Location header carries the auth code. We must read that
- * header WITHOUT following the redirect, which the global fetch cannot do
- * reliably (manual redirects become opaque), so we use node:https directly.
+ * Builds the Bullhorn authorize URL for the interactive (browser) flow. The
+ * user logs in on Bullhorn's own page and approves consent; Bullhorn then
+ * redirects back to our callback with an authorization code. No username or
+ * password is sent from the server.
  */
-function fetchAuthCode(oauthUrl: string): Promise<string> {
-  const authorizeUrl = new URL(`${oauthUrl}/authorize`);
-  authorizeUrl.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
-  authorizeUrl.searchParams.set("response_type", "code");
-  authorizeUrl.searchParams.set("action", "Login");
-  authorizeUrl.searchParams.set("username", getEnv("BULLHORN_USERNAME"));
-  authorizeUrl.searchParams.set("password", getEnv("BULLHORN_PASSWORD"));
-  authorizeUrl.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
-  authorizeUrl.searchParams.set("state", randomBytes(12).toString("hex"));
-
-  return new Promise<string>((resolve, reject) => {
-    const req = httpsRequest(
-      authorizeUrl.toString(),
-      { method: "GET" },
-      (res) => {
-        let body = "";
-        res.on("data", (chunk) => {
-          if (body.length < 2000) {
-            body += chunk;
-          }
-        });
-        res.on("end", () => {
-          const location = res.headers.location;
-          if (!location) {
-            reject(
-              new Error(
-                `Bullhorn authorize did not redirect (status ${res.statusCode}). ` +
-                  `This usually means an invalid redirect_uri, client_id, or credentials. ` +
-                  `Response: ${body.slice(0, 300)}`,
-              ),
-            );
-            return;
-          }
-          try {
-            const loc = new URL(location);
-            const code = loc.searchParams.get("code");
-            if (!code) {
-              const err = loc.searchParams.get("error_description") ?? location;
-              reject(new Error(`Bullhorn authorize returned no code: ${err}`));
-              return;
-            }
-            resolve(code);
-          } catch {
-            reject(new Error(`Bullhorn authorize returned malformed Location`));
-          }
-        });
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
+export async function getAuthorizeUrl(state: string): Promise<string> {
+  const { oauthUrl } = await discoverEndpoints();
+  const url = new URL(`${oauthUrl}/authorize`);
+  url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
+  url.searchParams.set("state", state);
+  return url.toString();
 }
 
 async function exchangeCodeForToken(
@@ -184,7 +176,10 @@ async function fetchTokenWithRefresh(
   });
 
   if (!res.ok) {
-    throw new Error(`Bullhorn refresh token request failed (${res.status})`);
+    const text = await res.text();
+    throw new Error(
+      `Bullhorn refresh token request failed (${res.status}): ${text.slice(0, 200)}`,
+    );
   }
 
   return (await res.json()) as TokenResponse;
@@ -247,14 +242,7 @@ async function pingSession(s: Session): Promise<boolean> {
   }
 }
 
-async function createSession(): Promise<Session> {
-  logger.info("Bullhorn: initiating new session via authorization_code grant");
-  const { oauthUrl, loginUrl } = await discoverEndpoints();
-  const code = await fetchAuthCode(oauthUrl);
-  const tokens = await exchangeCodeForToken(oauthUrl, code);
-  const loginData = await login(tokens.access_token, loginUrl);
-  const sessionExpiresAt = await resolveSessionExpiry(loginData);
-
+function buildSession(tokens: TokenResponse, loginData: LoginResponse, sessionExpiresAt: number): Session {
   return {
     BhRestToken: loginData.BhRestToken,
     restUrl: loginData.restUrl,
@@ -265,26 +253,47 @@ async function createSession(): Promise<Session> {
   };
 }
 
-async function refreshSession(current: Session): Promise<Session> {
-  logger.info("Bullhorn: refreshing session with refresh token");
-  try {
-    const { oauthUrl, loginUrl } = await discoverEndpoints();
-    const tokens = await fetchTokenWithRefresh(oauthUrl, current.refreshToken);
-    const loginData = await login(tokens.access_token, loginUrl);
-    const sessionExpiresAt = await resolveSessionExpiry(loginData);
+/**
+ * Completes the interactive authorization: exchanges the authorization code for
+ * tokens, establishes a Bullhorn REST session, and persists the refresh token
+ * so future sessions can be created headlessly. Called by the OAuth callback.
+ */
+export async function completeAuthorization(code: string): Promise<void> {
+  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const loginData = await login(tokens.access_token, loginUrl);
+  const sessionExpiresAt = await resolveSessionExpiry(loginData);
+  session = buildSession(tokens, loginData, sessionExpiresAt);
+  await saveRefreshToken(tokens.refresh_token);
+  logger.info({ restUrl: session.restUrl }, "Bullhorn: authorization complete, session established");
+}
 
-    return {
-      BhRestToken: loginData.BhRestToken,
-      restUrl: loginData.restUrl,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      tokenExpiresAt: Date.now() + tokens.expires_in * 1000 - 60_000,
-      sessionExpiresAt,
-    };
-  } catch (err) {
-    logger.warn({ err }, "Bullhorn: refresh failed, falling back to full re-auth");
-    return createSession();
+/**
+ * Builds a fresh session from a stored refresh token, rotating and persisting
+ * the new refresh token Bullhorn returns.
+ */
+async function sessionFromRefreshToken(refreshToken: string): Promise<Session> {
+  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  const tokens = await fetchTokenWithRefresh(oauthUrl, refreshToken);
+  const loginData = await login(tokens.access_token, loginUrl);
+  const sessionExpiresAt = await resolveSessionExpiry(loginData);
+  const s = buildSession(tokens, loginData, sessionExpiresAt);
+  await saveRefreshToken(tokens.refresh_token);
+  return s;
+}
+
+async function reauthenticate(): Promise<Session> {
+  // The DB row is the source of truth: every refresh rotates and re-persists
+  // the token, so the stored value is at least as fresh as anything held in
+  // memory. Prefer it, falling back to the in-memory token only if the DB has
+  // none (e.g. immediately after authorization before the first reload).
+  const stored = await loadRefreshToken();
+  const refreshToken = stored ?? session?.refreshToken ?? null;
+  if (!refreshToken) {
+    throw new BullhornNotAuthorizedError();
   }
+  logger.info("Bullhorn: establishing session from refresh token");
+  return sessionFromRefreshToken(refreshToken);
 }
 
 export async function getSession(): Promise<Session> {
@@ -300,7 +309,7 @@ export async function getSession(): Promise<Session> {
       return session;
     }
 
-    if (sessionExpired) {
+    if (sessionExpired && !tokenExpired) {
       logger.info("Bullhorn: BhRestToken session expired, re-validating via ping");
       const stillValid = await pingSession(session);
       if (stillValid) {
@@ -308,20 +317,10 @@ export async function getSession(): Promise<Session> {
         return session;
       }
     }
-
-    logger.info("Bullhorn: session invalid, refreshing");
-    authInProgress = refreshSession(session)
-      .then((s) => {
-        session = s;
-        return s;
-      })
-      .finally(() => {
-        authInProgress = null;
-      });
-    return authInProgress;
   }
 
-  authInProgress = createSession()
+  logger.info("Bullhorn: session invalid or missing, (re)authenticating");
+  authInProgress = reauthenticate()
     .then((s) => {
       session = s;
       logger.info({ restUrl: s.restUrl }, "Bullhorn: session established");
@@ -336,4 +335,12 @@ export async function getSession(): Promise<Session> {
 export async function invalidateSession(): Promise<void> {
   session = null;
   authInProgress = null;
+}
+
+/** Returns true if a refresh token is persisted (i.e. Bullhorn is connected). */
+export async function isConnected(): Promise<boolean> {
+  if (session) {
+    return true;
+  }
+  return (await loadRefreshToken()) !== null;
 }

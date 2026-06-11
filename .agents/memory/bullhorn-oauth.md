@@ -1,32 +1,36 @@
 ---
 name: Bullhorn OAuth
-description: How Bullhorn REST API authentication works for the MCP server and why the password grant no longer works.
+description: How Bullhorn REST API authentication works for the MCP server and the constraints that shaped the design.
 ---
 
 # Bullhorn OAuth flow
 
 Bullhorn **retired the OAuth `password` (ROPC) grant** — token requests with
-`grant_type=password` now return `unsupported_grant_type`. The server must use
-the **authorization_code** flow, then exchange the access token at
+`grant_type=password` now return `unsupported_grant_type`. Auth must use the
+**authorization_code** flow, then exchange the access token at
 `/rest-services/login` for a `BhRestToken`, and use `refresh_token` for renewals.
 
-**Why:** Bullhorn deprecated ROPC for security (no MFA/SSO support). Discovered
-when live calls failed with `unsupported_grant_type` despite valid credentials.
+**Why:** Bullhorn deprecated ROPC (no MFA/SSO support). Discovered when live
+calls failed with `unsupported_grant_type` despite valid credentials.
 
-**How to apply:**
-- Resolve data-center endpoints via `loginInfo?username=...` → use `oauthUrl`
-  (e.g. `auth-east.bullhornstaffing.com/oauth`) and `restUrl` (append `/login`).
-- Authorize: `GET {oauthUrl}/authorize?client_id&response_type=code&action=Login&username&password&redirect_uri&state`.
-  Read the `code` from the **302 Location header without following it**. Node's
-  global `fetch` turns manual redirects opaque (no headers), so use `node:https`.
-- `redirect_uri` is optional ONLY if the client has exactly one registered URI,
-  but **must exactly match** a registered value when supplied. A wrong value
-  yields an HTML "Invalid Redirect URI" page (HTTP 200, not JSON).
-- Diagnosing the error page: blank `Client Id`/`Client Name` rows = the client_id
-  itself is unrecognized; populated rows = client OK but redirect mismatch.
-- **Consent gate:** first authorization for a client+user shows a "Get Consent"
-  POST form (`action=Agree/Decline`, hidden `corporationId`/`masterUserId`).
-  Scripting the Agree POST is unreliable (returns 500). Grant consent ONCE in a
-  real browser; afterward headless logins return the code directly.
-- The robust foundation is a one-time browser OAuth (login + callback that stores
-  the refresh_token), then refresh-token renewals for all headless MCP calls.
+## Hard constraints (these drove the design)
+- **`redirect_uri` must EXACTLY match a value registered on the Bullhorn API key**
+  (registration is controlled by Bullhorn Support / the key owner). A wrong value
+  returns an HTML "Invalid Redirect URI" page (HTTP 200, not JSON). On that error
+  page, blank `Client Id`/`Client Name` rows mean the client_id itself is
+  unrecognized; populated rows mean the client is fine but the redirect mismatches.
+  The same redirect_uri must be used in BOTH the authorize request and the token
+  exchange.
+- **First authorization shows an interactive "Get Consent" screen** (a POST form
+  with Agree/Decline). Scripting the Agree POST server-side is unreliable (500s).
+  Consent must be granted once in a real browser; afterward the refresh token
+  works headlessly.
+- Endpoints are data-center specific: resolve them per-user via
+  `loginInfo?username=...` (`oauthUrl`, `restUrl`), don't hardcode the region.
+
+**How to apply:** the robust design is a one-time **browser** authorization
+(redirect the user to Bullhorn's authorize URL → callback receives the code →
+store the rotated refresh token in Postgres), then refresh-token renewals for all
+headless calls. Treat the persisted refresh token as the source of truth on
+re-auth (it's rotated and re-persisted on every refresh). Do NOT send username/
+password from the server in the authorize request — the user logs in interactively.
