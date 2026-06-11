@@ -1,0 +1,1 @@
+- [Bullhorn OAuth](bullhorn-oauth.md) — password grant is retired (`unsupported_grant_type`); use authorization_code flow + refresh tokens, redirect_uri must match a registered value, first use needs a one-time browser consent.
