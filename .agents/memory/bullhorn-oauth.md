@@ -48,14 +48,18 @@ redirect_uri at authorize time. So stop re-checking the redirect_uri — it's
 correct. Confirmed reproducible across multiple login users (a normal user AND the
 dedicated `*.api` user) and across browsers, so it is not browser/cookie- or
 user-permission-specific in the obvious sense.
-**Why (leading cause):** the API key / client_id is registered under a DIFFERENT
-Bullhorn corporation than the login users. The consent screen names the key's
-owning corp (e.g. "Quality Temporary Services Inc. - 11119 - REST API"); if the
-login accounts live in a different corp, Bullhorn shows consent but cannot record
-it / issue a code for a cross-corp grant, so it silently returns to login. Only
-Bullhorn can fix this (re-issue the key under the correct corp, or entitle the
-users). Other possible-but-less-likely causes: the users lack "grant OAuth
-consent" rights for that key, or a Bullhorn-side consent-write bug.
+**Why (CONFIRMED by controlled test):** the API key / client_id is registered
+under a DIFFERENT Bullhorn corporation than the login users. Swapping in a
+known-good client registered under the correct corp made the SAME flow complete —
+Bullhorn issued an authorization code immediately (visible as `?code=...` on the
+redirect), while the bad client always bounced. So when the consent screen names a
+corp (e.g. "Quality Temporary Services Inc. - 11119 - REST API") that doesn't match
+the login user's corp, Bullhorn shows consent but cannot record it / issue a code
+for a cross-corp grant and silently returns to login. Only Bullhorn can fix this
+(re-associate the key with the correct corp, or issue a new key under it).
+**Do NOT share one client across two apps** (e.g. this server + JobPulse): both
+rotate the same refresh token on refresh and will invalidate each other. Use a
+dedicated client per app.
 **How to apply:** do NOT change our code — it's proven correct (authorize URL
 decodes to the exact whitelisted redirect_uri, callback reachable, consent screen
 reached). Escalate to Bullhorn Support: ask them to confirm the API key is
