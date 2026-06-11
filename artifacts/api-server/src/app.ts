@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import rateLimit from "express-rate-limit";
 import router from "./routes";
+import authRouter from "./routes/auth";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -48,5 +49,11 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api", router);
+
+// Bullhorn OAuth is also served at the registered redirect path
+// (https://<domain>/bullhorn/oauth/callback) so the callback URL whitelisted
+// with Bullhorn resolves directly. The same handlers remain available under
+// /api/auth/bullhorn for internal/back-compat use.
+app.use("/bullhorn/oauth", authRouter);
 
 export default app;

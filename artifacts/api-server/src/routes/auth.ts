@@ -47,7 +47,7 @@ function page(title: string, message: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${t}</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}main{max-width:520px;padding:40px;text-align:center}h1{font-size:22px;margin:0 0 12px}p{font-size:15px;line-height:1.6;color:#aab4c5;margin:0}</style></head><body><main><h1>${t}</h1><p>${m}</p></main></body></html>`;
 }
 
-router.get("/auth/bullhorn/login", bearerAuth, async (_req: Request, res: Response) => {
+router.get("/login", bearerAuth, async (_req: Request, res: Response) => {
   try {
     const state = randomBytes(16).toString("hex");
     rememberState(state);
@@ -66,7 +66,7 @@ router.get("/auth/bullhorn/login", bearerAuth, async (_req: Request, res: Respon
   }
 });
 
-router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
+router.get("/callback", async (req: Request, res: Response) => {
   const { code, state, error, error_description } = req.query;
 
   if (typeof error === "string") {
@@ -84,7 +84,7 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
       .send(
         page(
           "Authorization link expired",
-          "This authorization link is invalid or has expired. Please start again from /api/auth/bullhorn/login.",
+          "This authorization link is invalid or has expired. Please start again from the Connect Bullhorn login link.",
         ),
       );
     return;
@@ -118,7 +118,7 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/auth/bullhorn/status", bearerAuth, async (_req: Request, res: Response) => {
+router.get("/status", bearerAuth, async (_req: Request, res: Response) => {
   try {
     const connected = await isConnected();
     res.json({ connected });
