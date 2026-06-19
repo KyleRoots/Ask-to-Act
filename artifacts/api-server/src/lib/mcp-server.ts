@@ -117,12 +117,12 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_candidates",
-    "Search for candidates in Bullhorn ATS using a Lucene query. Returns matching candidate records with key at-a-glance fields (name, email, phone, mobile, location, availability, last-updated). Each record includes a `bullhornUrl` deep link to open the candidate directly in Bullhorn — render the candidate's name as that link.",
+    "Search for candidates in Bullhorn ATS using a Lucene query. ACCURACY NOTE — a candidate's skills and experience live in THREE searchable places; search across all of them so you don't miss qualified people: `skillSet` (free-text skills list — the most complete source), `primarySkills.name` (structured skills — often sparse or empty), and `description` (the candidate's full parsed RÉSUMÉ text, which is fully searchable and catches skills, tools, and certifications that appear only in the résumé). Example: `(skillSet:Kubernetes OR description:Kubernetes)`. Combine must-have criteria with AND, use OR within a criterion for recall, quote multi-word terms to keep them together (e.g. `skillSet:\"Spring Boot\"`; Bullhorn matching is relevance-ranked, not strict exact-phrase, so confirm the top hits on the shortlist), and field-qualify EVERY term — bare keywords are rejected by Bullhorn. Results are relevance-ranked. Years-of-experience and skill recency are NOT reliable as query filters (the structured `experience` field is usually empty) — to judge those, open the shortlist with get_candidate (work history with dates) and get_candidate_resume (full résumé text). Returns key fields including `skillSet`; each record includes a `bullhornUrl` deep link — render the candidate's name as that link.",
     {
       query: z
         .string()
         .describe(
-          "Lucene query string, e.g. 'primarySkills.name:\"Java\"' or 'status:Active AND address.city:\"Chicago\"'",
+          "Lucene query string. Field-qualify every term (no bare keywords). For skills, search BOTH the skill fields and the résumé text for best recall, e.g. '(skillSet:\"Java\" OR description:\"Java\") AND (skillSet:\"AWS\" OR description:\"AWS\") AND status:\"Active\"'. Use AND for must-haves; quote multi-word skills.",
         ),
       count: z
         .number()
@@ -205,7 +205,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_candidate",
-    "Fetch the full record for a specific candidate by their Bullhorn ID. The record includes a `bullhornUrl` deep link to open the candidate directly in Bullhorn.",
+    "Fetch the full record for a specific candidate by their Bullhorn ID, including skills (`skillSet`, primary/secondary skills), work history with dates, and education — useful for judging years of experience and skill recency. For the candidate's full parsed RÉSUMÉ text, use get_candidate_resume (SSN-redacted and length-capped). The record includes a `bullhornUrl` deep link to open the candidate directly in Bullhorn.",
     {
       id: z.number().int().positive().describe("Bullhorn candidate ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),

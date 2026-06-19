@@ -144,6 +144,73 @@ async function enrichWithProfileUrls(
   return json;
 }
 
+/**
+ * SSN-redacts the `description` (parsed résumé text) of every Candidate record
+ * in a Bullhorn response, mutating in place. Covers (a) top-level Candidate
+ * reads and (b) candidate data returned as a `candidate` / `candidates`
+ * association on ANY entity (e.g. `JobSubmission.candidate(...,description)`),
+ * at any reasonable depth. Other entities' own `description` (job/company/note
+ * text) is intentionally left untouched. Defence-in-depth so résumé PII is
+ * masked even when a caller requests `description` directly; full, length-capped
+ * résumé text is served only by the dedicated get_candidate_resume tool.
+ */
+function redactCandidateDescriptions(entity: string, json: unknown): unknown {
+  if (!json || typeof json !== "object") return json;
+  const redactDesc = (rec: unknown) => {
+    if (rec && typeof rec === "object" && !Array.isArray(rec)) {
+      const r = rec as Record<string, unknown>;
+      if (typeof r.description === "string") {
+        r.description = redactResumeText(r.description);
+      }
+    }
+  };
+  // A candidate association value may be a bare to-one object, an array, or a
+  // `{ data }` / `{ total, data }` envelope.
+  const redactCandidateAssoc = (val: unknown) => {
+    if (!val || typeof val !== "object") return;
+    if (Array.isArray(val)) {
+      val.forEach(redactDesc);
+      return;
+    }
+    const o = val as Record<string, unknown>;
+    if ("data" in o) {
+      const d = o.data;
+      if (Array.isArray(d)) d.forEach(redactDesc);
+      else redactDesc(d);
+    } else {
+      redactDesc(o);
+    }
+  };
+  // Walks the response for `candidate`/`candidates` associations at any depth
+  // and redacts the résumé text inside them. Depth-bounded as a safety net;
+  // re-redaction is idempotent so overlapping passes are harmless.
+  const scan = (node: unknown, depth: number) => {
+    if (depth > 6 || !node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const n of node) scan(n, depth + 1);
+      return;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k === "candidate" || k === "candidates") redactCandidateAssoc(v);
+      scan(v, depth + 1);
+    }
+  };
+  // Top-level Candidate records' own résumé text.
+  if (entity === "Candidate") {
+    const obj = json as Record<string, unknown>;
+    if ("data" in obj) {
+      const data = obj.data;
+      if (Array.isArray(data)) data.forEach(redactDesc);
+      else redactDesc(data);
+    } else {
+      redactDesc(obj);
+    }
+  }
+  // Nested candidate associations on any entity.
+  scan(json, 0);
+  return json;
+}
+
 async function searchEntity(
   entity: string,
   query: string,
@@ -182,7 +249,10 @@ async function searchEntity(
     const text = await res.text();
     throw new Error(`Bullhorn search error (${res.status}): ${text}`);
   }
-  return enrichWithProfileUrls(entity, await res.json());
+  return redactCandidateDescriptions(
+    entity,
+    await enrichWithProfileUrls(entity, await res.json()),
+  );
 }
 
 async function queryEntity(
@@ -198,7 +268,10 @@ async function queryEntity(
   if (orderBy !== undefined && orderBy !== "") {
     params.orderBy = orderBy;
   }
-  return enrichWithProfileUrls(entity, await bullhornFetch(`query/${entity}`, params));
+  return redactCandidateDescriptions(
+    entity,
+    await enrichWithProfileUrls(entity, await bullhornFetch(`query/${entity}`, params)),
+  );
 }
 
 async function getEntity(
@@ -206,9 +279,12 @@ async function getEntity(
   id: number,
   fields: string,
 ): Promise<unknown> {
-  return enrichWithProfileUrls(
+  return redactCandidateDescriptions(
     entity,
-    await bullhornFetch(`entity/${entity}/${id}`, { fields: sanitizeFields(fields) }),
+    await enrichWithProfileUrls(
+      entity,
+      await bullhornFetch(`entity/${entity}/${id}`, { fields: sanitizeFields(fields) }),
+    ),
   );
 }
 
@@ -302,7 +378,7 @@ export async function searchCandidates(args: {
 }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,mobile,status,occupation,primarySkills,address,dateAvailable,dateLastModified,owner,dateAdded";
+    "id,firstName,lastName,email,phone,mobile,status,occupation,skillSet,primarySkills,address,dateAvailable,dateLastModified,owner,dateAdded";
   return searchEntity("Candidate", args.query, fields, args.count ?? 20, args.start ?? 0);
 }
 
@@ -357,7 +433,7 @@ export async function searchContacts(args: {
 export async function getCandidate(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,mobile,status,occupation,primarySkills,secondarySkills,educations,workHistories,address,salary,dateAvailable,dateLastModified,owner,dateAdded,source,description";
+    "id,firstName,lastName,email,phone,mobile,status,occupation,skillSet,primarySkills(id,name),secondarySkills(id,name),educations(id,degree,major,school),workHistories(id,title,companyName,startDate,endDate),address,salary,dateAvailable,dateLastModified,owner,dateAdded,source";
   return getEntity("Candidate", args.id, fields);
 }
 
@@ -865,7 +941,7 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
     canonical: "Candidate",
     route: "both",
     defaultFields:
-      "id,firstName,lastName,email,phone,mobile,status,occupation,address,dateAvailable,dateLastModified,owner,dateAdded",
+      "id,firstName,lastName,email,phone,mobile,status,occupation,skillSet,address,dateAvailable,dateLastModified,owner,dateAdded",
   },
   clientcontact: {
     canonical: "ClientContact",
