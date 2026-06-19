@@ -51,6 +51,7 @@ Recruiters in ChatGPT Enterprise toggle the Bullhorn app on and can immediately 
 - `RATE_LIMIT_WINDOW_MS` (optional) — window size in ms, default 60000
 - `CACHE_TTL_MS` (optional) — read-cache entry lifetime in ms, default 60000 (set 0 to disable)
 - `CACHE_MAX_ENTRIES` (optional) — max cached read responses, default 500
+- `BULLHORN_UI_BASE_URL` (optional) — base URL used to build record deep links; defaults to the UI cluster derived from the REST swimlane (e.g. `rest45...` → `https://cls45.bullhornstaffing.com`). Set this only if the instance's UI host differs.
 
 ## Gotchas
 
@@ -60,6 +61,7 @@ Recruiters in ChatGPT Enterprise toggle the Bullhorn app on and can immediately 
 - Bullhorn search uses Lucene syntax; entity queries use SQL WHERE syntax — different endpoints (`search/` vs `query/`)
 - Session tokens expire; the auth module auto-refreshes from a persisted refresh token, falling back to a headless authorization_code login on failure
 - `MCP_BEARER_TOKEN` must be set or the server will return 503 on all MCP requests
+- Read results for Candidate/ClientContact/ClientCorporation/JobOrder/Lead/Opportunity records include a `bullhornUrl` deep link (`OpenWindow.cfm`) so the AI can link straight to the record. The host is derived from the REST swimlane by default; override with `BULLHORN_UI_BASE_URL` if the instance moves clusters. Transactional entities (submissions, placements, notes, tasks, etc.) intentionally get no link.
 
 ## Deployment
 

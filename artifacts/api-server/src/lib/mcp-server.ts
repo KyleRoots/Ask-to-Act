@@ -114,7 +114,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_candidates",
-    "Search for candidates in Bullhorn ATS using a Lucene query. Returns matching candidate records with key fields.",
+    "Search for candidates in Bullhorn ATS using a Lucene query. Returns matching candidate records with key at-a-glance fields (name, email, phone, mobile, location, availability, last-updated). Each record includes a `bullhornUrl` deep link to open the candidate directly in Bullhorn — render the candidate's name as that link.",
     {
       query: z
         .string()
@@ -147,7 +147,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_jobs",
-    "Search for job orders in Bullhorn ATS using a Lucene query. Returns matching job records.",
+    "Search for job orders in Bullhorn ATS using a Lucene query. Returns matching job records. Each record includes a `bullhornUrl` deep link to open the job directly in Bullhorn.",
     {
       query: z
         .string()
@@ -166,7 +166,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_companies",
-    "Search for client companies (ClientCorporation) in Bullhorn ATS using a Lucene query.",
+    "Search for client companies (ClientCorporation) in Bullhorn ATS using a Lucene query. Each record includes a `bullhornUrl` deep link to open the company directly in Bullhorn.",
     {
       query: z
         .string()
@@ -183,7 +183,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_contacts",
-    "Search for client contacts in Bullhorn ATS using a Lucene query.",
+    "Search for client contacts in Bullhorn ATS using a Lucene query. Each record includes a `bullhornUrl` deep link to open the contact directly in Bullhorn.",
     {
       query: z
         .string()
@@ -202,7 +202,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_candidate",
-    "Fetch the full record for a specific candidate by their Bullhorn ID.",
+    "Fetch the full record for a specific candidate by their Bullhorn ID. The record includes a `bullhornUrl` deep link to open the candidate directly in Bullhorn.",
     {
       id: z.number().int().positive().describe("Bullhorn candidate ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
@@ -215,7 +215,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_job",
-    "Fetch the full record for a specific job order by its Bullhorn ID.",
+    "Fetch the full record for a specific job order by its Bullhorn ID. The record includes a `bullhornUrl` deep link to open the job directly in Bullhorn.",
     {
       id: z.number().int().positive().describe("Bullhorn job order ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
@@ -228,7 +228,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_company",
-    "Fetch the full record for a specific client company by its Bullhorn ID.",
+    "Fetch the full record for a specific client company by its Bullhorn ID. The record includes a `bullhornUrl` deep link to open the company directly in Bullhorn.",
     {
       id: z.number().int().positive().describe("Bullhorn client corporation ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
@@ -241,7 +241,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_contact",
-    "Fetch the full record for a specific client contact by their Bullhorn ID.",
+    "Fetch the full record for a specific client contact by their Bullhorn ID. The record includes a `bullhornUrl` deep link to open the contact directly in Bullhorn.",
     {
       id: z.number().int().positive().describe("Bullhorn client contact ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
@@ -353,7 +353,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_entity",
-    `Full-text search (Lucene) over ANY indexed Bullhorn entity — a flexible fallback for read coverage when no dedicated tool fits. Prefer the dedicated tools (search_candidates, search_jobs, search_companies, search_contacts) when they apply. Searchable entities: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. For query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) use query_entity instead. Use describe_entity to discover valid field names.`,
+    `Full-text search (Lucene) over ANY indexed Bullhorn entity — a flexible fallback for read coverage when no dedicated tool fits. Prefer the dedicated tools (search_candidates, search_jobs, search_companies, search_contacts) when they apply. Searchable entities: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. For query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) use query_entity instead. Use describe_entity to discover valid field names. For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
     {
       entityType: z.string().describe(entityTypeDescribe),
       query: z
@@ -373,7 +373,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "query_entity",
-    `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity. Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. The Note entity is search-only — use search_entity for it. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names. 'orderBy' is optional (e.g. '-dateAdded' for newest first).`,
+    `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity. Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. The Note entity is search-only — use search_entity for it. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names. 'orderBy' is optional (e.g. '-dateAdded' for newest first). For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
     {
       entityType: z.string().describe(entityTypeDescribe),
       where: z
@@ -399,7 +399,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_entity",
-    "Fetch a single record of ANY supported Bullhorn entity by its ID. Use the dedicated get_candidate/get_job/get_company/get_contact tools when they apply.",
+    "Fetch a single record of ANY supported Bullhorn entity by its ID. Use the dedicated get_candidate/get_job/get_company/get_contact tools when they apply. For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, the record includes a `bullhornUrl` deep link to open it directly in Bullhorn.",
     {
       entityType: z.string().describe(entityTypeDescribe),
       id: z.number().int().positive().describe("Bullhorn record ID"),
@@ -525,7 +525,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_leads",
-    "Search Bullhorn CRM leads (sales prospects) with a Lucene query. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    "Search Bullhorn CRM leads (sales prospects) with a Lucene query. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Active AND companyName:\"Acme*\"'"),
       count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
@@ -540,7 +540,7 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "search_opportunities",
-    "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Open AND title:\"Managed Services\"'"),
       count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),

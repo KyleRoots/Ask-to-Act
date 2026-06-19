@@ -59,6 +59,81 @@ function sanitizeFields(fields: string): string {
   return kept.length > 0 ? kept.join(",") : "id";
 }
 
+/**
+ * Entities that have a meaningful standalone record view in the Bullhorn UI, so
+ * a deep link to open them is useful. Transactional/junction entities
+ * (JobSubmission, Placement, Note, Task, etc.) are intentionally excluded.
+ */
+const UI_LINKABLE_ENTITIES = new Set<string>([
+  "Candidate",
+  "ClientContact",
+  "ClientCorporation",
+  "JobOrder",
+  "Lead",
+  "Opportunity",
+]);
+
+// Cache the swimlane-derived host keyed by the restUrl it was derived from, so a
+// cluster migration/failover that changes restUrl on re-auth recomputes the host.
+let memoDerivedUiBase: { restUrl: string; base: string | null } | undefined;
+
+/**
+ * Resolves the Bullhorn UI base URL used to build record deep links. Prefers an
+ * explicit BULLHORN_UI_BASE_URL override; otherwise derives the cluster host
+ * from the REST swimlane (e.g. rest45.bullhornstaffing.com ->
+ * cls45.bullhornstaffing.com). Returns null when it cannot be determined, in
+ * which case deep links are simply omitted.
+ */
+async function resolveUiBaseUrl(): Promise<string | null> {
+  const configured = process.env.BULLHORN_UI_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  let restUrl: string;
+  try {
+    restUrl = (await getSession()).restUrl;
+  } catch {
+    return null;
+  }
+  if (memoDerivedUiBase?.restUrl === restUrl) return memoDerivedUiBase.base;
+  let base: string | null = null;
+  try {
+    const host = new URL(restUrl).hostname;
+    const m = /^rest(\d+)\.bullhornstaffing\.com$/i.exec(host);
+    base = m ? `https://cls${m[1]}.bullhornstaffing.com` : null;
+  } catch {
+    base = null;
+  }
+  memoDerivedUiBase = { restUrl, base };
+  return base;
+}
+
+/**
+ * Adds a `bullhornUrl` deep link to each linkable record under `data` in a
+ * Bullhorn REST response (mutating it in place). No-op for non-linkable
+ * entities or when the UI base URL cannot be resolved. Records without a numeric
+ * `id` are left untouched.
+ */
+async function enrichWithProfileUrls(
+  entity: string,
+  json: unknown,
+): Promise<unknown> {
+  if (!UI_LINKABLE_ENTITIES.has(entity)) return json;
+  if (!json || typeof json !== "object" || !("data" in json)) return json;
+  const base = await resolveUiBaseUrl();
+  if (!base) return json;
+  const addUrl = (rec: unknown) => {
+    if (rec && typeof rec === "object" && !Array.isArray(rec)) {
+      const r = rec as Record<string, unknown>;
+      if (typeof r.id === "number") {
+        r.bullhornUrl = `${base}/BullhornStaffing/OpenWindow.cfm?Entity=${entity}&id=${r.id}`;
+      }
+    }
+  };
+  const data = (json as { data: unknown }).data;
+  if (Array.isArray(data)) data.forEach(addUrl);
+  else addUrl(data);
+  return json;
+}
+
 async function searchEntity(
   entity: string,
   query: string,
@@ -97,7 +172,7 @@ async function searchEntity(
     const text = await res.text();
     throw new Error(`Bullhorn search error (${res.status}): ${text}`);
   }
-  return res.json();
+  return enrichWithProfileUrls(entity, await res.json());
 }
 
 async function queryEntity(
@@ -113,7 +188,7 @@ async function queryEntity(
   if (orderBy !== undefined && orderBy !== "") {
     params.orderBy = orderBy;
   }
-  return bullhornFetch(`query/${entity}`, params);
+  return enrichWithProfileUrls(entity, await bullhornFetch(`query/${entity}`, params));
 }
 
 async function getEntity(
@@ -121,7 +196,10 @@ async function getEntity(
   id: number,
   fields: string,
 ): Promise<unknown> {
-  return bullhornFetch(`entity/${entity}/${id}`, { fields: sanitizeFields(fields) });
+  return enrichWithProfileUrls(
+    entity,
+    await bullhornFetch(`entity/${entity}/${id}`, { fields: sanitizeFields(fields) }),
+  );
 }
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -214,7 +292,7 @@ export async function searchCandidates(args: {
 }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,status,occupation,primarySkills,address,dateAvailable,owner,dateAdded";
+    "id,firstName,lastName,email,phone,mobile,status,occupation,primarySkills,address,dateAvailable,dateLastModified,owner,dateAdded";
   return searchEntity("Candidate", args.query, fields, args.count ?? 20, args.start ?? 0);
 }
 
@@ -269,7 +347,7 @@ export async function searchContacts(args: {
 export async function getCandidate(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,status,occupation,primarySkills,secondarySkills,educations,workHistories,address,salary,dateAvailable,owner,dateAdded,source,description";
+    "id,firstName,lastName,email,phone,mobile,status,occupation,primarySkills,secondarySkills,educations,workHistories,address,salary,dateAvailable,dateLastModified,owner,dateAdded,source,description";
   return getEntity("Candidate", args.id, fields);
 }
 
@@ -398,7 +476,7 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
     canonical: "Candidate",
     route: "both",
     defaultFields:
-      "id,firstName,lastName,email,phone,status,occupation,owner,dateAdded",
+      "id,firstName,lastName,email,phone,mobile,status,occupation,address,dateAvailable,dateLastModified,owner,dateAdded",
   },
   clientcontact: {
     canonical: "ClientContact",

@@ -69,7 +69,8 @@ the `meta/{Entity}` endpoint). Confirmed corrections vs. generic assumptions:
   `description`; uses `owners` (to-many), NOT `owner`. `revenue`, `fax` are valid.
 - **ClientContact**: no `title`. `owner`, `mobile`, `clientCorporation` are valid.
 - **Candidate**: work-history association is `workHistories` (plural, like
-  `educations`), NOT `workHistory`.
+  `educations`), NOT `workHistory`. `mobile` and `dateLastModified` are valid
+  Candidate fields (live-confirmed).
 - **Note is an INDEXED entity** → must be read via `/search` (Lucene `field:value`,
   e.g. `jobOrder.id:123`), NOT `/query`; its text field is `comments`, not `body`.
 - **`/query` responses return `{start, count, data}` with NO `total` field**;
@@ -96,6 +97,17 @@ the `meta/{Entity}` endpoint). Confirmed corrections vs. generic assumptions:
   fields). Generic read tools must denylist credential-like field names
   (`/password|secret|token|.../i`) from both requested `fields` and `describe`
   output — never let a caller request `password`.
+
+## Bullhorn UI deep links (record links from REST data)
+A record's UI deep link is
+`https://cls{N}.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity={Entity}&id={id}`.
+The UI cluster host maps 1:1 from the REST swimlane: `restUrl` host `rest{N}.bullhornstaffing.com`
+→ UI host `cls{N}.bullhornstaffing.com` (e.g. rest45 → cls45). `OpenWindow.cfm` is the
+long-standing version-agnostic deep link that resolves for the logged-in user; it does NOT need the
+corp token. Only "profile-like" entities have a useful standalone view — Candidate, ClientContact,
+ClientCorporation, JobOrder, Lead, Opportunity. Don't link transactional/junction entities
+(JobSubmission, Placement, Note, Task, Appointment, Sendout). Make the host overridable (env) in case
+a corp is migrated to a different cluster, but the swimlane derivation is the right default.
 
 ## History (kept for context; superseded by the headless solution above)
 The browser "Agree" bounced back to login with no code, reproducibly, across users,
