@@ -475,6 +475,15 @@ export async function getNotes(args: {
 /** Default / hard cap on characters of extracted attachment text returned. */
 const DEFAULT_ATTACHMENT_TEXT_CHARS = 20_000;
 const MAX_ATTACHMENT_TEXT_CHARS = 100_000;
+/**
+ * Cap on the attachment `description` snippet returned as metadata. Bullhorn
+ * sometimes stuffs the FULL parsed résumé (including PII) into this field, so it
+ * must be redacted + capped like any other returned text rather than passed
+ * through raw in attachment listings.
+ */
+const MAX_ATTACHMENT_DESC_CHARS = 1_000;
+/** Hard cap on decoded attachment bytes we will process for text extraction. */
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 
 const SSN_RE = /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g;
 
@@ -487,6 +496,20 @@ const SSN_RE = /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g;
  */
 function redactResumeText(text: string): string {
   return text.replace(SSN_RE, "[REDACTED-SSN]");
+}
+
+/**
+ * Sanitizes the attachment `description` returned as metadata. Bullhorn may put
+ * the full parsed résumé text here, so apply the same SSN redaction as extracted
+ * text and cap it to a short snippet — full text must come from the dedicated
+ * read tools (which redact + honour the larger text caps), not from listings.
+ */
+function sanitizeAttachmentDescription(desc?: string): string | undefined {
+  if (!desc) return desc;
+  const redacted = redactResumeText(desc);
+  return redacted.length > MAX_ATTACHMENT_DESC_CHARS
+    ? redacted.slice(0, MAX_ATTACHMENT_DESC_CHARS)
+    : redacted;
 }
 
 /** Reads the first present key from an object (tolerant of casing differences). */
@@ -538,7 +561,7 @@ function normalizeAttachment(raw: Record<string, unknown>): AttachmentMeta {
     contentType: fullContentType,
     fileType: asString(pickKey(raw, "fileType")),
     contentSubType,
-    description: asString(pickKey(raw, "description")),
+    description: sanitizeAttachmentDescription(asString(pickKey(raw, "description"))),
     dateAdded: asNumber(pickKey(raw, "dateAdded")),
   };
 }
@@ -676,6 +699,21 @@ export async function readCandidateAttachment(args: {
       textAvailable: false,
       message:
         "Bullhorn returned no file content for this attachment, so no text could be extracted.",
+    };
+  }
+
+  // Bound work BEFORE decoding: estimate decoded size from the base64 length and
+  // refuse oversized files so a huge attachment can't blow up memory/CPU.
+  const estimatedBytes = Math.floor((base64.length * 3) / 4);
+  if (estimatedBytes > MAX_ATTACHMENT_BYTES) {
+    return {
+      ...meta,
+      sizeBytes: estimatedBytes,
+      textAvailable: false,
+      message:
+        `This attachment is ~${Math.round(estimatedBytes / 1024 / 1024)} MB, which exceeds the ` +
+        `${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB processing limit. ` +
+        `Open it in Bullhorn to view.`,
     };
   }
 
