@@ -103,3 +103,19 @@ correct. Escalate to Bullhorn with the full ruled-out list and ask them to inspe
 the KEY's backend config (is authorization_code enabled for this client_id? is the
 "Agree" consent POST failing/!persisting on their side?). Push for a live call /
 senior tech — ticket round-trips have repeatedly mis-diagnosed this as corp/user.
+
+## Repeated OAuth attempts trip the account LOCKOUT — self-unlock, don't call support
+Symptom: after many login attempts the password starts getting rejected at the
+Bullhorn login screen (never reaches consent). Cause: repeated failed auths exceed
+`failedLoginLockoutThreshold` and Bullhorn LOCKS the user (Account shows "Locked"
+in red on the user record). A locked account rejects every password until unlocked.
+**Fix (no Bullhorn support needed):** a Super Admin opens the user record and, in
+Account Information, flips the radio from **Locked → Unlocked**, sets a fresh clean
+password (no spaces/quotes, typed not pasted, meets complexity), and Saves — all in
+one save. Wait ~2-3 min for cooldown before retrying. A single wrong attempt can
+re-lock it. **Why:** the Unlocked/Locked toggle is editable directly in the user
+edit form; admins do not need to escalate to Bullhorn for a lockout.
+**How to apply:** when a previously-working password suddenly gets rejected, check
+the Account Locked status FIRST before assuming a key/credential problem. Note the
+lockout is separate from the consent-bounce defect (lockout develops later, from
+the repeated attempts) — unlocking is necessary but may not fix the original bounce.
