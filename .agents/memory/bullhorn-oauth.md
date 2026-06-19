@@ -80,6 +80,22 @@ the `meta/{Entity}` endpoint). Confirmed corrections vs. generic assumptions:
   use numeric comparisons (`dateAdded >= <ms> AND dateAdded < <ms>`); in `/search`
   Lucene use a range (`dateAdded:[<ms> TO <ms>]`, inclusive both ends). Bullhorn
   `count` maxes at 500.
+- **Endpoint routing per entity (verified live, corp 28404)** — pick `/search` vs
+  `/query` per entity or you get a 400:
+  - `/search`-ONLY (indexed): **Note** (`errors.queryIndexedEntity` on /query).
+  - `/query`-ONLY (not indexed): **Tearsheet** (`Unknown search entity` on /search),
+    **Appointment**, **Task**, **CorporateUser**, **Sendout**.
+  - BOTH: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission,
+    Placement, Lead, Opportunity.
+- **Task has NO `dueDate` field** — its scheduled date is `dateBegin`; other dates
+  are `dateEnd`/`dateCompleted` (+ `isCompleted`). Filter/sort tasks on `dateBegin`.
+- **CorporateUser has no `dateAdded`** — it is `userDateAdded`; so don't order
+  CorporateUser by `-dateAdded`. CorporateUser is NOT full-text searchable (use
+  `/query` with `LIKE`, escaping single quotes by doubling them).
+- **Lead/Candidate `meta` expose a `password` field** (and persons carry auth-ish
+  fields). Generic read tools must denylist credential-like field names
+  (`/password|secret|token|.../i`) from both requested `fields` and `describe`
+  output — never let a caller request `password`.
 
 ## History (kept for context; superseded by the headless solution above)
 The browser "Agree" bounced back to login with no code, reproducibly, across users,

@@ -38,6 +38,27 @@ async function bullhornFetch(
   return res.json();
 }
 
+const SENSITIVE_FIELD_RE =
+  /(password|secret|token|apikey|api_key|sessionid|session_id|credential|ssn|socialsecurity)/i;
+
+/** True if a field name looks like a credential/secret that must never be returned. */
+function isSensitiveField(name: string): boolean {
+  return SENSITIVE_FIELD_RE.test(name);
+}
+
+/**
+ * Strips credential-like fields from a comma-separated fields list before it is
+ * sent to Bullhorn. Defense-in-depth so callers can never request (or exfiltrate)
+ * a field such as `password`. Falls back to "id" if nothing safe remains.
+ */
+function sanitizeFields(fields: string): string {
+  const kept = fields
+    .split(",")
+    .map((f) => f.trim())
+    .filter((f) => f.length > 0 && !isSensitiveField(f));
+  return kept.length > 0 ? kept.join(",") : "id";
+}
+
 async function searchEntity(
   entity: string,
   query: string,
@@ -45,6 +66,7 @@ async function searchEntity(
   count: number,
   start: number,
 ): Promise<unknown> {
+  fields = sanitizeFields(fields);
   const session = await getSession();
   const url = new URL(`search/${entity}`, session.restUrl);
   url.searchParams.set("BhRestToken", session.BhRestToken);
@@ -84,14 +106,14 @@ async function queryEntity(
   fields: string,
   count: number,
   start: number,
+  orderBy?: string,
 ): Promise<unknown> {
-  return bullhornFetch(`query/${entity}`, {
-    where,
-    fields,
-    count,
-    start,
-    orderBy: "-dateAdded",
-  });
+  fields = sanitizeFields(fields);
+  const params: Record<string, string | number> = { where, fields, count, start };
+  if (orderBy !== undefined && orderBy !== "") {
+    params.orderBy = orderBy;
+  }
+  return bullhornFetch(`query/${entity}`, params);
 }
 
 async function getEntity(
@@ -99,7 +121,7 @@ async function getEntity(
   id: number,
   fields: string,
 ): Promise<unknown> {
-  return bullhornFetch(`entity/${entity}/${id}`, { fields });
+  return bullhornFetch(`entity/${entity}/${id}`, { fields: sanitizeFields(fields) });
 }
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -293,6 +315,7 @@ export async function listSubmissionsForJob(args: {
     fields,
     args.count ?? 50,
     args.start ?? 0,
+    "-dateAdded",
   );
 }
 
@@ -318,7 +341,7 @@ export async function listPlacements(args: {
   const fields =
     args.fields ??
     "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate,clientBillRate";
-  return queryEntity("Placement", where, fields, args.count ?? 50, args.start ?? 0);
+  return queryEntity("Placement", where, fields, args.count ?? 50, args.start ?? 0, "-dateAdded");
 }
 
 export async function getNotes(args: {
@@ -347,4 +370,406 @@ export async function getNotes(args: {
   // Note is an indexed entity in Bullhorn — it must be read via /search (Lucene),
   // not /query.
   return searchEntity("Note", query, fields, args.count ?? 50, args.start ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Generic read-any-entity layer
+// ---------------------------------------------------------------------------
+
+type EntityRoute = "search" | "query" | "both";
+
+interface CatalogEntry {
+  /** Exact Bullhorn entity name used in the REST path. */
+  canonical: string;
+  /** Which read endpoints this entity supports. */
+  route: EntityRoute;
+  /** Default field list used when the caller does not specify fields. */
+  defaultFields: string;
+}
+
+/**
+ * Allow-list of readable Bullhorn entities. Restricting generic reads to this
+ * catalog (rather than accepting arbitrary entity names) prevents REST path
+ * abuse and accidental exposure of internal/sensitive entities, and lets us
+ * route to the correct endpoint (/search vs /query) with sensible defaults.
+ */
+const ENTITY_CATALOG: Record<string, CatalogEntry> = {
+  candidate: {
+    canonical: "Candidate",
+    route: "both",
+    defaultFields:
+      "id,firstName,lastName,email,phone,status,occupation,owner,dateAdded",
+  },
+  clientcontact: {
+    canonical: "ClientContact",
+    route: "both",
+    defaultFields:
+      "id,firstName,lastName,email,phone,clientCorporation,status,owner,dateAdded",
+  },
+  clientcorporation: {
+    canonical: "ClientCorporation",
+    route: "both",
+    defaultFields: "id,name,phone,status,numEmployees,owner,dateAdded",
+  },
+  joborder: {
+    canonical: "JobOrder",
+    route: "both",
+    defaultFields:
+      "id,title,status,type,clientCorporation,owner,dateAdded,isOpen,numOpenings",
+  },
+  jobsubmission: {
+    canonical: "JobSubmission",
+    route: "both",
+    defaultFields:
+      "id,candidate,jobOrder,status,dateAdded,sendingUser,salary,payRate",
+  },
+  placement: {
+    canonical: "Placement",
+    route: "both",
+    defaultFields:
+      "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate",
+  },
+  note: {
+    canonical: "Note",
+    route: "search",
+    defaultFields:
+      "id,action,comments,commentingPerson,candidates,jobOrder,dateAdded",
+  },
+  lead: {
+    canonical: "Lead",
+    route: "both",
+    defaultFields:
+      "id,firstName,lastName,companyName,status,owner,dateAdded,email,phone",
+  },
+  opportunity: {
+    canonical: "Opportunity",
+    route: "both",
+    defaultFields:
+      "id,title,status,clientCorporation,owner,dateAdded,dealValue",
+  },
+  appointment: {
+    canonical: "Appointment",
+    route: "query",
+    defaultFields: "id,subject,type,dateBegin,dateEnd,location,owner,dateAdded",
+  },
+  task: {
+    canonical: "Task",
+    route: "query",
+    defaultFields:
+      "id,subject,type,dateAdded,dateBegin,dateEnd,dateCompleted,isCompleted,owner,priority",
+  },
+  corporateuser: {
+    canonical: "CorporateUser",
+    route: "query",
+    defaultFields:
+      "id,firstName,lastName,name,email,username,phone,occupation,isDeleted",
+  },
+  tearsheet: {
+    canonical: "Tearsheet",
+    route: "query",
+    defaultFields: "id,name,description,owner,dateAdded",
+  },
+  sendout: {
+    canonical: "Sendout",
+    route: "query",
+    defaultFields: "id,candidate,jobOrder,clientContact,user,dateAdded",
+  },
+};
+
+const ENTITY_ALIASES: Record<string, string> = {
+  company: "clientcorporation",
+  companies: "clientcorporation",
+  client: "clientcorporation",
+  corporation: "clientcorporation",
+  contact: "clientcontact",
+  contacts: "clientcontact",
+  job: "joborder",
+  jobs: "joborder",
+  joborders: "joborder",
+  submission: "jobsubmission",
+  submissions: "jobsubmission",
+  user: "corporateuser",
+  users: "corporateuser",
+  recruiter: "corporateuser",
+  recruiters: "corporateuser",
+  appointments: "appointment",
+  tasks: "task",
+  leads: "lead",
+  opportunities: "opportunity",
+  placements: "placement",
+  candidates: "candidate",
+  notes: "note",
+  tearsheets: "tearsheet",
+  sendouts: "sendout",
+};
+
+/** Canonical names of every entity the generic read tools accept. */
+export const SUPPORTED_ENTITIES: string[] = Object.values(ENTITY_CATALOG)
+  .map((e) => e.canonical)
+  .sort();
+
+function resolveEntity(entityType: string): CatalogEntry {
+  const key = entityType.trim().toLowerCase();
+  const canonicalKey = ENTITY_ALIASES[key] ?? key;
+  const entry = ENTITY_CATALOG[canonicalKey];
+  if (!entry) {
+    throw new Error(
+      `Unknown or unsupported entityType "${entityType}". Supported entities: ${SUPPORTED_ENTITIES.join(
+        ", ",
+      )}.`,
+    );
+  }
+  return entry;
+}
+
+/** Generic full-text (/search) read over any indexed catalog entity. */
+export async function searchAnyEntity(args: {
+  entityType: string;
+  query: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const entry = resolveEntity(args.entityType);
+  if (entry.route === "query") {
+    throw new Error(
+      `Entity "${entry.canonical}" is not full-text searchable. Use query_entity with a 'where' clause instead.`,
+    );
+  }
+  const fields = args.fields ?? entry.defaultFields;
+  return searchEntity(
+    entry.canonical,
+    args.query,
+    fields,
+    args.count ?? 20,
+    args.start ?? 0,
+  );
+}
+
+/** Generic structured (/query) read over any query-capable catalog entity. */
+export async function queryAnyEntity(args: {
+  entityType: string;
+  where: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+  orderBy?: string;
+}) {
+  const entry = resolveEntity(args.entityType);
+  if (entry.route === "search") {
+    throw new Error(
+      `Entity "${entry.canonical}" must be read with search_entity (Lucene 'query'), not query_entity.`,
+    );
+  }
+  const fields = args.fields ?? entry.defaultFields;
+  return queryEntity(
+    entry.canonical,
+    args.where,
+    fields,
+    args.count ?? 20,
+    args.start ?? 0,
+    args.orderBy,
+  );
+}
+
+/** Generic get-by-id over any catalog entity. */
+export async function getAnyEntity(args: {
+  entityType: string;
+  id: number;
+  fields?: string;
+}) {
+  const entry = resolveEntity(args.entityType);
+  const fields = args.fields ?? entry.defaultFields;
+  return getEntity(entry.canonical, args.id, fields);
+}
+
+/** Returns a compact field catalog for an entity via Bullhorn /meta. */
+export async function describeEntity(args: { entityType: string }) {
+  const entry = resolveEntity(args.entityType);
+  const meta = (await bullhornFetch(`meta/${entry.canonical}`, {
+    fields: "*",
+    meta: "basic",
+  })) as {
+    entity?: string;
+    label?: string;
+    fields?: Array<Record<string, unknown>>;
+  };
+  const fields = Array.isArray(meta.fields)
+    ? meta.fields
+        .filter((f) => typeof f.name === "string" && !isSensitiveField(f.name as string))
+        .map((f) => {
+        const associated = f.associatedEntity as { entity?: string } | undefined;
+        return {
+          name: f.name,
+          type: f.type,
+          dataType: f.dataType,
+          ...(f.optionsType ? { optionsType: f.optionsType } : {}),
+          ...(associated?.entity ? { associatedEntity: associated.entity } : {}),
+        };
+      })
+    : [];
+  return {
+    entity: meta.entity ?? entry.canonical,
+    label: meta.label,
+    fieldCount: fields.length,
+    fields,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Curated high-value read tools
+// ---------------------------------------------------------------------------
+
+/** Doubles single quotes so a user value is safe inside a /query string literal. */
+function escapeQueryValue(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/** Job submissions for a candidate (which jobs they were submitted to). */
+export async function listSubmissionsForCandidate(args: {
+  candidateId: number;
+  dateAddedStart?: string;
+  dateAddedEnd?: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const conditions = [`candidate.id=${args.candidateId}`];
+  conditions.push(
+    ...queryDateConditions("dateAdded", args.dateAddedStart, args.dateAddedEnd),
+  );
+  const fields =
+    args.fields ??
+    "id,candidate,jobOrder,status,dateAdded,sendingUser,salary,payRate";
+  return queryEntity(
+    "JobSubmission",
+    conditions.join(" AND "),
+    fields,
+    args.count ?? 50,
+    args.start ?? 0,
+    "-dateAdded",
+  );
+}
+
+/** Appointments/meetings, filtered by owner and/or scheduled-time window. */
+export async function listAppointments(args: {
+  ownerId?: number;
+  startAfter?: string;
+  startBefore?: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const conditions: string[] = [];
+  if (args.ownerId) conditions.push(`owner.id=${args.ownerId}`);
+  conditions.push(
+    ...queryDateConditions("dateBegin", args.startAfter, args.startBefore),
+  );
+  if (conditions.length === 0) conditions.push("id IS NOT NULL");
+  const fields =
+    args.fields ?? "id,subject,type,dateBegin,dateEnd,location,owner,dateAdded";
+  return queryEntity(
+    "Appointment",
+    conditions.join(" AND "),
+    fields,
+    args.count ?? 50,
+    args.start ?? 0,
+    "dateBegin",
+  );
+}
+
+/** Tasks, filtered by owner, due-date window, and/or completion status. */
+export async function listTasks(args: {
+  ownerId?: number;
+  dueStart?: string;
+  dueEnd?: string;
+  isCompleted?: boolean;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const conditions: string[] = [];
+  if (args.ownerId) conditions.push(`owner.id=${args.ownerId}`);
+  if (args.isCompleted !== undefined) {
+    conditions.push(`isCompleted=${args.isCompleted ? "true" : "false"}`);
+  }
+  // Bullhorn Task has no dueDate field; dateBegin is the task's scheduled date.
+  conditions.push(...queryDateConditions("dateBegin", args.dueStart, args.dueEnd));
+  if (conditions.length === 0) conditions.push("id IS NOT NULL");
+  const fields =
+    args.fields ??
+    "id,subject,type,dateAdded,dateBegin,dateEnd,dateCompleted,isCompleted,owner,priority";
+  return queryEntity(
+    "Task",
+    conditions.join(" AND "),
+    fields,
+    args.count ?? 50,
+    args.start ?? 0,
+    "dateBegin",
+  );
+}
+
+/** Lucene search over CRM leads (requires Lead & Opportunity tracking enabled). */
+export async function searchLeads(args: {
+  query: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const fields =
+    args.fields ??
+    "id,firstName,lastName,companyName,status,owner,dateAdded,email,phone";
+  return searchEntity("Lead", args.query, fields, args.count ?? 20, args.start ?? 0);
+}
+
+/** Lucene search over CRM opportunities (requires Lead & Opportunity tracking). */
+export async function searchOpportunities(args: {
+  query: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const fields =
+    args.fields ??
+    "id,title,status,clientCorporation,owner,dateAdded,dealValue";
+  return searchEntity(
+    "Opportunity",
+    args.query,
+    fields,
+    args.count ?? 20,
+    args.start ?? 0,
+  );
+}
+
+/** Finds internal Bullhorn users (recruiters) by name and/or email. */
+export async function findUsers(args: {
+  name?: string;
+  email?: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+}) {
+  const conditions: string[] = [];
+  if (args.name) {
+    const n = escapeQueryValue(args.name.trim());
+    conditions.push(
+      `(firstName LIKE '%${n}%' OR lastName LIKE '%${n}%' OR name LIKE '%${n}%')`,
+    );
+  }
+  if (args.email) {
+    const e = escapeQueryValue(args.email.trim());
+    conditions.push(`email LIKE '%${e}%'`);
+  }
+  if (conditions.length === 0) conditions.push("id IS NOT NULL");
+  const fields =
+    args.fields ??
+    "id,firstName,lastName,name,email,username,phone,occupation,isDeleted";
+  return queryEntity(
+    "CorporateUser",
+    conditions.join(" AND "),
+    fields,
+    args.count ?? 20,
+    args.start ?? 0,
+    "lastName",
+  );
 }

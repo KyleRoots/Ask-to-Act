@@ -12,6 +12,17 @@ import {
   listSubmissionsForJob,
   listPlacements,
   getNotes,
+  searchAnyEntity,
+  queryAnyEntity,
+  getAnyEntity,
+  describeEntity,
+  listSubmissionsForCandidate,
+  listAppointments,
+  listTasks,
+  searchLeads,
+  searchOpportunities,
+  findUsers,
+  SUPPORTED_ENTITIES,
 } from "./bullhorn-client.js";
 import { logger } from "./logger.js";
 
@@ -325,6 +336,251 @@ export function createMcpServer(): McpServer {
         { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start },
         () =>
           getNotes({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Generic read-any-entity tools (flexible fallbacks for full read coverage)
+  // -------------------------------------------------------------------------
+
+  const entitiesList = SUPPORTED_ENTITIES.join(", ");
+  const entityTypeDescribe = `Bullhorn entity type. Supported: ${entitiesList}. Common aliases like 'company', 'job', 'user', 'recruiter' are also accepted.`;
+
+  server.tool(
+    "search_entity",
+    `Full-text search (Lucene) over ANY indexed Bullhorn entity — a flexible fallback for read coverage when no dedicated tool fits. Prefer the dedicated tools (search_candidates, search_jobs, search_companies, search_contacts) when they apply. Searchable entities: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. For query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) use query_entity instead. Use describe_entity to discover valid field names.`,
+    {
+      entityType: z.string().describe(entityTypeDescribe),
+      query: z
+        .string()
+        .describe("Lucene query string, e.g. 'status:Active AND city:\"Chicago\"'"),
+      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
+    },
+    async ({ entityType, query, count, start, fields }) => {
+      const result = await withLogging(
+        "search_entity",
+        { entityType, query, count, start },
+        () => searchAnyEntity({ entityType, query, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "query_entity",
+    `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity. Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. The Note entity is search-only — use search_entity for it. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names. 'orderBy' is optional (e.g. '-dateAdded' for newest first).`,
+    {
+      entityType: z.string().describe(entityTypeDescribe),
+      where: z
+        .string()
+        .describe(
+          "SQL-like where clause, e.g. \"candidate.id=123\" or \"status='Open' AND dateAdded >= 1746057600000\"",
+        ),
+      orderBy: z
+        .string()
+        .optional()
+        .describe("Optional sort field, e.g. '-dateAdded' (descending) or 'lastName'"),
+      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
+    },
+    async ({ entityType, where, orderBy, count, start, fields }) => {
+      const result = await withLogging(
+        "query_entity",
+        { entityType, where, orderBy, count, start },
+        () => queryAnyEntity({ entityType, where, orderBy, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "get_entity",
+    "Fetch a single record of ANY supported Bullhorn entity by its ID. Use the dedicated get_candidate/get_job/get_company/get_contact tools when they apply.",
+    {
+      entityType: z.string().describe(entityTypeDescribe),
+      id: z.number().int().positive().describe("Bullhorn record ID"),
+      fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
+    },
+    async ({ entityType, id, fields }) => {
+      const result = await withLogging("get_entity", { entityType, id }, () =>
+        getAnyEntity({ entityType, id, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "describe_entity",
+    "List the available fields (name + type) for a Bullhorn entity. Use this to discover valid field names before building a query_entity 'where' clause or requesting specific fields.",
+    {
+      entityType: z.string().describe(entityTypeDescribe),
+    },
+    async ({ entityType }) => {
+      const result = await withLogging("describe_entity", { entityType }, () =>
+        describeEntity({ entityType }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Curated high-value read tools
+  // -------------------------------------------------------------------------
+
+  server.tool(
+    "list_submissions_for_candidate",
+    "List the job submissions (applications) for a specific candidate — i.e. which jobs a candidate has been submitted to — optionally within a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
+      dateAddedStart: z
+        .string()
+        .optional()
+        .describe(
+          "Only include submissions added on/after this date (inclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      dateAddedEnd: z
+        .string()
+        .optional()
+        .describe(
+          "Only include submissions added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return"),
+    },
+    async ({ candidateId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
+      const result = await withLogging(
+        "list_submissions_for_candidate",
+        { candidateId, dateAddedStart, dateAddedEnd, count, start },
+        () =>
+          listSubmissionsForCandidate({
+            candidateId,
+            dateAddedStart,
+            dateAddedEnd,
+            count,
+            start,
+            fields,
+          }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "list_appointments",
+    "List appointments/meetings, optionally for a specific owner (recruiter) and/or within a scheduled-time window (filters on the appointment's dateBegin). Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 500) or page with `start` for more.",
+    {
+      ownerId: z.number().int().positive().optional().describe("Filter to appointments owned by this Bullhorn user ID"),
+      startAfter: z
+        .string()
+        .optional()
+        .describe(
+          "Only include appointments starting on/after this date (inclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      startBefore: z
+        .string()
+        .optional()
+        .describe(
+          "Only include appointments starting before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return"),
+    },
+    async ({ ownerId, startAfter, startBefore, count, start, fields }) => {
+      const result = await withLogging(
+        "list_appointments",
+        { ownerId, startAfter, startBefore, count, start },
+        () => listAppointments({ ownerId, startAfter, startBefore, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "list_tasks",
+    "List tasks, optionally for a specific owner (recruiter), filtered by a scheduled-date window (filters on the task's dateBegin) and/or completion status. Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 500) or page with `start` for more.",
+    {
+      ownerId: z.number().int().positive().optional().describe("Filter to tasks owned by this Bullhorn user ID"),
+      dueStart: z
+        .string()
+        .optional()
+        .describe(
+          "Only include tasks scheduled (dateBegin) on/after this date (inclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      dueEnd: z
+        .string()
+        .optional()
+        .describe(
+          "Only include tasks scheduled (dateBegin) before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      isCompleted: z.boolean().optional().describe("Filter by completion status (true = completed, false = open)"),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return"),
+    },
+    async ({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }) => {
+      const result = await withLogging(
+        "list_tasks",
+        { ownerId, dueStart, dueEnd, isCompleted, count, start },
+        () => listTasks({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "search_leads",
+    "Search Bullhorn CRM leads (sales prospects) with a Lucene query. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    {
+      query: z.string().describe("Lucene query string, e.g. 'status:Active AND companyName:\"Acme*\"'"),
+      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return"),
+    },
+    async ({ query, count, start, fields }) => {
+      const result = await withLogging("search_leads", { query, count, start }, () =>
+        searchLeads({ query, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "search_opportunities",
+    "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    {
+      query: z.string().describe("Lucene query string, e.g. 'status:Open AND title:\"Managed Services\"'"),
+      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return"),
+    },
+    async ({ query, count, start, fields }) => {
+      const result = await withLogging("search_opportunities", { query, count, start }, () =>
+        searchOpportunities({ query, count, start, fields }),
+      );
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    },
+  );
+
+  server.tool(
+    "find_users",
+    "Find internal Bullhorn users (recruiters / CorporateUser) by name and/or email — useful for resolving a recruiter to their user ID for ownerId filters on other tools. Omit all filters to list users.",
+    {
+      name: z.string().optional().describe("Partial first/last/full name to match"),
+      email: z.string().optional().describe("Partial email to match"),
+      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
+      fields: z.string().optional().describe("Comma-separated fields to return"),
+    },
+    async ({ name, email, count, start, fields }) => {
+      const result = await withLogging("find_users", { name, email, count, start }, () =>
+        findUsers({ name, email, count, start, fields }),
       );
       return { content: [{ type: "text", text: formatResult(result) }] };
     },
