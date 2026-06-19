@@ -1,39 +1,52 @@
 ---
 name: Bullhorn résumés & Files API
-description: Where candidate résumés actually live (parsed text on the record, not files), how the read-only Files API endpoints/shapes behave, and the REST rate limit that masquerades as flakiness.
+description: Where candidate résumés live (parsed text on the record AND real file attachments), the LIVE-CONFIRMED Files API envelope shapes/quirks, and the REST rate limit that masquerades as flakiness.
 ---
 
 # Where candidate résumés live (corp 28404 / swimlane 45)
 
-In this corp, **candidate résumés are stored as parsed HTML in `candidate.description`**,
-NOT as file attachments. Live evidence: 20/20 recent candidates had full résumé HTML in
-`description` (≈4k–100k chars); candidate FILE attachments are effectively **absent** —
-probed the most-recent candidates, 58 *placed* candidates, and scattered older IDs and
-found **zero** files.
-
-**Why this matters:** "read me candidate X's résumé" should read + HTML-strip
-`candidate.description` as the PRIMARY path. Bulk-imported candidates (high IDs, ~985k
-total) get description text set directly with no underlying file, so the Files API is a
-real but rarely-populated secondary path here.
+Two real sources, both populated:
+1. **Parsed text on the record:** `candidate.description` holds the parsed résumé
+   (HTML for older hand-entered records, plain-ish text for bulk imports), ≈4k–100k chars.
+2. **File attachments:** candidates DO have résumé files (PDF/.docx). An earlier note
+   claimed files were "absent" — that was WRONG, caused by a listing bug (see below), not
+   by missing data.
 
 **How to apply:** a résumé reader should prefer extracted text from a *textual* résumé
-attachment when one exists, else fall back to stripped `candidate.description`. Do NOT
-download binary (PDF/Word) attachments hoping for text — Bullhorn does no server-side
-text extraction, so only text/html/rtf/csv/etc. yield content; binaries degrade to
-metadata + "open in Bullhorn".
+attachment when one exists, else fall back to stripped `candidate.description`
+(`get_candidate_resume` reports which via `resumeTextSource`). Do NOT try to read binary
+(PDF/Word) attachment bytes as text — Bullhorn does no server-side text extraction, so
+only text/html/rtf/csv yield content; binaries must degrade to metadata + "open in
+Bullhorn / use the record's parsed text".
 
-## Files API (read-only) — accessors & shapes
-- Per-candidate file accessors are the ONLY way in: `GET entityFiles/Candidate/{id}`
-  (attachment metadata list) and `GET file/Candidate/{id}/{fileId}` (one file, base64
-  content). There is no bulk/corp-level file listing.
-- **`FileAttachment` is NOT a queryable entity** — both `/query` and `/search` reject it
-  ("Unknown or unsupported entityType"). The generic entity catalog rightly excludes it;
-  use the entityFiles/file endpoints instead.
-- Documented file envelope (handle DEFENSIVELY — could not be live-confirmed because this
-  corp has no candidate files): list under `FileAttachments`/`fileAttachments`/`data`;
-  single file under `File`/`file` with base64 in `fileContent`/`content`, plus
-  `contentType`/`name`/`type`/`dateAdded`. Tolerate these key variants and degrade to
-  metadata-only when content is binary or absent.
+## Files API (read-only) — LIVE-CONFIRMED shapes & quirks
+- Per-candidate accessors are the ONLY way in: `GET entityFiles/Candidate/{id}` (metadata
+  list) and `GET file/Candidate/{id}/{fileId}` (one file, base64 content). No bulk/corp
+  file listing. `FileAttachment` is NOT a queryable entity (`/query` and `/search` reject
+  it as "Unknown or unsupported entityType").
+- **CRITICAL: the list envelope key is `EntityFiles` (capital E/F)**, e.g.
+  `{"EntityFiles":[{...}]}` — NOT `FileAttachments`/`fileAttachments`/`data`. Checking only
+  those wrong keys returns count 0 for EVERY candidate and masks all files. Always include
+  `EntityFiles` first in the key-pick list.
+- **List entry splits the MIME type:** `contentType:"application"` + `contentSubType:"pdf"`
+  (or `"vnd.openxmlformats-officedocument.wordprocessingml.document"`). Recombine into
+  `application/pdf` before format detection. The single-file endpoint instead returns the
+  FULL `contentType` (e.g. `application/vnd.openxmlformats-...`) under the `File`/`file`
+  key with base64 in `fileContent`/`content`.
+- **Attachment `description` is inconsistent:** sometimes the FULL parsed résumé text
+  (hand-entered older records), sometimes just a label like `"Resume - <filename>.pdf"`
+  (bulk imports). Do not treat it as reliable résumé text — use `candidate.description`.
+
+## Binary detection gotcha (`isTextualContentType`)
+Naively substring-matching `"xml"` in a content type FALSE-POSITIVES on
+`application/vnd.openxmlformats-officedocument...` (the `.docx` MIME), so Office docs get
+mis-read as text and return raw ZIP bytes (`PK\x03\x04…`) as "résumé text".
+**Why:** `.docx/.xlsx/.pptx` are ZIP containers; their MIME/name contains text-looking
+substrings. **How to apply:** exclude binary/office/pdf/zip/image types FIRST (match
+`officedocument|opendocument|msword|ms-excel|ms-powerpoint|pdf|zip|vnd.|image/|...`), only
+then allow text/* and a *word-bounded* xml/html/json/csv. Add a magic-byte safety net on
+the decoded buffer (`PK\x03\x04` zip, `%PDF`, `\xD0\xCF\x11\xE0` OLE, or an embedded NUL)
+so a mislabeled binary still degrades to metadata instead of emitting garbage.
 
 ## REST rate limit bites during probing
 Bullhorn REST is **120 requests / 60s** (`RateLimit-Limit: 120; w=60`). Bursty probing

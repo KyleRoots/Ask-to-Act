@@ -522,25 +522,59 @@ interface AttachmentMeta {
 }
 
 function normalizeAttachment(raw: Record<string, unknown>): AttachmentMeta {
+  const contentType = asString(pickKey(raw, "contentType", "fileContentType"));
+  const contentSubType = asString(pickKey(raw, "contentSubType"));
+  // The list endpoint splits the MIME type across contentType ("application")
+  // and contentSubType ("pdf" / "vnd.openxmlformats-..."). Recombine into a full
+  // "application/pdf" so downstream format detection has the complete type.
+  const fullContentType =
+    contentType && contentSubType && !contentType.includes("/")
+      ? `${contentType}/${contentSubType}`
+      : contentType;
   return {
     id: asNumber(pickKey(raw, "id")),
     name: asString(pickKey(raw, "name", "fileName")),
     type: asString(pickKey(raw, "type")),
-    contentType: asString(pickKey(raw, "contentType", "fileContentType")),
+    contentType: fullContentType,
     fileType: asString(pickKey(raw, "fileType")),
-    contentSubType: asString(pickKey(raw, "contentSubType")),
+    contentSubType,
     description: asString(pickKey(raw, "description")),
     dateAdded: asNumber(pickKey(raw, "dateAdded")),
   };
 }
 
-/** True for formats whose bytes are directly readable as text. */
+/**
+ * True for formats whose bytes are directly readable as text. Binary container
+ * formats (PDF, the ZIP-based Office .docx/.xlsx/.pptx, images, etc.) are
+ * excluded FIRST — their MIME strings/names contain text-looking substrings
+ * (e.g. "xml" inside "openxmlformats"), which must not be mistaken for text.
+ */
 function isTextualContentType(contentType?: string, name?: string): boolean {
   const ct = (contentType ?? "").toLowerCase();
-  if (ct.startsWith("text/")) return true;
-  if (/(html|xml|rtf|json|csv|plain|markdown)/.test(ct)) return true;
   const n = (name ?? "").toLowerCase();
+  if (
+    /(officedocument|opendocument|msword|ms-excel|ms-powerpoint|pdf|zip|x-rar|7z|gzip|octet-stream|vnd\.|image\/|audio\/|video\/)/.test(
+      ct,
+    )
+  ) {
+    return false;
+  }
+  if (/\.(docx?|xlsx?|pptx?|pdf|zip|rar|7z|gz|png|jpe?g|gif|bmp|tiff?|webp)$/.test(n)) {
+    return false;
+  }
+  if (ct.startsWith("text/")) return true;
+  if (/\b(rtf|json|csv|plain|markdown)\b/.test(ct)) return true;
+  if (/(application|text)\/(x-)?(html|xhtml|xml)\b/.test(ct)) return true;
   return /\.(txt|text|html?|rtf|csv|md|markdown|xml|json|log)$/.test(n);
+}
+
+/** Magic-byte sniff: true when the decoded bytes are clearly a binary file. */
+function looksBinaryBuffer(buf: Buffer): boolean {
+  const sig = buf.subarray(0, 4).toString("latin1");
+  if (sig.startsWith("PK\u0003\u0004")) return true; // zip / docx / xlsx / pptx
+  if (sig.startsWith("%PDF")) return true; // pdf
+  if (sig.startsWith("\u00D0\u00CF\u0011\u00E0")) return true; // legacy OLE (doc/xls/ppt)
+  return buf.subarray(0, 1000).includes(0); // embedded NUL byte → binary
 }
 
 /** Crude but dependency-free HTML-to-text: drop tags/entities, collapse space. */
@@ -589,7 +623,13 @@ export async function listCandidateAttachments(args: { candidateId: number }) {
     `entityFiles/Candidate/${args.candidateId}`,
     {},
   )) as Record<string, unknown>;
-  const picked = pickKey(raw, "FileAttachments", "fileAttachments", "data");
+  const picked = pickKey(
+    raw,
+    "EntityFiles",
+    "FileAttachments",
+    "fileAttachments",
+    "data",
+  );
   // Be tolerant of the exact envelope shape: accept a bare array, or an object
   // that nests the array under `.data`. Anything else degrades to "no files"
   // rather than throwing.
@@ -640,7 +680,7 @@ export async function readCandidateAttachment(args: {
   }
 
   const buf = Buffer.from(base64, "base64");
-  if (!isTextualContentType(meta.contentType, meta.name)) {
+  if (!isTextualContentType(meta.contentType, meta.name) || looksBinaryBuffer(buf)) {
     return {
       ...meta,
       sizeBytes: buf.length,
