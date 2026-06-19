@@ -65,3 +65,22 @@ decodes to the exact whitelisted redirect_uri, callback reachable, consent scree
 reached). Escalate to Bullhorn Support: ask them to confirm the API key is
 associated with the SAME corporation as the login users, and whether the corp
 named on the consent screen matches the user's corp.
+
+## Refinement: Agree still bounces even when the consent screen names a corp that LOOKS right
+A re-issued key under a corp matching the user's company name is NOT sufficient.
+Confirmed in a clean incognito session: a new dedicated key whose consent screen
+read "Myticas BH1-28404" (a Myticas corp, not the old QTS corp), logged in as the
+dedicated `myticasbh1.api` user, reached "Get Consent", clicked **Agree** → still
+bounced to login, no code, status stayed `{connected:false}`. So matching the
+*company name* is not enough — the grant fails unless the login user is a member of
+the EXACT corporation/instance the key is bound to (the number after the name, e.g.
+the `28404` corp id) AND has rights to grant OAuth consent.
+**Two remaining root causes once the corp name looks right:** (a) the login user
+belongs to a DIFFERENT Myticas corp/instance than the one the key is bound to
+(consent screen shows the KEY's corp, not the user's, so it can still be a hidden
+mismatch); or (b) the user is in the right corp but lacks the entitlement to grant
+OAuth consent / use REST for that key. Both are Bullhorn-side only.
+**How to apply:** give Bullhorn the exact corp id shown on the consent screen (e.g.
+`28404`) and ask them to (1) confirm the login user is a member of THAT corp id,
+and (2) confirm that user has permission to grant OAuth consent / REST access for
+the key. A live phone call resolves this far faster than ticket round-trips.
