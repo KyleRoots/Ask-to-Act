@@ -84,3 +84,22 @@ OAuth consent / use REST for that key. Both are Bullhorn-side only.
 `28404`) and ask them to (1) confirm the login user is a member of THAT corp id,
 and (2) confirm that user has permission to grant OAuth consent / REST access for
 the key. A live phone call resolves this far faster than ticket round-trips.
+
+## Final elimination: it's a KEY-level defect when user-side is fully correct and Agree STILL bounces
+Both refinement root causes (corp membership AND usertype/entitlement) were
+subsequently ruled out and the bounce persisted. Verified user-side state that is
+fully correct yet still fails: login user on the REST-enabled API usertype the
+instance's OTHER working integrations all use (here `<Instance> Webservice API
+User`, non-billable), Identity Provider = Bullhorn (password auth, not SSO),
+account Enabled + Unlocked, Private Label + Primary Department = the key's corp, a
+freshly-set valid password (login succeeds → consent screen reached), clean
+incognito. Agree still returned to login with no code and status stayed
+`{connected:false}`. **Conclusion:** when EVERY user-side variable is correct and
+Agree still issues no code, the fault is a provisioning/config defect on the API
+key itself (e.g. authorization_code grant not fully enabled, or the consent POST
+not persisting a userConsent record server-side). Only Bullhorn can fix it.
+**How to apply:** stop iterating on user/account settings once they're confirmed
+correct. Escalate to Bullhorn with the full ruled-out list and ask them to inspect
+the KEY's backend config (is authorization_code enabled for this client_id? is the
+"Agree" consent POST failing/!persisting on their side?). Push for a live call /
+senior tech — ticket round-trips have repeatedly mis-diagnosed this as corp/user.
