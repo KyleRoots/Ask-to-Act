@@ -234,16 +234,31 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "list_submissions_for_job",
-    "List all candidate submissions (applications) for a specific job order.",
+    "List candidate submissions (applications) for a specific job order, optionally restricted to a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
     {
       jobId: z.number().int().positive().describe("Bullhorn job order ID"),
-      count: z.number().int().min(1).max(200).optional().describe("Number of results (default: 50)"),
+      dateAddedStart: z
+        .string()
+        .optional()
+        .describe(
+          "Only include submissions added on/after this date (inclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-05-01'.",
+        ),
+      dateAddedEnd: z
+        .string()
+        .optional()
+        .describe(
+          "Only include submissions added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-06-01' covers all of May.",
+        ),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ jobId, count, start, fields }) => {
-      const result = await withLogging("list_submissions_for_job", { jobId, count, start }, () =>
-        listSubmissionsForJob({ jobId, count, start, fields }),
+    async ({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
+      const result = await withLogging(
+        "list_submissions_for_job",
+        { jobId, dateAddedStart, dateAddedEnd, count, start },
+        () =>
+          listSubmissionsForJob({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
       );
       return { content: [{ type: "text", text: formatResult(result) }] };
     },
@@ -251,17 +266,32 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "list_placements",
-    "List placements, optionally filtered by candidate ID or job order ID. At least one filter is recommended.",
+    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd with a high `count` to retrieve them all in one call instead of paging. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
     {
       candidateId: z.number().int().positive().optional().describe("Filter by candidate Bullhorn ID"),
       jobId: z.number().int().positive().optional().describe("Filter by job order Bullhorn ID"),
-      count: z.number().int().min(1).max(200).optional().describe("Number of results (default: 50)"),
+      dateAddedStart: z
+        .string()
+        .optional()
+        .describe(
+          "Only include placements added on/after this date (inclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-05-01'.",
+        ),
+      dateAddedEnd: z
+        .string()
+        .optional()
+        .describe(
+          "Only include placements added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-06-01' covers all of May.",
+        ),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ candidateId, jobId, count, start, fields }) => {
-      const result = await withLogging("list_placements", { candidateId, jobId, count, start }, () =>
-        listPlacements({ candidateId, jobId, count, start, fields }),
+    async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
+      const result = await withLogging(
+        "list_placements",
+        { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start },
+        () =>
+          listPlacements({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
       );
       return { content: [{ type: "text", text: formatResult(result) }] };
     },
@@ -269,17 +299,32 @@ export function createMcpServer(): McpServer {
 
   server.tool(
     "get_notes",
-    "Retrieve notes and activity log entries for a candidate or job order. Provide at least one of candidateId or jobId.",
+    "Retrieve notes and activity log entries for a candidate or job order, optionally within a dateAdded range. Provide at least one of candidateId or jobId. Results are in `data`; `total` is the full match count. Raise `count` (max 500) or page with `start` for more.",
     {
       candidateId: z.number().int().positive().optional().describe("Bullhorn candidate ID"),
       jobId: z.number().int().positive().optional().describe("Bullhorn job order ID"),
-      count: z.number().int().min(1).max(200).optional().describe("Number of results (default: 50)"),
+      dateAddedStart: z
+        .string()
+        .optional()
+        .describe(
+          "Only include notes added on/after this date (inclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      dateAddedEnd: z
+        .string()
+        .optional()
+        .describe(
+          "Only include notes added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
+        ),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ candidateId, jobId, count, start, fields }) => {
-      const result = await withLogging("get_notes", { candidateId, jobId, count, start }, () =>
-        getNotes({ candidateId, jobId, count, start, fields }),
+    async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
+      const result = await withLogging(
+        "get_notes",
+        { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start },
+        () =>
+          getNotes({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
       );
       return { content: [{ type: "text", text: formatResult(result) }] };
     },

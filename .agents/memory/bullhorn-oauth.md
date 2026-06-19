@@ -72,6 +72,14 @@ the `meta/{Entity}` endpoint). Confirmed corrections vs. generic assumptions:
   `educations`), NOT `workHistory`.
 - **Note is an INDEXED entity** → must be read via `/search` (Lucene `field:value`,
   e.g. `jobOrder.id:123`), NOT `/query`; its text field is `comments`, not `body`.
+- **`/query` responses return `{start, count, data}` with NO `total` field**;
+  `/search` responses DO include `total`. So for query-based entities (Placement,
+  JobSubmission) you can't read a grand total from the response — rely on `count`
+  (rows returned) and request a high enough `count`/page with `start`.
+- **Date filtering**: `dateAdded` is epoch **milliseconds**. In `/query` `where`
+  use numeric comparisons (`dateAdded >= <ms> AND dateAdded < <ms>`); in `/search`
+  Lucene use a range (`dateAdded:[<ms> TO <ms>]`, inclusive both ends). Bullhorn
+  `count` maxes at 500.
 
 ## History (kept for context; superseded by the headless solution above)
 The browser "Agree" bounced back to login with no code, reproducibly, across users,

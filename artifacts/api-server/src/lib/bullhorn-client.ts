@@ -102,6 +102,88 @@ async function getEntity(
   return bullhornFetch(`entity/${entity}/${id}`, { fields });
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_TIME_RE =
+  /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
+
+/**
+ * Parses a date filter to epoch milliseconds with an explicit UTC contract.
+ * Accepts "YYYY-MM-DD" (treated as UTC midnight) or an ISO 8601 date-time; a
+ * date-time without a timezone designator is interpreted as UTC. Loose,
+ * non-ISO strings are rejected so the documented contract holds regardless of
+ * the server's local timezone.
+ */
+function toEpochMillis(value: string, label: string): number {
+  const v = value.trim();
+  let normalized: string;
+  if (DATE_ONLY_RE.test(v)) {
+    normalized = `${v}T00:00:00.000Z`;
+  } else if (DATE_TIME_RE.test(v)) {
+    const withT = v.replace(" ", "T");
+    const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(withT);
+    normalized = hasZone ? withT : `${withT}Z`;
+  } else {
+    throw new Error(
+      `Invalid ${label} "${value}". Use "YYYY-MM-DD" or an ISO 8601 timestamp such as "2026-05-01T14:30:00Z".`,
+    );
+  }
+  const ms = Date.parse(normalized);
+  if (Number.isNaN(ms)) {
+    throw new Error(
+      `Invalid ${label} "${value}". Use "YYYY-MM-DD" or an ISO 8601 timestamp such as "2026-05-01T14:30:00Z".`,
+    );
+  }
+  return ms;
+}
+
+/** Parses an optional start/end date range, enforcing start < end when both are given. */
+function parseDateRange(
+  start?: string,
+  end?: string,
+): { startMs?: number; endMs?: number } {
+  const startMs = start !== undefined ? toEpochMillis(start, "dateAddedStart") : undefined;
+  const endMs = end !== undefined ? toEpochMillis(end, "dateAddedEnd") : undefined;
+  if (startMs !== undefined && endMs !== undefined && endMs <= startMs) {
+    throw new Error(
+      `dateAddedEnd ("${end}") must be after dateAddedStart ("${start}").`,
+    );
+  }
+  return { startMs, endMs };
+}
+
+/**
+ * Builds numeric dateAdded conditions for a /query `where` clause. Bullhorn
+ * stores dates as epoch milliseconds, so date filtering is done with numeric
+ * comparisons. Start is inclusive (>=), end is exclusive (<).
+ */
+function queryDateConditions(
+  field: string,
+  start?: string,
+  end?: string,
+): string[] {
+  const { startMs, endMs } = parseDateRange(start, end);
+  const c: string[] = [];
+  if (startMs !== undefined) c.push(`${field} >= ${startMs}`);
+  if (endMs !== undefined) c.push(`${field} < ${endMs}`);
+  return c;
+}
+
+/**
+ * Builds a Lucene date-range clause for a /search query. Lucene ranges are
+ * inclusive on both ends, so the exclusive end is emulated by subtracting 1ms.
+ */
+function searchDateClause(
+  field: string,
+  start?: string,
+  end?: string,
+): string | null {
+  if (start === undefined && end === undefined) return null;
+  const { startMs, endMs } = parseDateRange(start, end);
+  const lo = startMs !== undefined ? String(startMs) : "*";
+  const hi = endMs !== undefined ? String(endMs - 1) : "*";
+  return `${field}:[${lo} TO ${hi}]`;
+}
+
 export async function searchCandidates(args: {
   query: string;
   fields?: string;
@@ -192,16 +274,22 @@ export async function getContact(args: { id: number; fields?: string }) {
 
 export async function listSubmissionsForJob(args: {
   jobId: number;
+  dateAddedStart?: string;
+  dateAddedEnd?: string;
   fields?: string;
   count?: number;
   start?: number;
 }) {
+  const conditions = [`jobOrder.id=${args.jobId}`];
+  conditions.push(
+    ...queryDateConditions("dateAdded", args.dateAddedStart, args.dateAddedEnd),
+  );
   const fields =
     args.fields ??
     "id,candidate,jobOrder,status,dateAdded,sendingUser,salary,payRate";
   return queryEntity(
     "JobSubmission",
-    `jobOrder.id=${args.jobId}`,
+    conditions.join(" AND "),
     fields,
     args.count ?? 50,
     args.start ?? 0,
@@ -211,6 +299,8 @@ export async function listSubmissionsForJob(args: {
 export async function listPlacements(args: {
   candidateId?: number;
   jobId?: number;
+  dateAddedStart?: string;
+  dateAddedEnd?: string;
   fields?: string;
   count?: number;
   start?: number;
@@ -218,6 +308,9 @@ export async function listPlacements(args: {
   const conditions: string[] = [];
   if (args.candidateId) conditions.push(`candidate.id=${args.candidateId}`);
   if (args.jobId) conditions.push(`jobOrder.id=${args.jobId}`);
+  conditions.push(
+    ...queryDateConditions("dateAdded", args.dateAddedStart, args.dateAddedEnd),
+  );
   if (conditions.length === 0) {
     conditions.push("id IS NOT NULL");
   }
@@ -231,6 +324,8 @@ export async function listPlacements(args: {
 export async function getNotes(args: {
   candidateId?: number;
   jobId?: number;
+  dateAddedStart?: string;
+  dateAddedEnd?: string;
   fields?: string;
   count?: number;
   start?: number;
@@ -238,6 +333,12 @@ export async function getNotes(args: {
   const conditions: string[] = [];
   if (args.candidateId) conditions.push(`candidates.id:${args.candidateId}`);
   if (args.jobId) conditions.push(`jobOrder.id:${args.jobId}`);
+  const dateClause = searchDateClause(
+    "dateAdded",
+    args.dateAddedStart,
+    args.dateAddedEnd,
+  );
+  if (dateClause) conditions.push(dateClause);
   const query =
     conditions.length > 0 ? conditions.join(" AND ") : "id:[1 TO *]";
   const fields =
