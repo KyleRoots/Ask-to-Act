@@ -25,6 +25,7 @@ import {
   SUPPORTED_ENTITIES,
 } from "./bullhorn-client.js";
 import { logger } from "./logger.js";
+import { responseCache, stableKey } from "./cache.js";
 
 function formatResult(data: unknown): string {
   return JSON.stringify(data, null, 2);
@@ -57,6 +58,30 @@ function withLogging<T>(
       throw err;
     },
   );
+}
+
+/**
+ * Runs a read tool with a short-TTL response cache layered over logging. The
+ * cache key is the tool name plus a deterministic encoding of ALL arguments
+ * (including `fields`), so two calls only share a cached result when they would
+ * return identical data. Only successful results are cached; errors propagate
+ * uncached so transient failures are not sticky.
+ */
+async function runTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  fn: () => Promise<unknown>,
+): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+  const key = `${toolName}:${stableKey(args)}`;
+  const cached = responseCache.get(key);
+  if (cached !== undefined) {
+    logger.info({ tool: toolName, cache: "hit" }, "MCP tool cache hit");
+    return { content: [{ type: "text", text: cached }] };
+  }
+  const result = await withLogging(toolName, args, fn);
+  const text = formatResult(result);
+  responseCache.set(key, text);
+  return { content: [{ type: "text", text }] };
 }
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
@@ -114,12 +139,10 @@ export function createMcpServer(): McpServer {
         .optional()
         .describe("Comma-separated list of fields to return (uses sensible defaults if omitted)"),
     },
-    async ({ query, count, start, fields }) => {
-      const result = await withLogging("search_candidates", { query, count, start }, () =>
+    async ({ query, count, start, fields }) =>
+      runTool("search_candidates", { query, count, start, fields }, () =>
         searchCandidates({ query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -135,12 +158,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ query, count, start, fields }) => {
-      const result = await withLogging("search_jobs", { query, count, start }, () =>
+    async ({ query, count, start, fields }) =>
+      runTool("search_jobs", { query, count, start, fields }, () =>
         searchJobs({ query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -154,12 +175,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ query, count, start, fields }) => {
-      const result = await withLogging("search_companies", { query, count, start }, () =>
+    async ({ query, count, start, fields }) =>
+      runTool("search_companies", { query, count, start, fields }, () =>
         searchCompanies({ query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -175,12 +194,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ query, count, start, fields }) => {
-      const result = await withLogging("search_contacts", { query, count, start }, () =>
+    async ({ query, count, start, fields }) =>
+      runTool("search_contacts", { query, count, start, fields }, () =>
         searchContacts({ query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -190,12 +207,10 @@ export function createMcpServer(): McpServer {
       id: z.number().int().positive().describe("Bullhorn candidate ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ id, fields }) => {
-      const result = await withLogging("get_candidate", { id }, () =>
+    async ({ id, fields }) =>
+      runTool("get_candidate", { id, fields }, () =>
         getCandidate({ id, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -205,12 +220,10 @@ export function createMcpServer(): McpServer {
       id: z.number().int().positive().describe("Bullhorn job order ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ id, fields }) => {
-      const result = await withLogging("get_job", { id }, () =>
+    async ({ id, fields }) =>
+      runTool("get_job", { id, fields }, () =>
         getJob({ id, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -220,12 +233,10 @@ export function createMcpServer(): McpServer {
       id: z.number().int().positive().describe("Bullhorn client corporation ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ id, fields }) => {
-      const result = await withLogging("get_company", { id }, () =>
+    async ({ id, fields }) =>
+      runTool("get_company", { id, fields }, () =>
         getCompany({ id, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -235,12 +246,10 @@ export function createMcpServer(): McpServer {
       id: z.number().int().positive().describe("Bullhorn client contact ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ id, fields }) => {
-      const result = await withLogging("get_contact", { id }, () =>
+    async ({ id, fields }) =>
+      runTool("get_contact", { id, fields }, () =>
         getContact({ id, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -264,15 +273,13 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
+      runTool(
         "list_submissions_for_job",
-        { jobId, dateAddedStart, dateAddedEnd, count, start },
+        { jobId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
           listSubmissionsForJob({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -297,15 +304,13 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
+      runTool(
         "list_placements",
-        { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start },
+        { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
           listPlacements({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -330,15 +335,13 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
+      runTool(
         "get_notes",
-        { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start },
+        { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
           getNotes({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   // -------------------------------------------------------------------------
@@ -360,14 +363,12 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
-    async ({ entityType, query, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ entityType, query, count, start, fields }) =>
+      runTool(
         "search_entity",
-        { entityType, query, count, start },
+        { entityType, query, count, start, fields },
         () => searchAnyEntity({ entityType, query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -388,14 +389,12 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
-    async ({ entityType, where, orderBy, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ entityType, where, orderBy, count, start, fields }) =>
+      runTool(
         "query_entity",
-        { entityType, where, orderBy, count, start },
+        { entityType, where, orderBy, count, start, fields },
         () => queryAnyEntity({ entityType, where, orderBy, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -406,12 +405,10 @@ export function createMcpServer(): McpServer {
       id: z.number().int().positive().describe("Bullhorn record ID"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
-    async ({ entityType, id, fields }) => {
-      const result = await withLogging("get_entity", { entityType, id }, () =>
+    async ({ entityType, id, fields }) =>
+      runTool("get_entity", { entityType, id, fields }, () =>
         getAnyEntity({ entityType, id, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -420,12 +417,10 @@ export function createMcpServer(): McpServer {
     {
       entityType: z.string().describe(entityTypeDescribe),
     },
-    async ({ entityType }) => {
-      const result = await withLogging("describe_entity", { entityType }, () =>
+    async ({ entityType }) =>
+      runTool("describe_entity", { entityType }, () =>
         describeEntity({ entityType }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   // -------------------------------------------------------------------------
@@ -453,10 +448,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ candidateId, dateAddedStart, dateAddedEnd, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ candidateId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
+      runTool(
         "list_submissions_for_candidate",
-        { candidateId, dateAddedStart, dateAddedEnd, count, start },
+        { candidateId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
           listSubmissionsForCandidate({
             candidateId,
@@ -466,9 +461,7 @@ export function createMcpServer(): McpServer {
             start,
             fields,
           }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -492,14 +485,12 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ ownerId, startAfter, startBefore, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ ownerId, startAfter, startBefore, count, start, fields }) =>
+      runTool(
         "list_appointments",
-        { ownerId, startAfter, startBefore, count, start },
+        { ownerId, startAfter, startBefore, count, start, fields },
         () => listAppointments({ ownerId, startAfter, startBefore, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -524,14 +515,12 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }) => {
-      const result = await withLogging(
+    async ({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }) =>
+      runTool(
         "list_tasks",
-        { ownerId, dueStart, dueEnd, isCompleted, count, start },
+        { ownerId, dueStart, dueEnd, isCompleted, count, start, fields },
         () => listTasks({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -543,12 +532,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ query, count, start, fields }) => {
-      const result = await withLogging("search_leads", { query, count, start }, () =>
+    async ({ query, count, start, fields }) =>
+      runTool("search_leads", { query, count, start, fields }, () =>
         searchLeads({ query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -560,12 +547,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ query, count, start, fields }) => {
-      const result = await withLogging("search_opportunities", { query, count, start }, () =>
+    async ({ query, count, start, fields }) =>
+      runTool("search_opportunities", { query, count, start, fields }, () =>
         searchOpportunities({ query, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   server.tool(
@@ -578,12 +563,10 @@ export function createMcpServer(): McpServer {
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
-    async ({ name, email, count, start, fields }) => {
-      const result = await withLogging("find_users", { name, email, count, start }, () =>
+    async ({ name, email, count, start, fields }) =>
+      runTool("find_users", { name, email, count, start, fields }, () =>
         findUsers({ name, email, count, start, fields }),
-      );
-      return { content: [{ type: "text", text: formatResult(result) }] };
-    },
+      ),
   );
 
   return server;
