@@ -59,6 +59,12 @@ let session: Session | null = null;
 let authInProgress: Promise<Session> | null = null;
 let endpoints: Endpoints | null = null;
 
+// Headless direct-login circuit breaker. After a failed direct login we refuse
+// further attempts for a cooldown window: a wrong password retried rapidly can
+// trip Bullhorn's failedLoginLockoutThreshold and lock the API user.
+const DIRECT_LOGIN_COOLDOWN_MS = 60_000;
+let directLoginBlockedUntil = 0;
+
 function getEnv(key: string): string {
   const val = process.env[key];
   if (!val) {
@@ -128,6 +134,58 @@ export async function getAuthorizeUrl(state: string): Promise<string> {
   url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
   url.searchParams.set("state", state);
   return url.toString();
+}
+
+/**
+ * Headless authorization-code retrieval. Sends username/password/action=Login to
+ * the OAuth /authorize endpoint and reads the code out of the 302 Location
+ * header WITHOUT following the redirect (so Bullhorn never calls our callback).
+ * This is the server-to-server flow for a Bullhorn "Webservice API User" — no
+ * browser and no interactive consent screen. A missing code means bad
+ * credentials (Bullhorn returns the HTML login page) or an un-whitelisted
+ * redirect_uri.
+ */
+async function fetchAuthCodeHeadless(oauthUrl: string): Promise<string> {
+  const url = new URL(`${oauthUrl}/authorize`);
+  url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
+  url.searchParams.set("username", getEnv("BULLHORN_USERNAME"));
+  url.searchParams.set("password", getEnv("BULLHORN_PASSWORD"));
+  url.searchParams.set("action", "Login");
+
+  const res = await fetch(url.toString(), { redirect: "manual" });
+  const location = res.headers.get("location") ?? "";
+
+  if (location) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(location);
+    } catch {
+      parsed = null;
+    }
+    if (parsed) {
+      const code = parsed.searchParams.get("code");
+      if (code) {
+        return code;
+      }
+      const errCode = parsed.searchParams.get("error");
+      if (errCode) {
+        const desc = parsed.searchParams.get("error_description") ?? "";
+        throw new Error(
+          `Bullhorn headless authorize returned an error: ${errCode} ${desc}`.trim(),
+        );
+      }
+    }
+  }
+
+  const bodyPreview = (await res.text().catch(() => "")).slice(0, 200);
+  throw new Error(
+    `Bullhorn headless authorize did not return an authorization code ` +
+      `(status=${res.status}). This usually means BULLHORN_USERNAME/BULLHORN_PASSWORD ` +
+      `are incorrect, or the redirect_uri is not whitelisted for this client_id. ` +
+      `Response start: ${bodyPreview}`,
+  );
 }
 
 async function exchangeCodeForToken(
@@ -282,6 +340,66 @@ async function sessionFromRefreshToken(refreshToken: string): Promise<Session> {
   return s;
 }
 
+/**
+ * Headless ("direct") login: gets an authorization code by sending credentials
+ * straight to /authorize, then runs the standard token + REST-login exchange and
+ * persists the rotating refresh token. No browser, no consent screen. Guarded by
+ * a cooldown so a wrong password cannot be retried fast enough to lock the API
+ * user.
+ */
+async function directLogin(): Promise<Session> {
+  const now = Date.now();
+  if (now < directLoginBlockedUntil) {
+    const secs = Math.ceil((directLoginBlockedUntil - now) / 1000);
+    throw new Error(
+      `Bullhorn headless login is cooling down for ${secs}s after a recent ` +
+        `failure (account-lockout protection). Verify BULLHORN_USERNAME and ` +
+        `BULLHORN_PASSWORD before retrying.`,
+    );
+  }
+  try {
+    const { oauthUrl, loginUrl } = await discoverEndpoints();
+    const code = await fetchAuthCodeHeadless(oauthUrl);
+    const tokens = await exchangeCodeForToken(oauthUrl, code);
+    const loginData = await login(tokens.access_token, loginUrl);
+    const sessionExpiresAt = await resolveSessionExpiry(loginData);
+    const s = buildSession(tokens, loginData, sessionExpiresAt);
+    await saveRefreshToken(tokens.refresh_token);
+    logger.info({ restUrl: s.restUrl }, "Bullhorn: headless direct login complete");
+    return s;
+  } catch (err) {
+    directLoginBlockedUntil = Date.now() + DIRECT_LOGIN_COOLDOWN_MS;
+    logger.error(
+      { err },
+      "Bullhorn: headless direct login failed; cooling down to protect against account lockout",
+    );
+    throw err;
+  }
+}
+
+/**
+ * Establishes a session via headless direct login and caches it. Used by the
+ * /api/auth/bullhorn/connect endpoint to bootstrap the connection with no
+ * browser interaction. Single-flighted so concurrent callers share one attempt.
+ */
+export async function connectHeadless(): Promise<{ restUrl: string }> {
+  if (authInProgress) {
+    const existing = await authInProgress;
+    return { restUrl: existing.restUrl };
+  }
+  authInProgress = directLogin()
+    .then((s) => {
+      session = s;
+      logger.info({ restUrl: s.restUrl }, "Bullhorn: session established (headless)");
+      return s;
+    })
+    .finally(() => {
+      authInProgress = null;
+    });
+  const s = await authInProgress;
+  return { restUrl: s.restUrl };
+}
+
 async function reauthenticate(): Promise<Session> {
   // The DB row is the source of truth: every refresh rotates and re-persists
   // the token, so the stored value is at least as fresh as anything held in
@@ -289,11 +407,19 @@ async function reauthenticate(): Promise<Session> {
   // none (e.g. immediately after authorization before the first reload).
   const stored = await loadRefreshToken();
   const refreshToken = stored ?? session?.refreshToken ?? null;
-  if (!refreshToken) {
-    throw new BullhornNotAuthorizedError();
+  if (refreshToken) {
+    try {
+      logger.info("Bullhorn: establishing session from refresh token");
+      return await sessionFromRefreshToken(refreshToken);
+    } catch (err) {
+      logger.warn(
+        { err },
+        "Bullhorn: refresh token failed; falling back to headless direct login",
+      );
+    }
   }
-  logger.info("Bullhorn: establishing session from refresh token");
-  return sessionFromRefreshToken(refreshToken);
+  logger.info("Bullhorn: no usable refresh token; performing headless direct login");
+  return directLogin();
 }
 
 export async function getSession(): Promise<Session> {

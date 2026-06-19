@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   getAuthorizeUrl,
   completeAuthorization,
+  connectHeadless,
   isConnected,
 } from "../lib/bullhorn-auth.js";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
@@ -127,5 +128,25 @@ router.get("/auth/bullhorn/status", bearerAuth, async (_req: Request, res: Respo
     res.status(500).json({ error: "Could not determine connection status" });
   }
 });
+
+// Headless connect: completes the entire OAuth flow server-side (no browser, no
+// consent screen) using the API user's credentials. This is the correct flow for
+// a Bullhorn "Webservice API User".
+router.post(
+  "/auth/bullhorn/connect",
+  bearerAuth,
+  async (_req: Request, res: Response) => {
+    try {
+      const { restUrl } = await connectHeadless();
+      logger.info({ restUrl }, "Bullhorn: headless connect succeeded");
+      res.json({ connected: true, restUrl });
+    } catch (err) {
+      logger.error({ err }, "Bullhorn headless connect failed");
+      res
+        .status(502)
+        .json({ connected: false, error: (err as Error).message });
+    }
+  },
+);
 
 export default router;
