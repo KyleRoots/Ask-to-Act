@@ -461,6 +461,307 @@ export async function getNotes(args: {
 }
 
 // ---------------------------------------------------------------------------
+// File / attachment reading (Bullhorn Files API — strictly READ-ONLY)
+// ---------------------------------------------------------------------------
+//
+// Bullhorn serves candidate documents through a separate Files API:
+//   - GET entityFiles/Candidate/{id}        -> list attachment metadata
+//   - GET file/Candidate/{id}/{fileId}       -> fetch one file (base64 content)
+// These are distinct from the search/query/entity plumbing above. We only ever
+// issue GETs here. Many résumés are binary (PDF/Word) with no server-side text
+// extraction; we decode and return text only for textual formats and degrade
+// gracefully (metadata + explanation) otherwise — never fabricating content.
+
+/** Default / hard cap on characters of extracted attachment text returned. */
+const DEFAULT_ATTACHMENT_TEXT_CHARS = 20_000;
+const MAX_ATTACHMENT_TEXT_CHARS = 100_000;
+
+const SSN_RE = /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g;
+
+/**
+ * Masks high-sensitivity PII (US SSNs) from free attachment text. Email and
+ * phone are intentionally preserved — they are returned unredacted by the
+ * structured read tools too, and contact details are the whole point of a
+ * résumé for a recruiter. `ssn` is part of the credential/secret denylist
+ * concept already enforced on field names, so we extend it to free text here.
+ */
+function redactResumeText(text: string): string {
+  return text.replace(SSN_RE, "[REDACTED-SSN]");
+}
+
+/** Reads the first present key from an object (tolerant of casing differences). */
+function pickKey(obj: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null) return obj[k];
+  }
+  return undefined;
+}
+
+function asNumber(v: unknown): number | undefined {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
+    return Number(v);
+  }
+  return undefined;
+}
+
+function asString(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+interface AttachmentMeta {
+  id?: number;
+  name?: string;
+  /** Bullhorn document category, e.g. "Resume", "Cover Letter". */
+  type?: string;
+  contentType?: string;
+  fileType?: string;
+  contentSubType?: string;
+  description?: string;
+  dateAdded?: number;
+}
+
+function normalizeAttachment(raw: Record<string, unknown>): AttachmentMeta {
+  return {
+    id: asNumber(pickKey(raw, "id")),
+    name: asString(pickKey(raw, "name", "fileName")),
+    type: asString(pickKey(raw, "type")),
+    contentType: asString(pickKey(raw, "contentType", "fileContentType")),
+    fileType: asString(pickKey(raw, "fileType")),
+    contentSubType: asString(pickKey(raw, "contentSubType")),
+    description: asString(pickKey(raw, "description")),
+    dateAdded: asNumber(pickKey(raw, "dateAdded")),
+  };
+}
+
+/** True for formats whose bytes are directly readable as text. */
+function isTextualContentType(contentType?: string, name?: string): boolean {
+  const ct = (contentType ?? "").toLowerCase();
+  if (ct.startsWith("text/")) return true;
+  if (/(html|xml|rtf|json|csv|plain|markdown)/.test(ct)) return true;
+  const n = (name ?? "").toLowerCase();
+  return /\.(txt|text|html?|rtf|csv|md|markdown|xml|json|log)$/.test(n);
+}
+
+/** Crude but dependency-free HTML-to-text: drop tags/entities, collapse space. */
+function stripHtml(s: string): string {
+  return s
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<\/(p|div|li|tr|h[1-6]|br)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function clampChars(requested: number | undefined): number {
+  const n = requested ?? DEFAULT_ATTACHMENT_TEXT_CHARS;
+  if (!Number.isFinite(n)) return DEFAULT_ATTACHMENT_TEXT_CHARS;
+  return Math.max(1, Math.min(MAX_ATTACHMENT_TEXT_CHARS, Math.floor(n)));
+}
+
+/** Picks the attachment most likely to be the résumé from a metadata list. */
+function pickResumeAttachment(attachments: AttachmentMeta[]): AttachmentMeta | null {
+  const matches = (a: AttachmentMeta, re: RegExp) =>
+    re.test(a.type ?? "") || re.test(a.name ?? "") || re.test(a.description ?? "");
+  return (
+    attachments.find((a) => matches(a, /resume|résumé|\bcv\b|curriculum/i)) ??
+    attachments.find((a) => isTextualContentType(a.contentType, a.name)) ??
+    attachments[0] ??
+    null
+  );
+}
+
+/**
+ * Lists a candidate's file attachments (metadata only — no content). Read-only.
+ */
+export async function listCandidateAttachments(args: { candidateId: number }) {
+  const raw = (await bullhornFetch(
+    `entityFiles/Candidate/${args.candidateId}`,
+    {},
+  )) as Record<string, unknown>;
+  const picked = pickKey(raw, "FileAttachments", "fileAttachments", "data");
+  // Be tolerant of the exact envelope shape: accept a bare array, or an object
+  // that nests the array under `.data`. Anything else degrades to "no files"
+  // rather than throwing.
+  const list: unknown[] = Array.isArray(picked)
+    ? picked
+    : picked && typeof picked === "object" && Array.isArray((picked as Record<string, unknown>).data)
+      ? ((picked as Record<string, unknown>).data as unknown[])
+      : [];
+  const attachments = list
+    .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+    .map(normalizeAttachment);
+  return { candidateId: args.candidateId, count: attachments.length, attachments };
+}
+
+/**
+ * Fetches a single candidate attachment and returns its extracted text when the
+ * format is textual; otherwise returns metadata plus a clear explanation. The
+ * returned text is SSN-redacted and capped. Read-only.
+ */
+export async function readCandidateAttachment(args: {
+  candidateId: number;
+  fileId: number;
+  maxChars?: number;
+}) {
+  const raw = (await bullhornFetch(
+    `file/Candidate/${args.candidateId}/${args.fileId}`,
+    {},
+  )) as Record<string, unknown>;
+  const file = (pickKey(raw, "File", "file") ?? raw) as Record<string, unknown>;
+
+  const meta = {
+    id: asNumber(pickKey(file, "id")) ?? args.fileId,
+    name: asString(pickKey(file, "name", "fileName")),
+    type: asString(pickKey(file, "type")),
+    contentType: asString(pickKey(file, "contentType", "fileContentType")),
+    fileType: asString(pickKey(file, "fileType")),
+    dateAdded: asNumber(pickKey(file, "dateAdded")),
+  };
+
+  const base64 = asString(pickKey(file, "fileContent", "content"));
+  if (!base64) {
+    return {
+      ...meta,
+      textAvailable: false,
+      message:
+        "Bullhorn returned no file content for this attachment, so no text could be extracted.",
+    };
+  }
+
+  const buf = Buffer.from(base64, "base64");
+  if (!isTextualContentType(meta.contentType, meta.name)) {
+    return {
+      ...meta,
+      sizeBytes: buf.length,
+      textAvailable: false,
+      message:
+        `This attachment is a binary file (${meta.contentType ?? "unknown type"}) ` +
+        `with no server-side text extraction available. Open it in Bullhorn to view, ` +
+        `or call get_candidate_resume / get_candidate — the candidate record often ` +
+        `stores the parsed résumé text.`,
+    };
+  }
+
+  let text = buf.toString("utf8");
+  const looksHtml =
+    /html/i.test(meta.contentType ?? "") || /<\/?(html|body|div|p|span|table)\b/i.test(text);
+  if (looksHtml) text = stripHtml(text);
+  text = redactResumeText(text);
+
+  const cap = clampChars(args.maxChars);
+  const truncated = text.length > cap;
+  if (truncated) text = text.slice(0, cap);
+
+  return {
+    ...meta,
+    sizeBytes: buf.length,
+    textAvailable: true,
+    truncated,
+    charsReturned: text.length,
+    text,
+  };
+}
+
+/**
+ * Convenience résumé reader: pulls the candidate's parsed résumé text from the
+ * record `description` (where Bullhorn typically stores it after parsing) and,
+ * if a résumé file attachment in a textual format exists, the extracted text
+ * from it (preferred over the record text). Binary attachments (PDF/Word) are
+ * surfaced as metadata only — they are never downloaded here, since they yield
+ * no extractable text. Read-only; all returned text is SSN-redacted and capped.
+ */
+export async function getCandidateResume(args: {
+  candidateId: number;
+  maxChars?: number;
+}) {
+  const cand = (await bullhornFetch(`entity/Candidate/${args.candidateId}`, {
+    fields: "id,firstName,lastName,description",
+  })) as Record<string, unknown>;
+  const candData = (pickKey(cand, "data") ?? cand) as Record<string, unknown>;
+  const rawDescription = asString(pickKey(candData, "description"));
+  const cap = clampChars(args.maxChars);
+  let descriptionText: string | null = null;
+  if (rawDescription && rawDescription.trim() !== "") {
+    const cleaned = redactResumeText(stripHtml(rawDescription));
+    descriptionText = cleaned.length > cap ? cleaned.slice(0, cap) : cleaned;
+  }
+
+  const { attachments } = await listCandidateAttachments({
+    candidateId: args.candidateId,
+  });
+  const resume = pickResumeAttachment(attachments);
+
+  // Only download/decode the chosen attachment when its format is textual.
+  // Binary résumés (PDF/Word) yield no extractable text, so fetching them just
+  // wastes bandwidth/memory — we still surface their metadata below and fall
+  // back to the parsed text on candidate.description.
+  let resumeAttachmentText:
+    | Awaited<ReturnType<typeof readCandidateAttachment>>
+    | null = null;
+  if (
+    resume?.id !== undefined &&
+    isTextualContentType(resume.contentType, resume.name)
+  ) {
+    resumeAttachmentText = await readCandidateAttachment({
+      candidateId: args.candidateId,
+      fileId: resume.id,
+      maxChars: args.maxChars,
+    });
+  }
+
+  const fileText =
+    resumeAttachmentText && "text" in resumeAttachmentText
+      ? (resumeAttachmentText as { text?: string }).text ?? null
+      : null;
+
+  // Best single answer for "read the résumé": prefer the attachment's extracted
+  // text, falling back to the parsed text on the candidate record.
+  const resumeText = fileText ?? descriptionText;
+  const resumeTextSource = fileText
+    ? "attachment"
+    : descriptionText
+      ? "candidate.description"
+      : "none";
+
+  return {
+    candidateId: args.candidateId,
+    candidateName:
+      [asString(pickKey(candData, "firstName")), asString(pickKey(candData, "lastName"))]
+        .filter(Boolean)
+        .join(" ") || undefined,
+    resumeText,
+    resumeTextSource,
+    // Surface the parsed record text separately only when it isn't already the
+    // answer (i.e. the résumé came from a file) so the text isn't sent twice.
+    ...(resumeTextSource === "attachment" && descriptionText
+      ? { descriptionText }
+      : {}),
+    resumeAttachment: resume,
+    attachmentCount: attachments.length,
+    attachments,
+    ...(resumeTextSource === "none"
+      ? {
+          note:
+            "No résumé text was found on the candidate record (description) and " +
+            "no readable text attachment exists. Any binary attachments are listed " +
+            "above — open them in Bullhorn to view.",
+        }
+      : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Generic read-any-entity layer
 // ---------------------------------------------------------------------------
 

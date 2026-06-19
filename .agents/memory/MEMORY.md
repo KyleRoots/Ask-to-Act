@@ -1,1 +1,2 @@
 - [Bullhorn OAuth](bullhorn-oauth.md) — SOLVED headless end-to-end: authorization_code flow + refresh tokens; first-time consent ("Get Consent" page) is approved by POSTing the consentForm server-side (browser "Agree" bounces); incl. entity field/endpoint gotchas + lockout self-unlock.
+- [Bullhorn résumés & Files API](bullhorn-resumes-files.md) — résumés live as parsed HTML in candidate.description, not files; Files API is GET-only entityFiles/file, FileAttachment isn't queryable; REST limit 120/60s.

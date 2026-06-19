@@ -22,6 +22,9 @@ import {
   searchLeads,
   searchOpportunities,
   findUsers,
+  listCandidateAttachments,
+  readCandidateAttachment,
+  getCandidateResume,
   SUPPORTED_ENTITIES,
 } from "./bullhorn-client.js";
 import { logger } from "./logger.js";
@@ -566,6 +569,61 @@ export function createMcpServer(): McpServer {
     async ({ name, email, count, start, fields }) =>
       runTool("find_users", { name, email, count, start, fields }, () =>
         findUsers({ name, email, count, start, fields }),
+      ),
+  );
+
+  // -------------------------------------------------------------------------
+  // Résumé & attachment reading (Bullhorn Files API — strictly read-only)
+  // -------------------------------------------------------------------------
+
+  server.tool(
+    "list_candidate_attachments",
+    "List the file attachments (résumés, cover letters, etc.) on a candidate's record. Returns metadata only — file id, name, document type (e.g. 'Resume'), content type, and dateAdded — not the file contents. Use read_candidate_attachment with a returned file id to read a specific attachment's text, or get_candidate_resume to jump straight to the résumé.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
+    },
+    async ({ candidateId }) =>
+      runTool("list_candidate_attachments", { candidateId }, () =>
+        listCandidateAttachments({ candidateId }),
+      ),
+  );
+
+  server.tool(
+    "read_candidate_attachment",
+    "Read the text of one candidate attachment by candidate ID + file id (get the file id from list_candidate_attachments). Returns extracted text for textual formats (plain text, HTML, RTF). Binary formats such as PDF or Word cannot be text-extracted server-side — for those the tool returns the file metadata and an explanation instead of fabricating text. Returned text is SSN-redacted and length-capped (raise `maxChars` up to 100000 for long documents).",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
+      fileId: z.number().int().positive().describe("Attachment file id (from list_candidate_attachments)"),
+      maxChars: z
+        .number()
+        .int()
+        .min(1)
+        .max(100000)
+        .optional()
+        .describe("Maximum characters of text to return (default: 20000, max: 100000)"),
+    },
+    async ({ candidateId, fileId, maxChars }) =>
+      runTool("read_candidate_attachment", { candidateId, fileId, maxChars }, () =>
+        readCandidateAttachment({ candidateId, fileId, maxChars }),
+      ),
+  );
+
+  server.tool(
+    "get_candidate_resume",
+    "Read a candidate's résumé in one call. Returns the best available résumé text in `resumeText` (with `resumeTextSource` indicating whether it came from a résumé file attachment or the parsed text stored on the candidate record), plus `resumeAttachment` (the chosen résumé file's metadata, if any) and the full attachment list for reference. In most records the résumé is stored as parsed text on the candidate record, so that is what `resumeText` returns. If the résumé is only stored as a binary file (PDF/Word) with no extractable text, `resumeText` falls back to the parsed record text when available; otherwise it is null and the attachment metadata shows what exists to open in Bullhorn. Text is SSN-redacted and length-capped (raise `maxChars` up to 100000 for long résumés).",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
+      maxChars: z
+        .number()
+        .int()
+        .min(1)
+        .max(100000)
+        .optional()
+        .describe("Maximum characters of text to return per source (default: 20000, max: 100000)"),
+    },
+    async ({ candidateId, maxChars }) =>
+      runTool("get_candidate_resume", { candidateId, maxChars }, () =>
+        getCandidateResume({ candidateId, maxChars }),
       ),
   );
 
