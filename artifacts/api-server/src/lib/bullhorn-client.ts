@@ -153,14 +153,27 @@ async function enrichWithProfileUrls(
  * text) is intentionally left untouched. Defence-in-depth so résumé PII is
  * masked even when a caller requests `description` directly; full, length-capped
  * résumé text is served only by the dedicated get_candidate_resume tool.
+ *
+ * When `opts.capDescription` is set (list/search paths), each résumé `description`
+ * is additionally truncated to a short preview so multi-record payloads stay
+ * within MCP client response-size limits. Single-record reads leave it uncapped.
  */
-function redactCandidateDescriptions(entity: string, json: unknown): unknown {
+function redactCandidateDescriptions(
+  entity: string,
+  json: unknown,
+  opts: { capDescription?: boolean } = {},
+): unknown {
   if (!json || typeof json !== "object") return json;
+  const cap = opts.capDescription === true;
   const redactDesc = (rec: unknown) => {
     if (rec && typeof rec === "object" && !Array.isArray(rec)) {
       const r = rec as Record<string, unknown>;
       if (typeof r.description === "string") {
-        r.description = redactResumeText(r.description);
+        let d = redactResumeText(r.description);
+        if (cap && d.length > MAX_LIST_DESC_CHARS) {
+          d = d.slice(0, MAX_LIST_DESC_CHARS) + LIST_DESC_TRUNCATION_MARKER;
+        }
+        r.description = d;
       }
     }
   };
@@ -252,6 +265,7 @@ async function searchEntity(
   return redactCandidateDescriptions(
     entity,
     await enrichWithProfileUrls(entity, await res.json()),
+    { capDescription: true },
   );
 }
 
@@ -271,6 +285,7 @@ async function queryEntity(
   return redactCandidateDescriptions(
     entity,
     await enrichWithProfileUrls(entity, await bullhornFetch(`query/${entity}`, params)),
+    { capDescription: true },
   );
 }
 
@@ -560,6 +575,19 @@ const MAX_ATTACHMENT_TEXT_CHARS = 100_000;
 const MAX_ATTACHMENT_DESC_CHARS = 1_000;
 /** Hard cap on decoded attachment bytes we will process for text extraction. */
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
+/**
+ * In multi-record list/search results, a candidate's résumé text (`description`)
+ * is capped to a short preview so large result sets stay within MCP client
+ * response-size limits. A `count=100` candidate search that returns full résumés
+ * is ~2.5 MB (median résumé ~22 k chars), which clients such as ChatGPT silently
+ * drop ("blocked by the tool-safety layer"). Full, length-capped résumé text is
+ * served only by the dedicated get_candidate_resume tool; single-record reads
+ * (get_candidate / get_entity) are not capped.
+ */
+const MAX_LIST_DESC_CHARS = 600;
+const LIST_DESC_TRUNCATION_MARKER =
+  " …[résumé preview truncated — call get_candidate_resume for the full text]";
 
 const SSN_RE = /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g;
 
