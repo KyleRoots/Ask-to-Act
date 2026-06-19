@@ -107,17 +107,20 @@ async function resolveUiBaseUrl(): Promise<string | null> {
 }
 
 /**
- * Adds a `bullhornUrl` deep link to each linkable record under `data` in a
- * Bullhorn REST response (mutating it in place). No-op for non-linkable
- * entities or when the UI base URL cannot be resolved. Records without a numeric
- * `id` are left untouched.
+ * Adds a `bullhornUrl` deep link to each linkable record in a Bullhorn REST
+ * response (mutating it in place). Handles both the `{ data: ... }` envelope
+ * returned by search/query (and entity GET on this instance) and a bare
+ * single-record payload (`{ id, ... }`), so `get_*` links don't depend on
+ * Bullhorn always wrapping single records. No-op for non-linkable entities or
+ * when the UI base URL cannot be resolved. Records without a numeric `id` are
+ * left untouched.
  */
 async function enrichWithProfileUrls(
   entity: string,
   json: unknown,
 ): Promise<unknown> {
   if (!UI_LINKABLE_ENTITIES.has(entity)) return json;
-  if (!json || typeof json !== "object" || !("data" in json)) return json;
+  if (!json || typeof json !== "object" || Array.isArray(json)) return json;
   const base = await resolveUiBaseUrl();
   if (!base) return json;
   const addUrl = (rec: unknown) => {
@@ -128,9 +131,16 @@ async function enrichWithProfileUrls(
       }
     }
   };
-  const data = (json as { data: unknown }).data;
-  if (Array.isArray(data)) data.forEach(addUrl);
-  else addUrl(data);
+  const obj = json as Record<string, unknown>;
+  if ("data" in obj) {
+    // search/query list envelope or entity-GET single-record envelope
+    const data = obj.data;
+    if (Array.isArray(data)) data.forEach(addUrl);
+    else addUrl(data);
+  } else {
+    // bare single-record payload (e.g. an unwrapped entity GET)
+    addUrl(obj);
+  }
   return json;
 }
 
