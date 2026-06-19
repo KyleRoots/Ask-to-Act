@@ -122,7 +122,7 @@ export async function searchJobs(args: {
 }) {
   const fields =
     args.fields ??
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,expiryDate,address,publicDescription";
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription";
   return searchEntity("JobOrder", args.query, fields, args.count ?? 20, args.start ?? 0);
 }
 
@@ -134,7 +134,7 @@ export async function searchCompanies(args: {
 }) {
   const fields =
     args.fields ??
-    "id,name,phone,address,status,numStaff,industry,owner,dateAdded";
+    "id,name,phone,address,status,numEmployees,dateAdded";
   return searchEntity(
     "ClientCorporation",
     args.query,
@@ -152,7 +152,7 @@ export async function searchContacts(args: {
 }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,title,clientCorporation,status,owner,dateAdded";
+    "id,firstName,lastName,email,phone,clientCorporation,status,owner,dateAdded";
   return searchEntity(
     "ClientContact",
     args.query,
@@ -165,28 +165,28 @@ export async function searchContacts(args: {
 export async function getCandidate(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,status,occupation,primarySkills,secondarySkills,educations,workHistory,address,salary,dateAvailable,owner,dateAdded,source,description";
+    "id,firstName,lastName,email,phone,status,occupation,primarySkills,secondarySkills,educations,workHistories,address,salary,dateAvailable,owner,dateAdded,source,description";
   return getEntity("Candidate", args.id, fields);
 }
 
 export async function getJob(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,expiryDate,address,publicDescription,skills,educationDegree,yearsRequired,startDate";
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate";
   return getEntity("JobOrder", args.id, fields);
 }
 
 export async function getCompany(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,name,phone,fax,address,status,numStaff,industry,revenue,description,owner,dateAdded,contacts";
+    "id,name,phone,fax,address,status,numEmployees,revenue,dateAdded";
   return getEntity("ClientCorporation", args.id, fields);
 }
 
 export async function getContact(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,mobile,title,clientCorporation,status,owner,dateAdded,description";
+    "id,firstName,lastName,email,phone,mobile,clientCorporation,status,owner,dateAdded,description";
   return getEntity("ClientContact", args.id, fields);
 }
 
@@ -236,14 +236,14 @@ export async function getNotes(args: {
   start?: number;
 }) {
   const conditions: string[] = [];
-  if (args.candidateId) conditions.push(`candidates.id=${args.candidateId}`);
-  if (args.jobId) conditions.push(`jobOrder.id=${args.jobId}`);
-  if (conditions.length === 0) {
-    conditions.push("id IS NOT NULL");
-  }
-  const where = conditions.join(" AND ");
+  if (args.candidateId) conditions.push(`candidates.id:${args.candidateId}`);
+  if (args.jobId) conditions.push(`jobOrder.id:${args.jobId}`);
+  const query =
+    conditions.length > 0 ? conditions.join(" AND ") : "id:[1 TO *]";
   const fields =
     args.fields ??
-    "id,action,body,commentingPerson,candidates,jobOrder,dateAdded";
-  return queryEntity("Note", where, fields, args.count ?? 50, args.start ?? 0);
+    "id,action,comments,commentingPerson,candidates,jobOrder,dateAdded";
+  // Note is an indexed entity in Bullhorn — it must be read via /search (Lucene),
+  // not /query.
+  return searchEntity("Note", query, fields, args.count ?? 50, args.start ?? 0);
 }

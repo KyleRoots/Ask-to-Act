@@ -136,14 +136,92 @@ export async function getAuthorizeUrl(state: string): Promise<string> {
   return url.toString();
 }
 
+/** Reads the `code` query param out of an OAuth redirect Location header. */
+function codeFromLocation(location: string): string | null {
+  if (!location) return null;
+  try {
+    return new URL(location).searchParams.get("code");
+  } catch {
+    return null;
+  }
+}
+
+/** Reads an `error`/`error_description` out of an OAuth redirect Location header. */
+function errorFromLocation(location: string): string | null {
+  if (!location) return null;
+  try {
+    const u = new URL(location);
+    const err = u.searchParams.get("error");
+    if (!err) return null;
+    return `${err} ${u.searchParams.get("error_description") ?? ""}`.trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Extracts the hidden form inputs from Bullhorn's consent HTML page. */
+function parseHiddenInputs(html: string): Record<string, string> {
+  const hidden: Record<string, string> = {};
+  for (const m of html.matchAll(/<input[^>]*type=["']hidden["'][^>]*>/gi)) {
+    const tag = m[0];
+    const name = /name=["']([^"']+)["']/i.exec(tag)?.[1];
+    if (name) {
+      hidden[name] = /value=["']([^"']*)["']/i.exec(tag)?.[1] ?? "";
+    }
+  }
+  return hidden;
+}
+
+/**
+ * Submits the "Agree" consent approval server-side. Bullhorn's consent form has
+ * no action attribute, so it POSTs back to the same authorize URL, carrying the
+ * JSESSIONID from the login response plus the form's hidden fields. This is the
+ * exact request a human clicking "Agree" would make — done headlessly here.
+ */
+async function approveConsent(
+  authorizeUrl: string,
+  html: string,
+  sessionCookie: string | null,
+): Promise<string> {
+  const body = new URLSearchParams({
+    ...parseHiddenInputs(html),
+    action: "Agree",
+  });
+  const res = await fetch(authorizeUrl, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(sessionCookie ? { Cookie: sessionCookie } : {}),
+    },
+    body: body.toString(),
+  });
+  const location = res.headers.get("location") ?? "";
+  const code = codeFromLocation(location);
+  if (code) return code;
+  const errInfo = errorFromLocation(location);
+  if (errInfo) {
+    throw new Error(`Bullhorn consent approval returned an error: ${errInfo}`);
+  }
+  const preview = (await res.text().catch(() => ""))
+    .replace(/\s+/g, " ")
+    .slice(0, 200);
+  throw new Error(
+    `Bullhorn consent approval did not return an authorization code ` +
+      `(status=${res.status}). Response start: ${preview}`,
+  );
+}
+
 /**
  * Headless authorization-code retrieval. Sends username/password/action=Login to
  * the OAuth /authorize endpoint and reads the code out of the 302 Location
  * header WITHOUT following the redirect (so Bullhorn never calls our callback).
  * This is the server-to-server flow for a Bullhorn "Webservice API User" — no
- * browser and no interactive consent screen. A missing code means bad
- * credentials (Bullhorn returns the HTML login page) or an un-whitelisted
- * redirect_uri.
+ * browser. The first time a user authorizes this client_id, Bullhorn returns its
+ * "Get Consent" HTML page instead of a code; we submit the "Agree" approval
+ * server-side (carrying the session cookie) to obtain the code, exactly as a
+ * human clicking Agree would. Once consent is recorded, future logins return the
+ * code directly.
  */
 async function fetchAuthCodeHeadless(oauthUrl: string): Promise<string> {
   const url = new URL(`${oauthUrl}/authorize`);
@@ -153,38 +231,56 @@ async function fetchAuthCodeHeadless(oauthUrl: string): Promise<string> {
   url.searchParams.set("username", getEnv("BULLHORN_USERNAME"));
   url.searchParams.set("password", getEnv("BULLHORN_PASSWORD"));
   url.searchParams.set("action", "Login");
+  const authorizeUrl = url.toString();
 
-  const res = await fetch(url.toString(), { redirect: "manual" });
+  const res = await fetch(authorizeUrl, { redirect: "manual" });
   const location = res.headers.get("location") ?? "";
 
-  if (location) {
-    let parsed: URL | null = null;
-    try {
-      parsed = new URL(location);
-    } catch {
-      parsed = null;
-    }
-    if (parsed) {
-      const code = parsed.searchParams.get("code");
-      if (code) {
-        return code;
-      }
-      const errCode = parsed.searchParams.get("error");
-      if (errCode) {
-        const desc = parsed.searchParams.get("error_description") ?? "";
-        throw new Error(
-          `Bullhorn headless authorize returned an error: ${errCode} ${desc}`.trim(),
-        );
-      }
-    }
+  // Consent already granted: the code comes straight back in the 302.
+  const directCode = codeFromLocation(location);
+  if (directCode) return directCode;
+  const directErr = errorFromLocation(location);
+  if (directErr) {
+    throw new Error(`Bullhorn headless authorize returned an error: ${directErr}`);
   }
 
-  const bodyPreview = (await res.text().catch(() => "")).slice(0, 200);
+  // First-time authorization: Bullhorn returns the "Get Consent" HTML form.
+  if (res.status === 200) {
+    const html = await res.text();
+    if (/consentForm|Get Consent/i.test(html)) {
+      // undici exposes getSetCookie(); fall back to the combined header for
+      // runtimes/proxies that don't split Set-Cookie into an array.
+      const setCookies =
+        res.headers.getSetCookie?.() ??
+        (res.headers.get("set-cookie")
+          ? [res.headers.get("set-cookie") as string]
+          : []);
+      const jsession =
+        setCookies
+          .map((c) => c.split(";")[0])
+          .find((c) => c.startsWith("JSESSIONID=")) ?? null;
+      logger.info("Bullhorn: consent screen returned; submitting approval headlessly");
+      return approveConsent(authorizeUrl, html, jsession);
+    }
+    const preview = html.replace(/\s+/g, " ").slice(0, 200);
+    if (/invalid redirect uri/i.test(html)) {
+      throw new Error(
+        `Bullhorn rejected the redirect_uri — it is not whitelisted for this ` +
+          `client_id (authorize returned the "Invalid Redirect URI" page). ` +
+          `Response start: ${preview}`,
+      );
+    }
+    throw new Error(
+      `Bullhorn headless authorize returned an unexpected HTML page (status=200). ` +
+        `This usually means BULLHORN_USERNAME/BULLHORN_PASSWORD are incorrect. ` +
+        `Response start: ${preview}`,
+    );
+  }
+
   throw new Error(
     `Bullhorn headless authorize did not return an authorization code ` +
-      `(status=${res.status}). This usually means BULLHORN_USERNAME/BULLHORN_PASSWORD ` +
-      `are incorrect, or the redirect_uri is not whitelisted for this client_id. ` +
-      `Response start: ${bodyPreview}`,
+      `(status=${res.status}) and no consent form was found. Check that the ` +
+      `redirect_uri is whitelisted for this client_id.`,
   );
 }
 

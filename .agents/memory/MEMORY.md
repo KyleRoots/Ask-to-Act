@@ -1,1 +1,1 @@
-- [Bullhorn OAuth](bullhorn-oauth.md) — password grant is retired (`unsupported_grant_type`); use authorization_code flow + refresh tokens, redirect_uri must match a registered value, first use needs a one-time browser consent.
+- [Bullhorn OAuth](bullhorn-oauth.md) — SOLVED headless end-to-end: authorization_code flow + refresh tokens; first-time consent ("Get Consent" page) is approved by POSTing the consentForm server-side (browser "Agree" bounces); incl. entity field/endpoint gotchas + lockout self-unlock.
