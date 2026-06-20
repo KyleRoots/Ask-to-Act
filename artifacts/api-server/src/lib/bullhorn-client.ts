@@ -1590,6 +1590,12 @@ async function searchTotal(entity: string, query: string): Promise<number> {
  * applied definition so the answer always matches the curated open_jobs report.
  * If the caller already mentions `status`/`Archive`, we leave their query untouched.
  */
+// Standalone "active opportunities" definition (the official active-pipeline set).
+// Used both to EXTEND an isOpen:true query (guard) and as a SELF-CONTAINED query
+// (annotation), so the two enforcement paths never drift.
+const ACTIVE_OPPS_DEFINITION =
+  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted';
+
 function applyMetricDefinitionGuard(
   entity: string,
   query: string,
@@ -1611,7 +1617,7 @@ function applyMetricDefinitionGuard(
     if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
     if (/\bstatus\s*:/i.test(query)) return { query };
     return {
-      query: `${query} AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted`,
+      query: `${query} AND ${ACTIVE_OPPS_DEFINITION}`,
       appliedDefinition:
         'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted (the official active-pipeline metric = 24; do NOT subtract further for deleted/converted — they are already excluded).',
     };
@@ -1655,6 +1661,44 @@ async function placementConfirmedAnnotation(
 }
 
 /**
+ * Active-opportunity guard for the freelancing failure mode: the model often
+ * approximates "active / pipeline opportunities" by enumerating a SUBSET of open
+ * statuses (e.g. `status:Open OR status:Qualifying`), which silently UNDERCOUNTS
+ * (5 instead of the official 24 — it misses Qualified/New). For any Opportunity
+ * count whose query is NOT already the canonical active definition, we compute the
+ * official active total and attach a note so the model reports the locked figure
+ * for active/pipeline asks. No-op when the query already IS the active definition
+ * (e.g. the guard rewrote isOpen:true, or the report tool ran it), so legitimate
+ * single-status drilldowns ("how many Qualified?") still answer their own number —
+ * the note is conditional guidance, mirroring placementConfirmedAnnotation.
+ */
+async function opportunityActiveAnnotation(
+  entity: string,
+  query: string,
+): Promise<{ activeOpportunitiesTotal: number; note: string } | undefined> {
+  if (entity !== "Opportunity") return undefined;
+  // Already the canonical active definition (guard-applied or caller-supplied) — no drift.
+  if (
+    /Closed-Won/i.test(query) &&
+    /Closed-Lost/i.test(query) &&
+    /Converted/i.test(query)
+  ) {
+    return undefined;
+  }
+  const activeOpportunitiesTotal = await searchTotal(entity, ACTIVE_OPPS_DEFINITION);
+  return {
+    activeOpportunitiesTotal,
+    note:
+      `"active" / "open" / "in the pipeline" opportunities officially means ` +
+      `${ACTIVE_OPPS_DEFINITION} = ${activeOpportunitiesTotal}. Do NOT approximate it by ` +
+      `listing a subset of statuses (e.g. status:Open OR status:Qualifying) — that UNDERCOUNTS ` +
+      `(it drops Qualified/New). Report activeOpportunitiesTotal (${activeOpportunitiesTotal}) ` +
+      `for active/pipeline asks, or call the sales_pipeline_report tool. Only report this ` +
+      `query's 'total' if the user explicitly asked for these specific status(es).`,
+  };
+}
+
+/**
  * Counts Bullhorn records for a query WITHOUT returning the records — and optionally
  * breaks the count down by a field (e.g. Internal Department). This exists because LLM
  * clients otherwise try to build scorecards by fetching records and counting them
@@ -1690,6 +1734,7 @@ export async function countEntity(args: {
   const total = await searchTotal(entry.canonical, base);
   // Surface the confirmed-only placement figure (98) alongside an all-status total (123).
   const placementAnnotation = await placementConfirmedAnnotation(entry.canonical, base);
+  const opportunityAnnotation = await opportunityActiveAnnotation(entry.canonical, base);
 
   if (!args.groupBy) {
     return {
@@ -1699,6 +1744,7 @@ export async function countEntity(args: {
       mode: "count_only",
       ...(guard.appliedDefinition ? { appliedDefinition: guard.appliedDefinition } : {}),
       ...(placementAnnotation ?? {}),
+      ...(opportunityAnnotation ?? {}),
     };
   }
 
@@ -1776,6 +1822,7 @@ export async function countEntity(args: {
     ...(discoveredFromSample ? { discoveredFromSample, sampleSize } : {}),
     ...(guard.appliedDefinition ? { appliedDefinition: guard.appliedDefinition } : {}),
     ...(placementAnnotation ?? {}),
+    ...(opportunityAnnotation ?? {}),
   };
 }
 

@@ -45,3 +45,28 @@ pre-built report builders call bullhorn-client directly and are unaffected.
 
 **Verify against curated truth:** open jobs=414, placements YTD=98, active opps=24,
 leaderboard 14 recruiters/98.
+
+## Second drift hole: status-ENUMERATION approximation (Opportunity "active")
+
+**Observed:** "How many active opportunities?" returned **5** (should be **24**). The guard
+above only fires on `isOpen:true` AND skips when the query contains `status:`. The model never
+used `isOpen:true` — it tried `status:Active` (0 hits, a guessed label that doesn't exist),
+then enumerated a SUBSET of open statuses `status:Open OR status:Qualifying` (=5), bypassing the
+guard and silently dropping Qualified(14)+New(5).
+
+**Durable lesson:** Locking only the `isOpen:true` path is not enough — the model approximates
+"active/open/pipeline" by hand-picking a status allowlist, and a wrong/partial allowlist
+undercounts. You cannot read intent from an arbitrary status query, so don't try to rewrite it.
+
+**Fix (annotation, not rewrite):** `opportunityActiveAnnotation` (bullhorn-client.ts) mirrors
+`placementConfirmedAnnotation`: for ANY Opportunity count whose query is NOT already the
+canonical active set, compute the official active total (24) and attach it + a conditional note
+("report activeOpportunitiesTotal for active asks; only report this query's total if the user
+asked for these specific statuses"). Skips when query already contains all three
+Closed-Won/Closed-Lost/Converted exclusions (guard-applied isOpen:true, or the report tool), so
+canonical paths pay no extra call and legit single-status drilldowns (status:Qualified→14) still
+answer their own number. Single shared `ACTIVE_OPPS_DEFINITION` const feeds both guard + annotation.
+
+**Why annotation > rewrite here:** rewriting a status query would break legitimate single-status
+drilldowns; the conditional note lets the model answer the specific question while still seeing
+the locked headline. Same trade as the placement-confirmed pattern.
