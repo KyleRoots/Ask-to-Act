@@ -3,6 +3,49 @@ import { logger } from "./logger.js";
 
 const MAX_RETRIES = 1;
 
+/**
+ * Turns a raw Bullhorn error body into a concise, ACTIONABLE message so an LLM client
+ * can self-correct in one step instead of retrying blindly. Blind retry loops are
+ * what trip ChatGPT's outbound safety blocks, so a clear "here's what to fix" message
+ * is safer than echoing Bullhorn's raw 400. The most common recoverable mistake is
+ * requesting a field that doesn't exist on the entity (e.g. reusing one entity's
+ * custom field on another), which Bullhorn reports as "Invalid field 'X'".
+ */
+function formatBullhornError(kind: string, status: number, body: string): Error {
+  // Bullhorn returns JSON like {"errorMessage":"...","errorMessageKey":"..."}; parse it
+  // first so matching is robust, then fall back to the raw text.
+  let errMsg = body;
+  let errKey = "";
+  try {
+    const parsed = JSON.parse(body) as { errorMessage?: string; errorMessageKey?: string };
+    if (parsed && typeof parsed === "object") {
+      errMsg = parsed.errorMessage ?? body;
+      errKey = parsed.errorMessageKey ?? "";
+    }
+  } catch {
+    // body was not JSON; keep raw text
+  }
+
+  const invalid = errMsg.match(/Invalid field '([^']+)'/i);
+  if (invalid) {
+    return new Error(
+      `Invalid field "${invalid[1]}" for this entity. Remove it or replace it, then retry. ` +
+        `Custom fields differ per entity (e.g. "Internal Department" is correlatedCustomText1 on ` +
+        `JobOrder/Placement but customText1 on Opportunity) — call describe_entity to list the ` +
+        `valid fields for this entity.`,
+    );
+  }
+  if (/badSearchQuery|Bad Query/i.test(`${errKey} ${errMsg}`)) {
+    const what = kind === "search" ? "search query (Lucene)" : "query request";
+    return new Error(
+      `Malformed Bullhorn ${what} (${status}): likely unbalanced quotes/brackets or invalid ` +
+        `syntax. Fix the syntax and retry.`,
+    );
+  }
+  const capped = errMsg.length > 300 ? `${errMsg.slice(0, 300)}…[truncated]` : errMsg;
+  return new Error(`Bullhorn ${kind} error (${status}): ${capped}`);
+}
+
 async function bullhornFetch(
   path: string,
   params: Record<string, string | number>,
@@ -32,7 +75,7 @@ async function bullhornFetch(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Bullhorn API error (${res.status}): ${text}`);
+    throw formatBullhornError("API", res.status, text);
   }
 
   return res.json();
@@ -307,7 +350,7 @@ async function searchEntity(
   }
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Bullhorn search error (${res.status}): ${text}`);
+    throw formatBullhornError("search", res.status, text);
   }
   return redactCandidateDescriptions(
     entity,
