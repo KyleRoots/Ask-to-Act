@@ -1,3 +1,4 @@
 - [Bullhorn OAuth](bullhorn-oauth.md) — headless auth end-to-end: authorization_code + refresh tokens; first-time consent approved by POSTing the consentForm server-side (browser "Agree" bounces); incl. lockout self-unlock.
 - [Bullhorn résumés & Files API](bullhorn-resumes-files.md) — résumés live in candidate.description AND as file attachments; list key is `EntityFiles` (miss it → count 0); REST limit 120/60s.
 - [Candidate search & résumé PII](bullhorn-candidate-search.md) — clearance/skills live in résumé TEXT (description)+skillSet/comments, no structured field; field-scope every Lucene term; ChatGPT withholds bulk-PII → use get_candidate_resume VERIFY (highlight) excerpt mode.
+- [ChatGPT connector hosting](chatgpt-connector-hosting.md) — repeated Connect/Allow popups & unfinished runs = dev endpoint not always-on + per-call approval; fix = deploy a stable URL + click "Always allow" (transport is stateless → Autoscale safe).
