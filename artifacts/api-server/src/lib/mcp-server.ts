@@ -1,4 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   searchCandidates,
@@ -115,7 +117,24 @@ export function createMcpServer(): McpServer {
     version: "1.0.0",
   });
 
-  server.tool(
+  // This MCP server is STRICTLY READ-ONLY. Advertise that to clients via tool
+  // annotations so hosts (e.g. ChatGPT) do not classify these reads as
+  // write/destructive/open-world actions and gate or block them. The `tool`
+  // helper attaches these hints to every tool registration below.
+  const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  };
+  const tool = <Args extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    schema: Args,
+    cb: ToolCallback<Args>,
+  ) => server["tool"](name, description, schema, READ_ONLY_ANNOTATIONS, cb);
+
+  tool(
     "search_candidates",
     "Search for candidates in Bullhorn ATS. PREFERRED for any skills/résumé/clearance text search: use the `keywords` argument — the server then searches ALL of a candidate's searchable text fields at once (`description` = full parsed RÉSUMÉ text, `skillSet` = skills list, `comments` = recruiter notes, `occupation` = title) so you can never miss a field, and it safely handles quoting/escaping. Each `keywords` entry is a REQUIRED concept (AND-ed); a plain string is one phrase and an inner array is a synonym/OR group — e.g. `keywords=[[\"Top Secret\",\"TS/SCI\",\"security clearance\"]]` (any of those) or `keywords=[\"Java\",\"AWS\"]` (both required). Use the `query` argument for STRUCTURED filters only (status, willRelocate, desiredLocations, dates); `keywords` and `query` are AND-ed together. If you instead hand-write free text into `query`, you must field-qualify every term across all text fields yourself (bare keywords are rejected by Bullhorn), e.g. `(skillSet:Kubernetes OR description:Kubernetes OR comments:Kubernetes OR occupation:Kubernetes)`. Combine must-have criteria with AND, use OR within a criterion for recall, quote multi-word terms to keep them together (e.g. `skillSet:\"Spring Boot\"`; Bullhorn matching is relevance-ranked, not strict exact-phrase, so confirm the top hits on the shortlist), and field-qualify EVERY term — bare keywords are rejected by Bullhorn. Results are relevance-ranked. Years-of-experience and skill recency are NOT reliable as query filters (the structured `experience` field is usually empty) — to judge those, open the shortlist with get_candidate (work history with dates) and get_candidate_resume (full résumé text). IMPORTANT — search the résumé via the QUERY (e.g. `description:Kubernetes`), but do NOT add `description` to the returned `fields`: in search results résumé text is truncated to a short preview to keep responses small, and pulling full résumés for many candidates at once makes the client drop the whole result. To CONFIRM a clearance phrase or skill on your shortlist, call get_candidate_resume with `highlight=[...the terms you're checking...]` — it returns just the short quote(s) where each term appears (smaller, and less likely to be withheld by the client) plus which terms were/weren't found. To read a candidate's FULL résumé, call get_candidate_resume WITHOUT `highlight` on your shortlist (~5 candidates). STATUS NOTE — to find 'active' / current / workable candidates, do NOT filter on `status:\"Active\"`: in this Bullhorn the workable pool is dominated by 'Online Applicant' and 'New Lead', with 'Active' only a minority and 'Archive' the main inactive bucket observed. Express 'active' as `AND NOT status:Archive` (keeps the full workable pool); only restrict to a specific status like `status:Active` when the user explicitly asks for that exact status. For stronger asks like 'available' / 'contactable' / 'submit-ready', do NOT assume every non-archived candidate is actionable — verify on your shortlist using recent placements (list_placements), submissions (list_submissions_for_candidate), and notes (get_notes). Returns key fields including `skillSet`; each record includes a `bullhornUrl` deep link — render the candidate's name as that link.",
     {
@@ -157,7 +176,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "search_jobs",
     "Search for job orders in Bullhorn ATS using a Lucene query. Returns matching job records. Each record includes a `bullhornUrl` deep link to open the job directly in Bullhorn.",
     {
@@ -176,7 +195,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "search_companies",
     "Search for client companies (ClientCorporation) in Bullhorn ATS using a Lucene query. Each record includes a `bullhornUrl` deep link to open the company directly in Bullhorn.",
     {
@@ -193,7 +212,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "search_contacts",
     "Search for client contacts in Bullhorn ATS using a Lucene query. Each record includes a `bullhornUrl` deep link to open the contact directly in Bullhorn.",
     {
@@ -212,7 +231,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_candidate",
     "Fetch the full record for a specific candidate by their Bullhorn ID, including skills (`skillSet`, primary/secondary skills), work history with dates, and education — useful for judging years of experience and skill recency. For the candidate's full parsed RÉSUMÉ text, use get_candidate_resume (SSN-redacted and length-capped). The record includes a `bullhornUrl` deep link to open the candidate directly in Bullhorn.",
     {
@@ -225,7 +244,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_job",
     "Fetch the full record for a specific job order by its Bullhorn ID. The record includes a `bullhornUrl` deep link to open the job directly in Bullhorn.",
     {
@@ -238,7 +257,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_company",
     "Fetch the full record for a specific client company by its Bullhorn ID. The record includes a `bullhornUrl` deep link to open the company directly in Bullhorn.",
     {
@@ -251,7 +270,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_contact",
     "Fetch the full record for a specific client contact by their Bullhorn ID. The record includes a `bullhornUrl` deep link to open the contact directly in Bullhorn.",
     {
@@ -264,7 +283,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "list_submissions_for_job",
     "List candidate submissions (applications) for a specific job order, optionally restricted to a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
     {
@@ -294,7 +313,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "list_placements",
     "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd with a high `count` to retrieve them all in one call instead of paging. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
     {
@@ -325,7 +344,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_notes",
     "Retrieve notes and activity log entries for a candidate or job order, optionally within a dateAdded range. Provide at least one of candidateId or jobId. Results are in `data`; `total` is the full match count. Raise `count` (max 500) or page with `start` for more.",
     {
@@ -363,7 +382,7 @@ export function createMcpServer(): McpServer {
   const entitiesList = SUPPORTED_ENTITIES.join(", ");
   const entityTypeDescribe = `Bullhorn entity type. Supported: ${entitiesList}. Common aliases like 'company', 'job', 'user', 'recruiter' are also accepted.`;
 
-  server.tool(
+  tool(
     "search_entity",
     `Full-text search (Lucene) over ANY indexed Bullhorn entity — a flexible fallback for read coverage when no dedicated tool fits. Prefer the dedicated tools (search_candidates, search_jobs, search_companies, search_contacts) when they apply. Searchable entities: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. For query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) use query_entity instead. Use describe_entity to discover valid field names. For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
     {
@@ -383,7 +402,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "query_entity",
     `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity. Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. The Note entity is search-only — use search_entity for it. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names. 'orderBy' is optional (e.g. '-dateAdded' for newest first). For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
     {
@@ -409,7 +428,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_entity",
     "Fetch a single record of ANY supported Bullhorn entity by its ID. Use the dedicated get_candidate/get_job/get_company/get_contact tools when they apply. For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, the record includes a `bullhornUrl` deep link to open it directly in Bullhorn.",
     {
@@ -423,7 +442,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "describe_entity",
     "List the available fields (name + type) for a Bullhorn entity. Use this to discover valid field names before building a query_entity 'where' clause or requesting specific fields.",
     {
@@ -439,7 +458,7 @@ export function createMcpServer(): McpServer {
   // Curated high-value read tools
   // -------------------------------------------------------------------------
 
-  server.tool(
+  tool(
     "list_submissions_for_candidate",
     "List the job submissions (applications) for a specific candidate — i.e. which jobs a candidate has been submitted to — optionally within a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
     {
@@ -476,7 +495,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "list_appointments",
     "List appointments/meetings, optionally for a specific owner (recruiter) and/or within a scheduled-time window (filters on the appointment's dateBegin). Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 500) or page with `start` for more.",
     {
@@ -505,7 +524,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "list_tasks",
     "List tasks, optionally for a specific owner (recruiter), filtered by a scheduled-date window (filters on the task's dateBegin) and/or completion status. Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 500) or page with `start` for more.",
     {
@@ -535,7 +554,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "search_leads",
     "Search Bullhorn CRM leads (sales prospects) with a Lucene query. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
@@ -550,7 +569,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "search_opportunities",
     "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
@@ -565,7 +584,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "find_users",
     "Find internal Bullhorn users (recruiters / CorporateUser) by name and/or email — useful for resolving a recruiter to their user ID for ownerId filters on other tools. Omit all filters to list users.",
     {
@@ -585,7 +604,7 @@ export function createMcpServer(): McpServer {
   // Résumé & attachment reading (Bullhorn Files API — strictly read-only)
   // -------------------------------------------------------------------------
 
-  server.tool(
+  tool(
     "list_candidate_attachments",
     "List the file attachments (résumés, cover letters, etc.) on a candidate's record. Returns metadata only — file id, name, document type (e.g. 'Resume'), content type, and dateAdded — not the file contents. Use read_candidate_attachment with a returned file id to read a specific attachment's text, or get_candidate_resume to jump straight to the résumé.",
     {
@@ -597,7 +616,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "read_candidate_attachment",
     "Read the text of one candidate attachment by candidate ID + file id (get the file id from list_candidate_attachments). Returns extracted text for textual formats (plain text, HTML, RTF). Binary formats such as PDF or Word cannot be text-extracted server-side — for those the tool returns the file metadata and an explanation instead of fabricating text. Returned text is SSN-redacted and length-capped (raise `maxChars` up to 100000 for long documents).",
     {
@@ -617,7 +636,7 @@ export function createMcpServer(): McpServer {
       ),
   );
 
-  server.tool(
+  tool(
     "get_candidate_resume",
     "Read a candidate's résumé in one call, in either of TWO modes. (1) VERIFY mode — PREFERRED for confirming a specific clearance phrase, skill, or keyword on your shortlist: pass `highlight` with the terms you are verifying (e.g. `highlight=[\"Secret clearance\",\"Federal Government Secret\",\"Java\"]`). The tool then returns only the short QUOTE(S) around each match in `excerpts` (each entry is `{ terms, quote }`, and one quote may cover several terms), plus `matchedTerms` (confirmed present WITH a quote), `foundButNotQuoted` (present but the quote was trimmed by size caps), and `termsNotFound` (absent) so you can see at a glance which terms actually appear in the résumé. This keeps the result small and low on personal data, which makes the client far less likely to withhold it, and it hands you the exact 'quote where it appears' to cite. (2) FULL mode — omit `highlight` to get the complete résumé text in `resumeText` (length-capped; raise `maxChars` up to 100000 for long résumés). In both modes `resumeTextSource` indicates whether text came from a résumé file attachment or the parsed text on the candidate record, and `resumeAttachment` + the full attachment list are included. If the résumé is only a binary file (PDF/Word) with no extractable text, the tool falls back to the parsed record text when available; otherwise it returns no text and the attachment metadata shows what to open in Bullhorn. Text is SSN-redacted.",
     {
