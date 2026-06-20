@@ -306,10 +306,10 @@ function anchorPureNegationQuery(query: string, entity: string): string {
   if (/\bOR\b/i.test(trimmed)) return query;
   // Log only non-PII metadata: the raw query can contain names/emails/phones, so we
   // record that an anchor was applied and to which entity, never the query text.
-  logger.info("Bullhorn search: anchoring all-negative query so it is not silently empty", {
-    entity,
-    clauseCount: clauses.length,
-  });
+  logger.info(
+    { entity, clauseCount: clauses.length },
+    "Bullhorn search: anchoring all-negative query so it is not silently empty",
+  );
   return `id:[1 TO *] AND ${trimmed}`;
 }
 
@@ -357,7 +357,7 @@ function normalizeSearchDateRanges(query: string, entity: string): string {
     },
   );
   if (rewrote) {
-    logger.info("Bullhorn search: rewrote epoch date range to yyyyMMddHHmmss", { entity });
+    logger.info({ entity }, "Bullhorn search: rewrote epoch date range to yyyyMMddHHmmss");
   }
   return out;
 }

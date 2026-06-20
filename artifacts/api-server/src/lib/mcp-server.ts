@@ -32,6 +32,15 @@ import {
 } from "./bullhorn-client.js";
 import { logger } from "./logger.js";
 import { responseCache, stableKey } from "./cache.js";
+import {
+  staffingScorecard,
+  placementsReport,
+  openJobsReport,
+  salesPipelineReport,
+  jobAgingReport,
+  recruiterLeaderboard,
+  listReports,
+} from "./reports.js";
 
 // Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
 // a human, so whitespace is pure overhead — and multi-record reads are large
@@ -697,6 +706,84 @@ export function createMcpServer(): McpServer {
     async ({ candidateId, maxChars, highlight }) =>
       runTool("get_candidate_resume", { candidateId, maxChars, highlight }, () =>
         getCandidateResume({ candidateId, maxChars, highlight }),
+      ),
+  );
+
+  // -------------------------------------------------------------------------
+  // Report library — pre-built, server-computed analytics. Each report runs its
+  // Bullhorn queries in parallel and returns ONE compact table + summary, so the
+  // AI answers common scorecard-style asks in a single fast call. The ad-hoc
+  // tools above remain for anything not covered here.
+  // -------------------------------------------------------------------------
+
+  tool(
+    "list_reports",
+    "List the pre-built REPORTS available in this connector (the report 'library'): their names, what each shows, and parameters. Call this when the user asks 'what reports can you run?' / 'what can you show me?' or to pick a canned analytics report. Each report is a single fast call that returns a finished table. For anything not in the library, use the ad-hoc tools (count_entity, search_*).",
+    {},
+    async () => runTool("list_reports", {}, async () => listReports()),
+  );
+
+  tool(
+    "staffing_scorecard",
+    "PRE-BUILT REPORT (one fast call). Department staffing scorecard for a year: confirmed placements split by Contract / Contract-to-Hire / Direct Hire, currently open jobs, active sales opportunities, and a demand-vs-delivery ratio per department — plus totals and an 'otherOrUnmapped' bucket for records outside the configured departments. Uses this instance's locked definitions (open jobs = isOpen AND NOT Archive; placements made = Approved/Completed/Ended; active opps = NOT Closed-Won/Closed-Lost/Converted). Prefer this over assembling the numbers yourself with count_entity for scorecard / overview asks.",
+    {
+      year: z
+        .number()
+        .int()
+        .optional()
+        .describe("Calendar year for placements (default: current year, year-to-date)."),
+    },
+    async ({ year }) => runTool("staffing_scorecard", { year }, () => staffingScorecard({ year })),
+  );
+
+  tool(
+    "placements_report",
+    "PRE-BUILT REPORT (one fast call). Confirmed placements over a period, broken down by department and employment type (Contract / Contract-to-Hire / Direct Hire), with totals, a per-status breakdown, and an 'otherOrUnmapped' bucket. 'Confirmed' = status Approved/Completed/Ended by default; pass status:'all' to include every status.",
+    {
+      startDate: z.string().optional().describe("Start date YYYY-MM-DD (default: start of current year)."),
+      endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),
+      status: z
+        .enum(["confirmed", "all"])
+        .optional()
+        .describe("'confirmed' (default; Approved/Completed/Ended) or 'all' statuses."),
+    },
+    async ({ startDate, endDate, status }) =>
+      runTool("placements_report", { startDate, endDate, status }, () =>
+        placementsReport({ startDate, endDate, status }),
+      ),
+  );
+
+  tool(
+    "open_jobs_report",
+    "PRE-BUILT REPORT (one fast call). Current demand: open job requisitions by department and by employment type, with the grand total. Open jobs = isOpen:true AND NOT status:Archive (this instance's locked definition).",
+    {},
+    async () => runTool("open_jobs_report", {}, () => openJobsReport()),
+  );
+
+  tool(
+    "sales_pipeline_report",
+    "PRE-BUILT REPORT (one fast call). Active sales pipeline: open opportunities by department and by stage (status), with the total. Active = NOT Closed-Won / Closed-Lost / Converted.",
+    {},
+    async () => runTool("sales_pipeline_report", {}, () => salesPipelineReport()),
+  );
+
+  tool(
+    "job_aging_report",
+    "PRE-BUILT REPORT (one fast call). How long open jobs have been open: counts bucketed by age (0-30 / 31-90 / 91-180 / 180+ days) plus stale (>90 days) open jobs by department. Spotlights aging requisitions. Open jobs = isOpen:true AND NOT status:Archive.",
+    {},
+    async () => runTool("job_aging_report", {}, () => jobAgingReport()),
+  );
+
+  tool(
+    "recruiter_leaderboard",
+    "PRE-BUILT REPORT (one fast call). Recruiter activity leaderboard: recruiters ranked by CONFIRMED placements (Approved/Completed/Ended) over a period, each with their job-submission count for the same period. Note: this v1 lists only recruiters who made at least one confirmed placement (submissions are shown for those recruiters); recruiters who submitted but have no confirmed placement are not listed.",
+    {
+      startDate: z.string().optional().describe("Start date YYYY-MM-DD (default: start of current year)."),
+      endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),
+    },
+    async ({ startDate, endDate }) =>
+      runTool("recruiter_leaderboard", { startDate, endDate }, () =>
+        recruiterLeaderboard({ startDate, endDate }),
       ),
   );
 
