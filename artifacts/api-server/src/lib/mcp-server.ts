@@ -178,14 +178,14 @@ export function createMcpServer(): McpServer {
 
   tool(
     "search_jobs",
-    "Search for job orders in Bullhorn ATS using a Lucene query. Returns matching job records. Each record includes a `bullhornUrl` deep link to open the job directly in Bullhorn.",
+    "Search for job orders in Bullhorn ATS using a Lucene query. Returns matching job records, each with a `bullhornUrl` deep link to open the job in Bullhorn. IMPORTANT: in this instance each job's \"Internal Department\" (the owning office/branch, e.g. \"MYT-Ottawa\" or \"MYT-Chicago\") is stored in the field `correlatedCustomText1`, which is populated on virtually all jobs — use that field (NOT `categories`, which is mostly empty) to group, filter, or report jobs by internal department. You can filter on it directly, e.g. query `isOpen:true AND correlatedCustomText1:\"MYT-Ottawa\"`. To count or group jobs, request a high `count` (up to 500); if the response's `total` is larger than the number of records returned, page with `start` to fetch the remainder before finalizing any counts.",
     {
       query: z
         .string()
         .describe(
           "Lucene query string, e.g. 'status:Open AND title:\"Software Engineer\"' or 'isOpen:true'",
         ),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20)"),
+      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 20, max: 500). For grouping/aggregation across all jobs, set this high to avoid paging."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },

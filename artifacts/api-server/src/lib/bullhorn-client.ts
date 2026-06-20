@@ -499,7 +499,12 @@ export async function searchJobs(args: {
 }) {
   const fields =
     args.fields ??
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription";
+    // `correlatedCustomText1` is this instance's "Internal Department" (office/
+    // branch, e.g. "MYT-Ottawa"); included so callers can group/filter by it.
+    // `publicDescription` is deliberately omitted from the search default: it is
+    // large free text that bloats multi-record payloads (and a high `count` could
+    // exceed MCP response-size limits). Request it explicitly, or use get_job.
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,correlatedCustomText1";
   return searchEntity("JobOrder", args.query, fields, args.count ?? 20, args.start ?? 0);
 }
 
@@ -549,7 +554,7 @@ export async function getCandidate(args: { id: number; fields?: string }) {
 export async function getJob(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate";
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate,correlatedCustomText1";
   return getEntity("JobOrder", args.id, fields);
 }
 
@@ -1242,7 +1247,7 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
     canonical: "JobOrder",
     route: "both",
     defaultFields:
-      "id,title,status,type,clientCorporation,owner,dateAdded,isOpen,numOpenings",
+      "id,title,status,type,clientCorporation,owner,dateAdded,isOpen,numOpenings,correlatedCustomText1",
   },
   jobsubmission: {
     canonical: "JobSubmission",
@@ -1428,6 +1433,10 @@ export async function describeEntity(args: { entityType: string }) {
         const associated = f.associatedEntity as { entity?: string } | undefined;
         return {
           name: f.name,
+          // The human-readable UI label (e.g. "Internal Department" for the
+          // opaque `correlatedCustomText1`) so callers can map labels they see
+          // in Bullhorn to the real API field names used in queries/fields.
+          ...(typeof f.label === "string" && f.label ? { label: f.label } : {}),
           type: f.type,
           dataType: f.dataType,
           ...(f.optionsType ? { optionsType: f.optionsType } : {}),
