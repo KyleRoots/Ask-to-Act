@@ -17,6 +17,7 @@ import {
   searchAnyEntity,
   queryAnyEntity,
   getAnyEntity,
+  countEntity,
   describeEntity,
   listSubmissionsForCandidate,
   listAppointments,
@@ -431,6 +432,38 @@ export function createMcpServer(): McpServer {
         "query_entity",
         { entityType, where, orderBy, count, start, fields },
         () => queryAnyEntity({ entityType, where, orderBy, count, start, fields }),
+      ),
+  );
+
+  tool(
+    "count_entity",
+    `Count Bullhorn records for a Lucene query WITHOUT returning the records — and optionally break the count down by a field. USE THIS for "how many" and scorecard / by-department questions instead of fetching records and counting them yourself: record lists cap at 100-500 and will undercount (e.g. report "51+" instead of the true total). Returns exact totals straight from Bullhorn in a tiny payload. Set \`groupBy\` to a field to get a per-value breakdown; for EXACT grouping also pass the known values in \`groupValues\` (e.g. the Internal Department names) — without them, values are auto-discovered from a sample and may be incomplete (groupsComplete:false). "Internal Department" field by entity: JobOrder & Placement = \`correlatedCustomText1\`; Opportunity, ClientContact & Lead = \`customText1\`; Candidate = \`customText3\`. Searchable entities only: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Lead, Opportunity, Note.`,
+    {
+      entityType: z.string().describe(entityTypeDescribe),
+      query: z
+        .string()
+        .optional()
+        .describe(
+          "Lucene query to count (default: all records). E.g. 'isOpen:true AND NOT status:Archive'",
+        ),
+      groupBy: z
+        .string()
+        .optional()
+        .describe(
+          "Optional field to break the count down by, e.g. 'correlatedCustomText1' (Internal Department).",
+        ),
+      groupValues: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Optional explicit list of groupBy values for EXACT per-group counts (recommended over auto-discovery). Max 50.",
+        ),
+    },
+    async ({ entityType, query, groupBy, groupValues }) =>
+      runTool(
+        "count_entity",
+        { entityType, query, groupBy, groupValues },
+        () => countEntity({ entityType, query, groupBy, groupValues }),
       ),
   );
 

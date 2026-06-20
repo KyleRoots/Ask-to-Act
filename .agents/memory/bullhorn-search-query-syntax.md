@@ -34,6 +34,22 @@ Opportunity/most = customText1, Candidate = customText3. Reusing the placement f
 on an opportunity search returns NULLs (not an error), so a department column can come
 back silently blank.
 
+# Counting records: read `total`, don't fetch + count
+The /search response includes `total` = the FULL match count even when count<returned
+(so count:1 still returns the true total in ~100-180 bytes). To answer "how many" /
+build scorecards, run search count:1 and read `total` — never fetch records and count
+them (generic search/query cap at 100 records, so you silently undercount, e.g. "51+"
+instead of 414). The /query path does NOT return `total`. The count_entity tool encodes
+this; per-group counts are one count:1 query per value.
+
+**Combining a base query with a group clause hits the SAME pure-negation trap.** When
+counting by group you build `base AND field:"value"`. If the base is all-negative (e.g.
+active opportunities), wrapping it as `(NOT a AND NOT b) AND field:"X"` returns 0 for
+EVERY group (parenthesized all-negative = 0). Fix: flat-anchor the base
+(anchorPureNegationQuery) and flat-append the clause — `id:[1 TO *] AND NOT a AND NOT b
+AND field:"X"`. Only parenthesize the base when it has a top-level OR (else precedence
+breaks). Verified: jobs by dept summed exactly to total (242/106/48/13/5 = 414).
+
 # Three DIFFERENT ChatGPT "blocked" messages — do not conflate
 1. "blocked by the connector safety layer" (assistant narration) = client-side
    tool-output SIZE drop. Fix: compact JSON + scoped fields + pagination. See

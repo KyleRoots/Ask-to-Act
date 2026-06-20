@@ -1469,6 +1469,126 @@ export async function searchAnyEntity(args: {
   );
 }
 
+const MAX_GROUP_VALUES = 50;
+const GROUP_DISCOVERY_SAMPLE = 500;
+const GROUP_FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.]*$/;
+
+/** Reads Bullhorn's authoritative total match count for a Lucene query, no records. */
+async function searchTotal(entity: string, query: string): Promise<number> {
+  const res = (await searchEntity(entity, query, "id", 1, 0)) as { total?: number };
+  return typeof res.total === "number" ? res.total : 0;
+}
+
+/**
+ * Counts Bullhorn records for a query WITHOUT returning the records — and optionally
+ * breaks the count down by a field (e.g. Internal Department). This exists because LLM
+ * clients otherwise try to build scorecards by fetching records and counting them
+ * client-side, which silently truncates at the per-call record cap (so "414 open jobs"
+ * gets reported as "100" or "51+"). Here we run /search with count=1 and read its
+ * authoritative `total`, returning tiny exact payloads.
+ *
+ * Grouping: prefer caller-supplied `groupValues` (exact). If only `groupBy` is given,
+ * distinct values are discovered from a capped sample, which can MISS values when the
+ * match set is larger than the sample — then groupsComplete is false and the caller
+ * should pass groupValues explicitly.
+ */
+export async function countEntity(args: {
+  entityType: string;
+  query?: string;
+  groupBy?: string;
+  groupValues?: string[];
+}): Promise<unknown> {
+  const entry = resolveEntity(args.entityType);
+  if (entry.route === "query") {
+    throw new Error(
+      `count_entity supports only full-text searchable entities (Candidate, ClientContact, ` +
+        `ClientCorporation, JobOrder, JobSubmission, Placement, Lead, Opportunity, Note). ` +
+        `"${entry.canonical}" is query-only — use query_entity instead.`,
+    );
+  }
+  const baseRaw = (args.query ?? "").trim();
+  const base = baseRaw === "" ? "id:[1 TO *]" : baseRaw;
+  const total = await searchTotal(entry.canonical, base);
+
+  if (!args.groupBy) {
+    return { entityType: entry.canonical, query: base, total, mode: "count_only" };
+  }
+
+  const groupBy = args.groupBy.trim();
+  if (!GROUP_FIELD_NAME_RE.test(groupBy)) {
+    throw new Error(
+      `Invalid groupBy field "${args.groupBy}". Use a single field name, e.g. "correlatedCustomText1".`,
+    );
+  }
+  if (isSensitiveField(groupBy)) {
+    throw new Error(`Field "${groupBy}" cannot be used for grouping.`);
+  }
+
+  let values = (args.groupValues ?? [])
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter((v) => v.length > 0);
+  let groupsComplete = true;
+  let discoveredFromSample = false;
+  let sampleSize: number | undefined;
+
+  if (values.length === 0) {
+    const sample = (await searchEntity(
+      entry.canonical,
+      base,
+      groupBy,
+      GROUP_DISCOVERY_SAMPLE,
+      0,
+    )) as { data?: Array<Record<string, unknown>> };
+    const rows = Array.isArray(sample.data) ? sample.data : [];
+    const distinct = new Set<string>();
+    for (const row of rows) {
+      const v = row?.[groupBy];
+      if (typeof v === "string" && v.trim() !== "") distinct.add(v.trim());
+    }
+    values = [...distinct];
+    sampleSize = rows.length;
+    discoveredFromSample = true;
+    groupsComplete = total <= rows.length;
+  }
+
+  if (values.length > MAX_GROUP_VALUES) {
+    values = values.slice(0, MAX_GROUP_VALUES);
+    groupsComplete = false;
+  }
+
+  // Build each group's query by AND-ing the base with the value clause. The base must
+  // keep working when combined: an all-negative base (e.g. active-opportunities) returns
+  // 0 if parenthesized, so anchor it FLAT (id:[1 TO *] AND NOT ...) and append flat. Only
+  // parenthesize when the base has a top-level OR, where flat-appending would change
+  // precedence (a pure-negation+OR base is the known unsupported case and stays 0).
+  const hasTopLevelOr = /\bOR\b/i.test(base);
+  const flatBase = anchorPureNegationQuery(base, entry.canonical);
+  // One tiny /search per value, sequential to stay well under the rate limit; a single
+  // bad value yields a per-group error instead of failing the whole batch.
+  const groups: Array<{ value: string; count: number | null; error?: string }> = [];
+  for (const value of values) {
+    const clause = `${groupBy}:"${escapeLucenePhrase(value)}"`;
+    const q = hasTopLevelOr ? `(${base}) AND ${clause}` : `${flatBase} AND ${clause}`;
+    try {
+      groups.push({ value, count: await searchTotal(entry.canonical, q) });
+    } catch (e) {
+      groups.push({ value, count: null, error: (e as Error).message.slice(0, 160) });
+    }
+  }
+  groups.sort((a, b) => (b.count ?? -1) - (a.count ?? -1));
+
+  return {
+    entityType: entry.canonical,
+    query: base,
+    total,
+    mode: "count_by_group",
+    groupBy,
+    groups,
+    groupsComplete,
+    ...(discoveredFromSample ? { discoveredFromSample, sampleSize } : {}),
+  };
+}
+
 /** Generic structured (/query) read over any query-capable catalog entity. */
 export async function queryAnyEntity(args: {
   entityType: string;
