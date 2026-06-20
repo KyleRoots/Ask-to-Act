@@ -1,5 +1,6 @@
 import { getSession, invalidateSession } from "./bullhorn-auth.js";
 import { logger } from "./logger.js";
+import { cacheGet, cacheSet } from "./cache.js";
 
 const MAX_RETRIES = 1;
 
@@ -51,6 +52,13 @@ async function bullhornFetch(
   params: Record<string, string | number>,
   retries = MAX_RETRIES,
 ): Promise<unknown> {
+  // Cache key excludes the rotating BhRestToken; same path+params => same read.
+  const cacheKey = `fetch:${path}:${JSON.stringify(
+    Object.entries(params).sort(([a], [b]) => a.localeCompare(b)),
+  )}`;
+  const cached = cacheGet<unknown>(cacheKey);
+  if (cached !== undefined) return cached;
+
   const session = await getSession();
   const url = new URL(path, session.restUrl);
   url.searchParams.set("BhRestToken", session.BhRestToken);
@@ -78,7 +86,9 @@ async function bullhornFetch(
     throw formatBullhornError("API", res.status, text);
   }
 
-  return res.json();
+  const json = await res.json();
+  cacheSet(cacheKey, json);
+  return json;
 }
 
 const SENSITIVE_FIELD_RE =
@@ -372,39 +382,49 @@ async function searchEntity(
   fields = sanitizeFields(fields);
   query = normalizeSearchDateRanges(query, entity);
   query = anchorPureNegationQuery(query, entity);
-  const session = await getSession();
-  const url = new URL(`search/${entity}`, session.restUrl);
-  url.searchParams.set("BhRestToken", session.BhRestToken);
-  url.searchParams.set("query", query);
-  url.searchParams.set("fields", fields);
-  url.searchParams.set("count", String(count));
-  url.searchParams.set("start", String(start));
 
-  let res = await fetch(url.toString(), { redirect: "follow" });
+  // Cache the raw Bullhorn JSON (post-processing below mutates a fresh clone each
+  // call, so cached entries stay pristine). Key excludes the rotating BhRestToken.
+  const cacheKey = `search:${entity}:${query}:${fields}:${count}:${start}`;
+  let raw = cacheGet<unknown>(cacheKey);
+  if (raw === undefined) {
+    const session = await getSession();
+    const url = new URL(`search/${entity}`, session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set("query", query);
+    url.searchParams.set("fields", fields);
+    url.searchParams.set("count", String(count));
+    url.searchParams.set("start", String(start));
 
-  if (res.status === 401) {
-    logger.warn("Bullhorn: 401 on search, re-authenticating");
-    await invalidateSession();
-    const session2 = await getSession();
-    const url2 = new URL(`search/${entity}`, session2.restUrl);
-    url2.searchParams.set("BhRestToken", session2.BhRestToken);
-    url2.searchParams.set("query", query);
-    url2.searchParams.set("fields", fields);
-    url2.searchParams.set("count", String(count));
-    url2.searchParams.set("start", String(start));
-    res = await fetch(url2.toString(), { redirect: "follow" });
+    let res = await fetch(url.toString(), { redirect: "follow" });
+
+    if (res.status === 401) {
+      logger.warn("Bullhorn: 401 on search, re-authenticating");
+      await invalidateSession();
+      const session2 = await getSession();
+      const url2 = new URL(`search/${entity}`, session2.restUrl);
+      url2.searchParams.set("BhRestToken", session2.BhRestToken);
+      url2.searchParams.set("query", query);
+      url2.searchParams.set("fields", fields);
+      url2.searchParams.set("count", String(count));
+      url2.searchParams.set("start", String(start));
+      res = await fetch(url2.toString(), { redirect: "follow" });
+    }
+
+    if (res.status === 429) {
+      throw new Error("Bullhorn API rate limit exceeded. Please try again shortly.");
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw formatBullhornError("search", res.status, text);
+    }
+    raw = await res.json();
+    cacheSet(cacheKey, raw);
   }
 
-  if (res.status === 429) {
-    throw new Error("Bullhorn API rate limit exceeded. Please try again shortly.");
-  }
-  if (!res.ok) {
-    const text = await res.text();
-    throw formatBullhornError("search", res.status, text);
-  }
   return redactCandidateDescriptions(
     entity,
-    await enrichWithProfileUrls(entity, await res.json()),
+    await enrichWithProfileUrls(entity, raw),
     { capDescription: true },
   );
 }
@@ -754,7 +774,35 @@ export async function listPlacements(args: {
     // correlatedCustomText1 = "Internal Department"; customText29 = "External ID";
     // customDate1 = "Original End Date" (epoch ms); customText2 = "Currency Unit".
     "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate,clientBillRate,correlatedCustomText1,customText29,customDate1,customText2";
-  return queryEntity("Placement", where, fields, args.count ?? 50, args.start ?? 0, "-dateAdded");
+  const result = await queryEntity(
+    "Placement",
+    where,
+    fields,
+    args.count ?? 50,
+    args.start ?? 0,
+    "-dateAdded",
+  );
+
+  // A broad placements list (no candidate/job filter) is the pattern AI clients
+  // misuse to ANSWER "how many placements this year" — they read the all-status
+  // `total` (123) when the official figure is CONFIRMED only (98). This list has no
+  // status filter, so always surface the confirmed count + a note so the AI reports
+  // the locked number instead of the inflated all-status total.
+  if (!args.candidateId && !args.jobId && result && typeof result === "object") {
+    const dateClause = searchDateClause("dateAdded", args.dateAddedStart, args.dateAddedEnd);
+    const confirmedQuery = dateClause
+      ? `${dateClause} AND ${CONFIRMED_PLACEMENT_CLAUSE}`
+      : CONFIRMED_PLACEMENT_CLAUSE;
+    const confirmedPlacements = await searchTotal("Placement", confirmedQuery);
+    const r = result as Record<string, unknown>;
+    r.confirmedPlacements = confirmedPlacements;
+    r.note =
+      `This list (and its all-status 'total') includes ALL placement statuses (pending Submitted, Canceled, Archive). ` +
+      `"Placements made / this year" officially means CONFIRMED only = ${CONFIRMED_PLACEMENT_CLAUSE} → ` +
+      `report confirmedPlacements (${confirmedPlacements}), or call the placements_report tool. ` +
+      `Use the all-status total only if the user explicitly asked for all/pending/canceled placements.`;
+  }
+  return result;
 }
 
 export async function getNotes(args: {
@@ -1530,6 +1578,64 @@ async function searchTotal(entity: string, query: string): Promise<number> {
 }
 
 /**
+ * Enforces the LOCKED "open jobs" definition server-side so the count cannot drift.
+ * The official metric is `isOpen:true AND NOT status:Archive` (the open flag alone
+ * still counts Archived requisitions — that is the 513-vs-414 drift we observed live).
+ * AI clients routinely query a raw `isOpen:true`; when they do (for JobOrder) without
+ * addressing the status, we transparently append the Archive exclusion and report the
+ * applied definition so the answer always matches the curated open_jobs report.
+ * If the caller already mentions `status`/`Archive`, we leave their query untouched.
+ */
+function applyOpenJobsGuard(
+  entity: string,
+  query: string,
+): { query: string; appliedDefinition?: string } {
+  if (entity !== "JobOrder") return { query };
+  if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
+  if (/\bstatus\s*:/i.test(query)) return { query };
+  return {
+    query: `${query} AND NOT status:Archive`,
+    appliedDefinition:
+      "open jobs = isOpen:true AND NOT status:Archive (Archived requisitions excluded to match the official open-jobs metric; on-hold/filled/placed still included)",
+  };
+}
+
+/**
+ * Confirmed-placement statuses for this instance. "Placements made / this year" means
+ * CONFIRMED only; Submitted (pending), Canceled, and Archive are NOT real placements
+ * (counting all statuses gives the 123-vs-98 drift we observed live).
+ */
+const CONFIRMED_PLACEMENT_CLAUSE =
+  "(status:Approved OR status:Completed OR status:Ended)";
+
+/**
+ * For a Placement count with NO status filter, the raw `total` includes pending/
+ * canceled/archived rows. Rather than silently change the number the caller asked for,
+ * we ALSO compute the confirmed-only total and attach a note, so the AI reports the
+ * official figure (98) instead of the all-status figure (123). No-op once the caller
+ * already constrains status.
+ */
+async function placementConfirmedAnnotation(
+  entity: string,
+  query: string,
+): Promise<{ confirmedTotal: number; note: string } | undefined> {
+  if (entity !== "Placement") return undefined;
+  if (/\bstatus\s*:/i.test(query)) return undefined;
+  const confirmedTotal = await searchTotal(
+    entity,
+    `(${query}) AND ${CONFIRMED_PLACEMENT_CLAUSE}`,
+  );
+  return {
+    confirmedTotal,
+    note:
+      `'total' counts ALL placement statuses (including pending Submitted, Canceled, and Archive). ` +
+      `"Placements made / this year" officially means CONFIRMED placements only = ` +
+      `${CONFIRMED_PLACEMENT_CLAUSE} → report confirmedTotal (${confirmedTotal}), ` +
+      `or call the placements_report tool. Only use 'total' if the user explicitly asked for all/pending/canceled placements.`,
+  };
+}
+
+/**
  * Counts Bullhorn records for a query WITHOUT returning the records — and optionally
  * breaks the count down by a field (e.g. Internal Department). This exists because LLM
  * clients otherwise try to build scorecards by fetching records and counting them
@@ -1557,11 +1663,23 @@ export async function countEntity(args: {
     );
   }
   const baseRaw = (args.query ?? "").trim();
-  const base = baseRaw === "" ? "id:[1 TO *]" : baseRaw;
+  const baseInput = baseRaw === "" ? "id:[1 TO *]" : baseRaw;
+  // Lock the "open jobs" definition so a raw isOpen:true cannot drift (513 -> 414).
+  const guard = applyOpenJobsGuard(entry.canonical, baseInput);
+  const base = guard.query;
   const total = await searchTotal(entry.canonical, base);
+  // Surface the confirmed-only placement figure (98) alongside an all-status total (123).
+  const placementAnnotation = await placementConfirmedAnnotation(entry.canonical, base);
 
   if (!args.groupBy) {
-    return { entityType: entry.canonical, query: base, total, mode: "count_only" };
+    return {
+      entityType: entry.canonical,
+      query: base,
+      total,
+      mode: "count_only",
+      ...(guard.appliedDefinition ? { appliedDefinition: guard.appliedDefinition } : {}),
+      ...(placementAnnotation ?? {}),
+    };
   }
 
   const groupBy = args.groupBy.trim();
@@ -1636,6 +1754,8 @@ export async function countEntity(args: {
     groups,
     groupsComplete,
     ...(discoveredFromSample ? { discoveredFromSample, sampleSize } : {}),
+    ...(guard.appliedDefinition ? { appliedDefinition: guard.appliedDefinition } : {}),
+    ...(placementAnnotation ?? {}),
   };
 }
 
