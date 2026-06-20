@@ -696,6 +696,111 @@ function redactResumeText(text: string): string {
   return text.replace(SSN_RE, "[REDACTED-SSN]");
 }
 
+/** Chars of context kept on EACH side of a matched term in an excerpt. */
+const EXCERPT_WINDOW_CHARS = 220;
+/** Overall caps so excerpt payloads stay small. */
+const MAX_TOTAL_EXCERPTS = 10;
+const MAX_EXCERPT_TOTAL_CHARS = 4_000;
+/** Clamp on a single (possibly merged) excerpt so one long passage can't bloat the result. */
+const MAX_SINGLE_EXCERPT_CHARS = 1_200;
+
+/**
+ * Builds short quotes ("excerpts") around the FIRST occurrence of each term in
+ * `text`. Returned by get_candidate_resume's VERIFY mode INSTEAD of the full
+ * résumé, so the payload stays small and low on PII — which makes clients such as
+ * ChatGPT far less likely to withhold the result ("blocked by the tool-safety
+ * layer"), while still giving the exact "quote where it appears" to cite.
+ *
+ * Contract (important): a term lands in `matchedTerms` ONLY if it is actually
+ * present in a returned quote (verified, not just "found somewhere"). Terms that
+ * appear in the text but whose quote was trimmed by the caps go in
+ * `foundButNotQuoted` (and set `truncated`); terms absent from the text go in
+ * `termsNotFound`. So `matchedTerms` is always backed by citable evidence and
+ * the model can never report a skill/clearance as present without a quote.
+ *
+ * Each excerpt is a ~EXCERPT_WINDOW_CHARS window on either side of a match (with
+ * "…" markers when it doesn't reach a text boundary); overlapping windows are
+ * merged into one quote that may cover several `terms`. Case-insensitive and
+ * phrase-aware (a term may be a multi-word phrase). Pure string work; no network
+ * or mutation.
+ */
+function buildExcerpts(
+  text: string,
+  terms: string[],
+): {
+  excerpts: Array<{ terms: string[]; quote: string }>;
+  matchedTerms: string[];
+  foundButNotQuoted: string[];
+  termsNotFound: string[];
+  truncated: boolean;
+} {
+  const cleanTerms = Array.from(
+    new Set(terms.map((t) => t.trim()).filter((t) => t.length > 0)),
+  );
+  const hay = text.toLowerCase();
+
+  // First occurrence of each term (one anchor per term).
+  const found: Array<{ term: string; idx: number }> = [];
+  const termsNotFound: string[] = [];
+  for (const term of cleanTerms) {
+    const idx = hay.indexOf(term.toLowerCase());
+    if (idx === -1) termsNotFound.push(term);
+    else found.push({ term, idx });
+  }
+  found.sort((a, b) => a.idx - b.idx);
+
+  // Merge overlapping windows (sorted by idx → only need to check the last one).
+  type Range = { start: number; end: number; terms: string[] };
+  const ranges: Range[] = [];
+  let truncated = false;
+  for (const { term, idx } of found) {
+    const start = Math.max(0, idx - EXCERPT_WINDOW_CHARS);
+    const end = Math.min(text.length, idx + term.length + EXCERPT_WINDOW_CHARS);
+    const last = ranges[ranges.length - 1];
+    if (last && start <= last.end) {
+      last.end = Math.max(last.end, end);
+      if (!last.terms.includes(term)) last.terms.push(term);
+    } else if (ranges.length < MAX_TOTAL_EXCERPTS) {
+      ranges.push({ start, end, terms: [term] });
+    } else {
+      truncated = true; // no room to open a new excerpt window
+    }
+  }
+
+  const excerpts: Array<{ terms: string[]; quote: string }> = [];
+  const quoted = new Set<string>();
+  let totalChars = 0;
+  for (const r of ranges) {
+    const start = r.start;
+    // Clamp a single (merged) window so one long passage can't bloat the result.
+    const end = Math.min(r.end, start + MAX_SINGLE_EXCERPT_CHARS);
+    if (end < r.end) truncated = true;
+    let quote = text.slice(start, end).trim();
+    if (start > 0) quote = "…" + quote;
+    if (end < text.length) quote = quote + "…";
+    if (totalChars + quote.length > MAX_EXCERPT_TOTAL_CHARS && excerpts.length > 0) {
+      truncated = true;
+      break;
+    }
+    // Only credit terms that ACTUALLY appear in the emitted quote (a term anchored
+    // past the clamp wouldn't), so matchedTerms is always evidence-backed.
+    const ql = quote.toLowerCase();
+    const present = r.terms.filter((t) => ql.includes(t.toLowerCase()));
+    if (present.length === 0) continue;
+    excerpts.push({ terms: present, quote });
+    present.forEach((t) => quoted.add(t));
+    totalChars += quote.length;
+  }
+
+  const matchedTerms = found.map((f) => f.term).filter((t) => quoted.has(t));
+  const foundButNotQuoted = found
+    .map((f) => f.term)
+    .filter((t) => !quoted.has(t));
+  if (foundButNotQuoted.length > 0) truncated = true;
+
+  return { excerpts, matchedTerms, foundButNotQuoted, termsNotFound, truncated };
+}
+
 /**
  * Sanitizes the attachment `description` returned as metadata. Bullhorn may put
  * the full parsed résumé text here, so apply the same SSN redaction as extracted
@@ -960,18 +1065,29 @@ export async function readCandidateAttachment(args: {
 export async function getCandidateResume(args: {
   candidateId: number;
   maxChars?: number;
+  highlight?: string[];
 }) {
+  const highlightTerms = Array.isArray(args.highlight)
+    ? args.highlight
+        .map((t) => (typeof t === "string" ? t : ""))
+        .filter((t) => t.trim().length > 0)
+    : [];
+  const highlightActive = highlightTerms.length > 0;
+
   const cand = (await bullhornFetch(`entity/Candidate/${args.candidateId}`, {
     fields: "id,firstName,lastName,description",
   })) as Record<string, unknown>;
   const candData = (pickKey(cand, "data") ?? cand) as Record<string, unknown>;
   const rawDescription = asString(pickKey(candData, "description"));
   const cap = clampChars(args.maxChars);
-  let descriptionText: string | null = null;
-  if (rawDescription && rawDescription.trim() !== "") {
-    const cleaned = redactResumeText(stripHtml(rawDescription));
-    descriptionText = cleaned.length > cap ? cleaned.slice(0, cap) : cleaned;
-  }
+  // In VERIFY (excerpt) mode we search the FULL résumé so matches beyond the
+  // normal cap aren't missed, but only return short quotes — so the response
+  // stays small regardless. In FULL mode we cap as before.
+  const searchCap = highlightActive ? MAX_ATTACHMENT_TEXT_CHARS : cap;
+  const cleanedDescription =
+    rawDescription && rawDescription.trim() !== ""
+      ? redactResumeText(stripHtml(rawDescription))
+      : null;
 
   const { attachments } = await listCandidateAttachments({
     candidateId: args.candidateId,
@@ -992,7 +1108,7 @@ export async function getCandidateResume(args: {
     resumeAttachmentText = await readCandidateAttachment({
       candidateId: args.candidateId,
       fileId: resume.id,
-      maxChars: args.maxChars,
+      maxChars: searchCap,
     });
   }
 
@@ -1001,21 +1117,67 @@ export async function getCandidateResume(args: {
       ? (resumeAttachmentText as { text?: string }).text ?? null
       : null;
 
-  // Best single answer for "read the résumé": prefer the attachment's extracted
+  // Best single source for "read the résumé": prefer the attachment's extracted
   // text, falling back to the parsed text on the candidate record.
-  const resumeText = fileText ?? descriptionText;
+  const sourceFullText = fileText ?? cleanedDescription;
   const resumeTextSource = fileText
     ? "attachment"
-    : descriptionText
+    : cleanedDescription
       ? "candidate.description"
       : "none";
 
+  const candidateName =
+    [asString(pickKey(candData, "firstName")), asString(pickKey(candData, "lastName"))]
+      .filter(Boolean)
+      .join(" ") || undefined;
+
+  // VERIFY mode: return only short quotes around the requested terms.
+  if (highlightActive) {
+    const { excerpts, matchedTerms, foundButNotQuoted, termsNotFound, truncated } =
+      buildExcerpts(sourceFullText ?? "", highlightTerms);
+    // Drop the attachments' parsed `description` previews here: VERIFY mode is the
+    // privacy-lean path, and those previews can carry résumé text we deliberately
+    // aren't returning. Keep the rest of the metadata (name/type/id/dates).
+    const stripDescription = <T extends { description?: unknown }>(a: T | null) =>
+      a ? (({ description: _drop, ...rest }) => rest)(a) : a;
+    return {
+      candidateId: args.candidateId,
+      candidateName,
+      mode: "excerpts" as const,
+      resumeTextSource,
+      highlightTerms,
+      matchedTerms,
+      foundButNotQuoted,
+      termsNotFound,
+      excerpts,
+      excerptsTruncated: truncated,
+      resumeAttachment: stripDescription(resume ?? null),
+      attachmentCount: attachments.length,
+      attachments: attachments.map((a) => stripDescription(a)),
+      note:
+        resumeTextSource === "none"
+          ? "No résumé text was found on the candidate record (description) and " +
+            "no readable text attachment exists. Any binary attachments are listed " +
+            "above — open them in Bullhorn to view."
+          : "VERIFY mode: returned short quotes around your `highlight` terms instead " +
+            "of the full résumé, to keep the result small and reduce the chance the " +
+            "client withholds it. `matchedTerms` are confirmed present WITH a quote; " +
+            "`foundButNotQuoted` appear but their quote was trimmed by size caps; " +
+            "`termsNotFound` do not appear. For the complete text, call " +
+            "get_candidate_resume again WITHOUT `highlight` (optionally raise `maxChars`).",
+    };
+  }
+
+  // FULL mode (unchanged behaviour): return the capped résumé text.
+  const descriptionText = cleanedDescription
+    ? cleanedDescription.length > cap
+      ? cleanedDescription.slice(0, cap)
+      : cleanedDescription
+    : null;
+  const resumeText = fileText ?? descriptionText;
   return {
     candidateId: args.candidateId,
-    candidateName:
-      [asString(pickKey(candData, "firstName")), asString(pickKey(candData, "lastName"))]
-        .filter(Boolean)
-        .join(" ") || undefined,
+    candidateName,
     resumeText,
     resumeTextSource,
     // Surface the parsed record text separately only when it isn't already the
