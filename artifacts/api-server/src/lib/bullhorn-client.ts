@@ -504,7 +504,8 @@ export async function searchJobs(args: {
     // `publicDescription` is deliberately omitted from the search default: it is
     // large free text that bloats multi-record payloads (and a high `count` could
     // exceed MCP response-size limits). Request it explicitly, or use get_job.
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,correlatedCustomText1";
+    // customText2 = "Client Job Title" (the client's own title for the role).
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,correlatedCustomText1,customText2";
   return searchEntity("JobOrder", args.query, fields, args.count ?? 20, args.start ?? 0);
 }
 
@@ -534,7 +535,8 @@ export async function searchContacts(args: {
 }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,clientCorporation,status,owner,dateAdded";
+    // customText1 = this instance's "Internal Department" on contacts.
+    "id,firstName,lastName,email,phone,clientCorporation,status,owner,dateAdded,customText1";
   return searchEntity(
     "ClientContact",
     args.query,
@@ -547,14 +549,15 @@ export async function searchContacts(args: {
 export async function getCandidate(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,mobile,status,occupation,skillSet,primarySkills(id,name),secondarySkills(id,name),educations(id,degree,major,school),workHistories(id,title,companyName,startDate,endDate),address,salary,dateAvailable,dateLastModified,owner,dateAdded,source";
+    // customText3 = this instance's "Internal Department" on candidates (sparse).
+    "id,firstName,lastName,email,phone,mobile,status,occupation,skillSet,primarySkills(id,name),secondarySkills(id,name),educations(id,degree,major,school),workHistories(id,title,companyName,startDate,endDate),address,salary,dateAvailable,dateLastModified,owner,dateAdded,source,customText3";
   return getEntity("Candidate", args.id, fields);
 }
 
 export async function getJob(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate,correlatedCustomText1";
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate,correlatedCustomText1,customText2";
   return getEntity("JobOrder", args.id, fields);
 }
 
@@ -568,7 +571,8 @@ export async function getCompany(args: { id: number; fields?: string }) {
 export async function getContact(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,email,phone,mobile,clientCorporation,status,owner,dateAdded,description";
+    // customText1 = this instance's "Internal Department" on contacts.
+    "id,firstName,lastName,email,phone,mobile,clientCorporation,status,owner,dateAdded,description,customText1";
   return getEntity("ClientContact", args.id, fields);
 }
 
@@ -618,7 +622,9 @@ export async function listPlacements(args: {
   const where = conditions.join(" AND ");
   const fields =
     args.fields ??
-    "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate,clientBillRate";
+    // correlatedCustomText1 = "Internal Department"; customText29 = "External ID";
+    // customDate1 = "Original End Date" (epoch ms); customText2 = "Currency Unit".
+    "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate,clientBillRate,correlatedCustomText1,customText29,customDate1,customText2";
   return queryEntity("Placement", where, fields, args.count ?? 50, args.start ?? 0, "-dateAdded");
 }
 
@@ -1235,8 +1241,9 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
   clientcontact: {
     canonical: "ClientContact",
     route: "both",
+    // customText1 = this instance's "Internal Department" (owning office/branch).
     defaultFields:
-      "id,firstName,lastName,email,phone,clientCorporation,status,owner,dateAdded",
+      "id,firstName,lastName,email,phone,clientCorporation,status,owner,dateAdded,customText1",
   },
   clientcorporation: {
     canonical: "ClientCorporation",
@@ -1246,8 +1253,9 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
   joborder: {
     canonical: "JobOrder",
     route: "both",
+    // correlatedCustomText1 = "Internal Department"; customText2 = "Client Job Title".
     defaultFields:
-      "id,title,status,type,clientCorporation,owner,dateAdded,isOpen,numOpenings,correlatedCustomText1",
+      "id,title,status,type,clientCorporation,owner,dateAdded,isOpen,numOpenings,correlatedCustomText1,customText2",
   },
   jobsubmission: {
     canonical: "JobSubmission",
@@ -1258,8 +1266,10 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
   placement: {
     canonical: "Placement",
     route: "both",
+    // correlatedCustomText1 = "Internal Department"; customText29 = "External ID";
+    // customDate1 = "Original End Date" (epoch ms); customText2 = "Currency Unit".
     defaultFields:
-      "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate",
+      "id,candidate,jobOrder,status,dateAdded,dateBegin,dateEnd,salary,payRate,correlatedCustomText1,customText29,customDate1,customText2",
   },
   note: {
     canonical: "Note",
@@ -1270,14 +1280,16 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
   lead: {
     canonical: "Lead",
     route: "both",
+    // customText1 = "Internal Department"; customText20 = "External ID".
     defaultFields:
-      "id,firstName,lastName,companyName,status,owner,dateAdded,email,phone",
+      "id,firstName,lastName,companyName,status,owner,dateAdded,email,phone,customText1,customText20",
   },
   opportunity: {
     canonical: "Opportunity",
     route: "both",
+    // customText1 = "Internal Department".
     defaultFields:
-      "id,title,status,clientCorporation,owner,dateAdded,dealValue",
+      "id,title,status,clientCorporation,owner,dateAdded,dealValue,customText1",
   },
   appointment: {
     canonical: "Appointment",
@@ -1415,6 +1427,27 @@ export async function getAnyEntity(args: {
   return getEntity(entry.canonical, args.id, fields);
 }
 
+/**
+ * True when a field is a tenant-CONFIGURED custom field: an opaque custom field
+ * name (customText3, correlatedCustomText1, customInt1, ...) that an admin has
+ * given a real human label (e.g. "Internal Department"), as opposed to an
+ * unconfigured slot whose label is still Bullhorn's generic default ("Custom Text
+ * Block 10", "Custom Encrypted Text 1", "Custom 10", "Custom Object1s"). Lets us
+ * surface the label -> API-field mapping without hardcoding any tenant field name.
+ */
+function isConfiguredCustomField(name: unknown, label: unknown): boolean {
+  if (typeof name !== "string" || typeof label !== "string") return false;
+  if (!/^(custom|correlatedCustom)/i.test(name)) return false;
+  const trimmed = label.trim();
+  if (!trimmed || trimmed.toLowerCase() === name.toLowerCase()) return false;
+  const DEFAULT_LABEL_PATTERNS = [
+    /^(custom\s*)?(text\s*block|encrypted\s*text|bill\s*rate|pay\s*rate|text|int|integer|float|date|object|number)\s*\d+$/i,
+    /^custom\s*object\s*\d+\s*s$/i,
+    /^custom\s*\d+$/i,
+  ];
+  return !DEFAULT_LABEL_PATTERNS.some((re) => re.test(trimmed));
+}
+
 /** Returns a compact field catalog for an entity via Bullhorn /meta. */
 export async function describeEntity(args: { entityType: string }) {
   const entry = resolveEntity(args.entityType);
@@ -1444,10 +1477,17 @@ export async function describeEntity(args: { entityType: string }) {
         };
       })
     : [];
+  const configuredCustomFields = fields.filter((f) =>
+    isConfiguredCustomField(f.name, f.label),
+  );
   return {
     entity: meta.entity ?? entry.canonical,
     label: meta.label,
     fieldCount: fields.length,
+    // Admin-configured custom fields (opaque API name + human label), surfaced so
+    // callers can map a Bullhorn UI label to the real field without scanning all
+    // 100-300 fields. Subset of `fields`.
+    configuredCustomFields,
     fields,
   };
 }
@@ -1554,7 +1594,8 @@ export async function searchLeads(args: {
 }) {
   const fields =
     args.fields ??
-    "id,firstName,lastName,companyName,status,owner,dateAdded,email,phone";
+    // customText1 = "Internal Department"; customText20 = "External ID".
+    "id,firstName,lastName,companyName,status,owner,dateAdded,email,phone,customText1,customText20";
   return searchEntity("Lead", args.query, fields, args.count ?? 20, args.start ?? 0);
 }
 
@@ -1567,7 +1608,8 @@ export async function searchOpportunities(args: {
 }) {
   const fields =
     args.fields ??
-    "id,title,status,clientCorporation,owner,dateAdded,dealValue";
+    // customText1 = "Internal Department".
+    "id,title,status,clientCorporation,owner,dateAdded,dealValue,customText1";
   return searchEntity(
     "Opportunity",
     args.query,

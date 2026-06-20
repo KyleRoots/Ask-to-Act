@@ -214,7 +214,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "search_contacts",
-    "Search for client contacts in Bullhorn ATS using a Lucene query. Each record includes a `bullhornUrl` deep link to open the contact directly in Bullhorn.",
+    "Search for client contacts (ClientContact) in Bullhorn ATS using a Lucene query. This instance stores each contact's \"Internal Department\" (owning office/branch, e.g. \"MYT-Ottawa\") in field customText1 — use it to filter/group contacts by department. Each record includes a `bullhornUrl` deep link to open the contact directly in Bullhorn.",
     {
       query: z
         .string()
@@ -315,7 +315,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "list_placements",
-    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd with a high `count` to retrieve them all in one call instead of paging. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
+    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. This instance stores each placement's \"Internal Department\" (office/branch) in field correlatedCustomText1. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd with a high `count` to retrieve them all in one call instead of paging. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
     {
       candidateId: z.number().int().positive().optional().describe("Filter by candidate Bullhorn ID"),
       jobId: z.number().int().positive().optional().describe("Filter by job order Bullhorn ID"),
@@ -384,7 +384,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "search_entity",
-    `Full-text search (Lucene) over ANY indexed Bullhorn entity — a flexible fallback for read coverage when no dedicated tool fits. Prefer the dedicated tools (search_candidates, search_jobs, search_companies, search_contacts) when they apply. Searchable entities: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. For query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) use query_entity instead. Use describe_entity to discover valid field names. For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
+    `Full-text search (Lucene) over ANY indexed Bullhorn entity — a flexible fallback for read coverage when no dedicated tool fits. Prefer the dedicated tools (search_candidates, search_jobs, search_companies, search_contacts) when they apply. Searchable entities: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. For query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) use query_entity instead. Use describe_entity to discover valid field names — its \`configuredCustomFields\` lists this instance's custom fields with their human labels (label -> API field). This instance's "Internal Department" (office/branch, e.g. "MYT-Ottawa") is a custom field whose API name varies by entity: JobOrder & Placement use \`correlatedCustomText1\`; ClientContact, Lead & Opportunity use \`customText1\`; Candidate uses \`customText3\`. The \`categories\` field is mostly empty, so never group by it. For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
     {
       entityType: z.string().describe(entityTypeDescribe),
       query: z
@@ -404,7 +404,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "query_entity",
-    `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity. Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. The Note entity is search-only — use search_entity for it. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names. 'orderBy' is optional (e.g. '-dateAdded' for newest first). For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
+    `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity. Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. The Note entity is search-only — use search_entity for it. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names — its \`configuredCustomFields\` maps this instance's custom-field labels to API names (e.g. "Internal Department" = \`correlatedCustomText1\` on Placement, \`customText1\` on ClientContact/Lead/Opportunity). 'orderBy' is optional (e.g. '-dateAdded' for newest first). For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn.`,
     {
       entityType: z.string().describe(entityTypeDescribe),
       where: z
@@ -444,7 +444,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "describe_entity",
-    "List the available fields (name + type) for a Bullhorn entity. Use this to discover valid field names before building a query_entity 'where' clause or requesting specific fields.",
+    "List the available fields (name + type) for a Bullhorn entity. The response also includes `configuredCustomFields`: this instance's admin-configured custom fields with their human-readable labels (e.g. \"Internal Department\" -> correlatedCustomText1/customText1), so you can map a label you see in Bullhorn to the real API field name. Use this to discover valid field names before building a query_entity 'where' clause or requesting specific fields.",
     {
       entityType: z.string().describe(entityTypeDescribe),
     },
@@ -556,7 +556,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "search_leads",
-    "Search Bullhorn CRM leads (sales prospects) with a Lucene query. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    "Search Bullhorn CRM leads (sales prospects) with a Lucene query. This instance stores each lead's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Active AND companyName:\"Acme*\"'"),
       count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
@@ -571,7 +571,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "search_opportunities",
-    "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. This instance stores each opportunity's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Open AND title:\"Managed Services\"'"),
       count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),

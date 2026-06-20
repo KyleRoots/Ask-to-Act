@@ -1,6 +1,6 @@
 ---
 name: Bullhorn custom-field label mapping
-description: Bullhorn custom fields have opaque API names; their real meaning lives in the meta `label`. Includes this corp's known JobOrder mappings.
+description: Bullhorn custom fields have opaque API names; their real meaning lives in the meta `label`. Includes this corp's cross-entity "Internal Department" mapping and the describe_entity configuredCustomFields backbone.
 ---
 
 # Bullhorn custom fields are opaque — map them via meta `label`
@@ -27,8 +27,42 @@ wrong answer, because the real value lives in an opaquely-named custom field.
 - This is single-tenant config: validate periodically via the meta `label`, since
   a Bullhorn field remap would silently change the mapping.
 
-**Known JobOrder mappings for this corp (Myticas / corp 28404):**
-- `correlatedCustomText1` = **Internal Department** (owning office/branch).
-  Observed values: `STS-STSI` (largest), `MYT-Ottawa`, `MYT-Chicago`,
-  `MYT-Clover`, `MYT-Ohio`. Populated on virtually all jobs; `categories` /
-  `publishedCategory` are mostly empty — never group jobs by those.
+# "Internal Department" uses a DIFFERENT API name per entity (the headline gotcha)
+
+The same business concept ("Internal Department" = owning office/branch, values
+like `STS-STSI`, `MYT-Ottawa`, `MYT-Chicago`, `MYT-Clover`, `MYT-Ohio`) is stored
+under a different custom field on each entity. Never assume one name everywhere:
+
+- JobOrder → `correlatedCustomText1` (≈100% populated)
+- Placement → `correlatedCustomText1` (≈100%)
+- ClientContact → `customText1` (≈100%)
+- Lead → `customText1` (≈94%)
+- Opportunity → `customText1` (≈86%)
+- Candidate → `customText3` (only ≈8% populated — sparse; get-only default)
+
+`categories` / `publishedCategory` are mostly empty — never group by those.
+
+# `describe_entity` backbone: `configuredCustomFields`
+
+`describe_entity` returns a top-level `configuredCustomFields` array (subset of
+`fields`) so a client can map a Bullhorn UI label → real API name without scanning
+100–300 fields. It is computed by `isConfiguredCustomField(name,label)`: name must
+be `custom*`/`correlatedCustom*` AND the label must be meaningful (not equal to the
+API name and not a generic default like "Custom Text 1", "Custom Text Block 10",
+"Custom Encrypted Text 1", "Custom 10", "Custom Object1s").
+
+**Why a heuristic, not a hardcoded list:** labels are the single source of truth and
+survive tenant remaps; hardcoding tenant field names rots silently. Keep it generic.
+
+**Key distinction — discovery vs. defaults:**
+- `configuredCustomFields` lists every CONFIGURED field even if it is currently
+  EMPTY (e.g. Placement "Net Margin %", "Exempt", "Per Diem Rule") — it is a
+  label→name map for discovery, not a claim of fill.
+- Curated/`ENTITY_CATALOG` DEFAULT fields only include POPULATED fields, so default
+  reads aren't padded with empty columns that mislead the model.
+
+**Other populated customs promoted to defaults (Myticas):** JobOrder `customText2`
+= Client Job Title; Placement `customText29` = External ID, `customDate1` = Original
+End Date (epoch ms), `customText2` = Currency Unit; Lead `customText20` = External
+ID. Candidate `customText1` = Visa Type (sparse, discover-only). Sanity-checked live
+labels can drift — trust `describe_entity` over this list if they disagree.
