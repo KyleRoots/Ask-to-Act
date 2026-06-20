@@ -235,6 +235,41 @@ function redactCandidateDescriptions(
   return json;
 }
 
+/**
+ * Bullhorn's Lucene /search returns ZERO matches for a query made up entirely of
+ * negations (e.g. `NOT status:"Closed-Won" AND NOT status:"Closed-Lost"`), because
+ * there is no positive document set to subtract from. Callers building an
+ * "everything except X" filter — LLM clients especially — hit this silently and
+ * wrongly conclude the data is unavailable. When every top-level clause is negated,
+ * prepend a positive anchor (`id:[1 TO *]`, which matches every record) so the
+ * negations apply to the full set. A query that already has a positive clause is
+ * left untouched: anchoring it would be a harmless no-op, but we restrict the
+ * rewrite to the all-negative case to avoid surprising intended results.
+ */
+function anchorPureNegationQuery(query: string, entity: string): string {
+  const trimmed = query.trim();
+  if (trimmed === "") return query;
+  const clauses = trimmed
+    .split(/\s+(?:AND|OR)\s+/i)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (clauses.length === 0) return query;
+  const allNegated = clauses.every((c) => /^(?:NOT\b|-)/i.test(c));
+  if (!allNegated) return query;
+  // Bullhorn's Lucene rejects a *parenthesized* all-negative group (it returns 0
+  // just like the bare query), so prepend the anchor FLAT, AND-joined. Skip
+  // queries that use a top-level OR between negations: a flat prepend would change
+  // operator precedence and could silently mislead, so we leave those untouched.
+  if (/\bOR\b/i.test(trimmed)) return query;
+  // Log only non-PII metadata: the raw query can contain names/emails/phones, so we
+  // record that an anchor was applied and to which entity, never the query text.
+  logger.info("Bullhorn search: anchoring all-negative query so it is not silently empty", {
+    entity,
+    clauseCount: clauses.length,
+  });
+  return `id:[1 TO *] AND ${trimmed}`;
+}
+
 async function searchEntity(
   entity: string,
   query: string,
@@ -243,6 +278,7 @@ async function searchEntity(
   start: number,
 ): Promise<unknown> {
   fields = sanitizeFields(fields);
+  query = anchorPureNegationQuery(query, entity);
   const session = await getSession();
   const url = new URL(`search/${entity}`, session.restUrl);
   url.searchParams.set("BhRestToken", session.BhRestToken);
