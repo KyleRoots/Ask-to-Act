@@ -32,8 +32,14 @@ import {
 import { logger } from "./logger.js";
 import { responseCache, stableKey } from "./cache.js";
 
+// Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
+// a human, so whitespace is pure overhead — and multi-record reads are large
+// enough that the ~30% saved by dropping indentation keeps responses under the
+// ChatGPT/OpenAI client's tool-output size limit (oversized results are silently
+// dropped by the client, which the assistant reports as "blocked by the safety
+// layer"). To shrink further, callers should scope `fields` and/or page via `count`/`start`.
 function formatResult(data: unknown): string {
-  return JSON.stringify(data, null, 2);
+  return JSON.stringify(data);
 }
 
 function withLogging<T>(
