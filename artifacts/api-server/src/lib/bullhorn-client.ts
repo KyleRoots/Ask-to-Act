@@ -396,8 +396,90 @@ function searchDateClause(
   return `${field}:[${lo} TO ${hi}]`;
 }
 
+/**
+ * Candidate text fields that are reliably full-text searchable in this Bullhorn
+ * instance (verified empirically): `description` is the parsed RÉSUMÉ text,
+ * `skillSet` the free-text skills list, `comments` recruiter notes, and
+ * `occupation` the headline title. primarySkills/secondarySkills/certifications/
+ * certificationList/educations/workHistories are empty or not free-text
+ * searchable here, so they are intentionally excluded from keyword expansion.
+ */
+const CANDIDATE_TEXT_SEARCH_FIELDS = [
+  "description",
+  "skillSet",
+  "comments",
+  "occupation",
+] as const;
+
+const MAX_KEYWORD_GROUPS = 12;
+const MAX_TERMS_PER_GROUP = 24;
+const MAX_KEYWORD_LEN = 100;
+
+/** Escapes the two characters that are special inside a Lucene quoted phrase. */
+function escapeLucenePhrase(term: string): string {
+  return term.replace(/[\\"]/g, "\\$&");
+}
+
+/**
+ * Expands caller-supplied keywords into a safe, field-scoped Lucene fragment that
+ * searches ALL of a candidate's text fields at once — so résumé/skills/notes
+ * keyword discovery can never miss a field or accidentally emit a bare
+ * (fieldless) term, which Bullhorn either rejects (400) or, worse, silently
+ * mis-applies. Each top-level entry is a REQUIRED concept (AND-ed); a string is
+ * one phrase, an inner array is a synonym group (OR-ed). Every term is quoted as
+ * a phrase and OR-ed across CANDIDATE_TEXT_SEARCH_FIELDS.
+ *
+ * Example: [["Top Secret", "TS/SCI"], "Active"] =>
+ *   (description:"Top Secret" OR skillSet:"Top Secret" OR ... OR description:"TS/SCI" OR ...)
+ *   AND (description:"Active" OR skillSet:"Active" OR ...)
+ *
+ * Returns "" when no usable keywords are supplied.
+ */
+function buildCandidateKeywordQuery(keywords: Array<string | string[]>): string {
+  if (!Array.isArray(keywords)) return "";
+  const groups: string[] = [];
+  for (const entry of keywords.slice(0, MAX_KEYWORD_GROUPS)) {
+    const terms = (Array.isArray(entry) ? entry : [entry])
+      .filter((t): t is string => typeof t === "string")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0 && t.length <= MAX_KEYWORD_LEN)
+      .slice(0, MAX_TERMS_PER_GROUP);
+    if (terms.length === 0) continue;
+    const clauses = terms.flatMap((t) => {
+      const phrase = `"${escapeLucenePhrase(t)}"`;
+      return CANDIDATE_TEXT_SEARCH_FIELDS.map((f) => `${f}:${phrase}`);
+    });
+    groups.push(`(${clauses.join(" OR ")})`);
+  }
+  return groups.join(" AND ");
+}
+
+/**
+ * Combines an optional structured Lucene `query` (status/willRelocate/dates/etc.)
+ * with optional `keywords` (résumé/skills text search). At least one must
+ * resolve to a non-empty clause; the two are AND-ed so keyword discovery is
+ * constrained by the structured filters.
+ */
+function combineCandidateQuery(
+  query: string | undefined,
+  keywords: Array<string | string[]> | undefined,
+): string {
+  const parts: string[] = [];
+  const kw = keywords ? buildCandidateKeywordQuery(keywords) : "";
+  if (kw) parts.push(kw);
+  const q = (query ?? "").trim();
+  if (q) parts.push(`(${q})`);
+  if (parts.length === 0) {
+    throw new Error(
+      "search_candidates requires `query` (structured filters) and/or `keywords` (résumé/skills text search).",
+    );
+  }
+  return parts.join(" AND ");
+}
+
 export async function searchCandidates(args: {
-  query: string;
+  query?: string;
+  keywords?: Array<string | string[]>;
   fields?: string;
   count?: number;
   start?: number;
@@ -405,7 +487,8 @@ export async function searchCandidates(args: {
   const fields =
     args.fields ??
     "id,firstName,lastName,email,phone,mobile,status,occupation,skillSet,primarySkills,address,dateAvailable,dateLastModified,owner,dateAdded";
-  return searchEntity("Candidate", args.query, fields, args.count ?? 20, args.start ?? 0);
+  const query = combineCandidateQuery(args.query, args.keywords);
+  return searchEntity("Candidate", query, fields, args.count ?? 20, args.start ?? 0);
 }
 
 export async function searchJobs(args: {
