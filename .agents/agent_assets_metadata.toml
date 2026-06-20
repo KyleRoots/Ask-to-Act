@@ -12,3 +12,9 @@ id = "MpuBFFQEIPSr-lXe538Mf"
 uri = "file://.local/outputs/AskToAct-Executive-Summary.zip"
 type = "unspecified"
 title = "AskToAct — Executive Summary (HTML – Print-ready)"
+
+[[outputs]]
+id = "n2OUqvYOLAuTowlOaU5Xk"
+uri = "file://exports/asktoact-actions.yaml"
+type = "unspecified"
+title = "AskToAct — ChatGPT Action schema (ready to paste)"
