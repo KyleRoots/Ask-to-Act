@@ -47,15 +47,26 @@ function isSensitiveField(name: string): boolean {
 }
 
 /**
- * Strips credential-like fields from a comma-separated fields list before it is
- * sent to Bullhorn. Defense-in-depth so callers can never request (or exfiltrate)
- * a field such as `password`. Falls back to "id" if nothing safe remains.
+ * Cleans a comma-separated fields list before it is sent to Bullhorn:
+ *  - drops credential-like fields (defense-in-depth, so a caller can never
+ *    request/exfiltrate a field such as `password`), and
+ *  - drops `bullhornUrl`, a server-injected deep-link pseudo-field that is added
+ *    to responses AFTER the fetch (see enrichWithProfileUrls). It is not a real
+ *    Bullhorn field, so forwarding it returns a 400 "Invalid field" — which makes
+ *    the AI client waste a whole retry round-trip. Callers may safely include it
+ *    (the tool descriptions advertise it); we strip it here and add it back later.
+ * Falls back to "id" if nothing safe remains.
  */
 function sanitizeFields(fields: string): string {
   const kept = fields
     .split(",")
     .map((f) => f.trim())
-    .filter((f) => f.length > 0 && !isSensitiveField(f));
+    .filter(
+      (f) =>
+        f.length > 0 &&
+        !isSensitiveField(f) &&
+        f.toLowerCase() !== "bullhornurl",
+    );
   return kept.length > 0 ? kept.join(",") : "id";
 }
 
