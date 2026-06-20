@@ -52,6 +52,37 @@ function formatResult(data: unknown): string {
   return JSON.stringify(data);
 }
 
+// Records-per-call cap for browse/list tools. Over-sized requests are quietly
+// trimmed to this (never rejected) so any AI — including weaker models — never
+// hits a hard error mid-answer. Internal/report callers bypass the MCP schema
+// entirely, so their (larger) paging counts are unaffected.
+const FETCH_CAP = 50;
+function capFetch(v: number | undefined): number | undefined {
+  return typeof v === "number" ? Math.min(v, FETCH_CAP) : v;
+}
+
+// When a browse/list page comes back full (a `data` array of exactly FETCH_CAP
+// rows) AND Bullhorn's reported `total` exceeds the cap, tell the model the page
+// is a partial slice — so it never mistakes a capped page for a complete total
+// after a silent trim. Both conditions are required to avoid false positives:
+//   - keying on a `data` ARRAY (not a scalar `count`) excludes count-only and
+//     single-entity results, plus tools whose `count` is a real length
+//     (e.g. listCandidateAttachments returns {count, attachments}, no `data`);
+//   - requiring an explicit `total > FETCH_CAP` excludes naturally-complete
+//     pages (a query with exactly/at most 50 matches is not truncated).
+// Bullhorn /search and /query always return `total`, so this never false-negates
+// a genuinely truncated page in practice.
+function annotateIfTruncated(result: unknown): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const r = result as Record<string, unknown>;
+  if (!Array.isArray(r.data) || r.data.length !== FETCH_CAP) return result;
+  if (typeof r.total !== "number" || r.total <= FETCH_CAP) return result;
+  return {
+    ...r,
+    _truncatedNote: `Returned the per-call maximum of ${FETCH_CAP} records — this is a PARTIAL page, NOT a complete total (Bullhorn reports ${r.total} matches). For any count/total/by-department number use count_entity or a report tool; to read more records, call again with a higher 'start'.`,
+  };
+}
+
 function withLogging<T>(
   toolName: string,
   params: Record<string, unknown>,
@@ -99,7 +130,7 @@ async function runTool(
     logger.info({ tool: toolName, cache: "hit" }, "MCP tool cache hit");
     return { content: [{ type: "text", text: cached }] };
   }
-  const result = await withLogging(toolName, args, fn);
+  const result = annotateIfTruncated(await withLogging(toolName, args, fn));
   const text = formatResult(result);
   responseCache.set(key, text);
   return { content: [{ type: "text", text }] };
@@ -170,9 +201,9 @@ export function createMcpServer(): McpServer {
         .number()
         .int()
         .min(1)
-        .max(50)
         .optional()
-        .describe("Number of results to return (default: 20, max: 50). For viewing specific candidate records only — for ANY total/count, use count_entity."),
+        .transform(capFetch)
+        .describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z
         .number()
         .int()
@@ -201,7 +232,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Lucene query string, e.g. 'status:Open AND title:\"Software Engineer\"' or 'isOpen:true'",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific job records only. Do NOT use to count/total/aggregate jobs — use count_entity (set groupBy:correlatedCustomText1 for a per-department breakdown) or the open_jobs report tool, which return exact totals in a tiny payload."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 job records per call — NOT a total). Do NOT use to count/total/aggregate jobs — use count_entity (set groupBy:correlatedCustomText1 for a per-department breakdown) or the open_jobs report tool, which return exact totals in a tiny payload. Page with 'start' for more records."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -218,7 +249,7 @@ export function createMcpServer(): McpServer {
       query: z
         .string()
         .describe("Lucene query string, e.g. 'name:\"Acme*\"' or 'status:Active'"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -237,7 +268,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Lucene query string, e.g. 'lastName:\"Smith\" AND status:Active'",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -316,7 +347,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include submissions added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-06-01' covers all of May.",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 50; the server returns AT MOST 50 per call — NOT a total). For ANY count/total/by-group number use count_entity or the report tools; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -347,7 +378,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include placements added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-06-01' covers all of May.",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 50; the server returns AT MOST 50 per call — NOT a total). For ANY count/total/by-group number use count_entity or the report tools; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -378,7 +409,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include notes added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 50; the server returns AT MOST 50 per call — NOT a total). For ANY count/total/by-group number use count_entity or the report tools; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -406,7 +437,7 @@ export function createMcpServer(): McpServer {
       query: z
         .string()
         .describe("Lucene query string, e.g. 'status:Active AND city:\"Chicago\"'"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
@@ -432,7 +463,7 @@ export function createMcpServer(): McpServer {
         .string()
         .optional()
         .describe("Optional sort field, e.g. '-dateAdded' (descending) or 'lastName'"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
@@ -523,7 +554,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include submissions added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 50; the server returns AT MOST 50 per call — NOT a total). For ANY count/total/by-group number use count_entity or the report tools; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -560,7 +591,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include appointments starting before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 50; the server returns AT MOST 50 per call — NOT a total). For ANY count/total/by-group number use count_entity or the report tools; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -590,7 +621,7 @@ export function createMcpServer(): McpServer {
           "Only include tasks scheduled (dateBegin) before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
       isCompleted: z.boolean().optional().describe("Filter by completion status (true = completed, false = open)"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 50; the server returns AT MOST 50 per call — NOT a total). For ANY count/total/by-group number use count_entity or the report tools; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -607,7 +638,7 @@ export function createMcpServer(): McpServer {
     "Search Bullhorn CRM leads (sales prospects) with a Lucene query. This instance stores each lead's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Active AND companyName:\"Acme*\"'"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -622,7 +653,7 @@ export function createMcpServer(): McpServer {
     "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. This instance stores each opportunity's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Open AND title:\"Managed Services\"'"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -638,7 +669,7 @@ export function createMcpServer(): McpServer {
     {
       name: z.string().optional().describe("Partial first/last/full name to match"),
       email: z.string().optional().describe("Partial email to match"),
-      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
