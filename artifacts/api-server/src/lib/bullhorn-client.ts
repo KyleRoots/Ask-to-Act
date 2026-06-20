@@ -1594,7 +1594,7 @@ async function searchTotal(entity: string, query: string): Promise<number> {
 // Used both to EXTEND an isOpen:true query (guard) and as a SELF-CONTAINED query
 // (annotation), so the two enforcement paths never drift.
 const ACTIVE_OPPS_DEFINITION =
-  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted';
+  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false';
 
 function applyMetricDefinitionGuard(
   entity: string,
@@ -1603,23 +1603,49 @@ function applyMetricDefinitionGuard(
   // Open jobs: a raw isOpen:true must not include Archived reqs (drifts 513 -> 414).
   if (entity === "JobOrder") {
     if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
-    if (/\bstatus\s*:/i.test(query)) return { query };
+    // Apply each exclusion independently: NOT Archive only if no explicit status:
+    // (lets power users override the status filter), and isDeleted:false unless the
+    // caller already pinned isDeleted — so even the old `isOpen:true AND NOT status:Archive`
+    // form (which has a status:) still gets the soft-delete exclusion (398, not 414).
+    const additions: string[] = [];
+    if (!/\bstatus\s*:/i.test(query)) additions.push("NOT status:Archive");
+    if (!/\bisDeleted\s*:/i.test(query)) additions.push("isDeleted:false");
+    if (additions.length === 0) return { query };
     return {
-      query: `${query} AND NOT status:Archive`,
+      query: `${query} AND ${additions.join(" AND ")}`,
       appliedDefinition:
-        "open jobs = isOpen:true AND NOT status:Archive (Archived requisitions excluded to match the official open-jobs metric; on-hold/filled/placed still included)",
+        "open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (Archived requisitions AND soft-deleted records excluded to match the official open-jobs metric = 398; on-hold/filled/placed still included)",
     };
   }
   // Active opportunities: pipeline intent (isOpen:true) maps to the status-based
-  // definition (exclude Closed-Won/Closed-Lost/Converted), which yields 24 — NOT the
-  // raw isOpen:true 34. Stops the AI from hand-subtracting to a wrong number (23).
+  // definition (exclude Closed-Won/Closed-Lost/Converted) AND excludes soft-deleted
+  // records, yielding the official 23 — NOT the raw isOpen:true 34. Stops the AI from
+  // freelancing the status set or omitting the soft-delete exclusion.
   if (entity === "Opportunity") {
     if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
     if (/\bstatus\s*:/i.test(query)) return { query };
     return {
       query: `${query} AND ${ACTIVE_OPPS_DEFINITION}`,
       appliedDefinition:
-        'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted (the official active-pipeline metric = 24; do NOT subtract further for deleted/converted — they are already excluded).',
+        'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false (the official active-pipeline metric = 23; soft-deleted and closed/converted are already excluded — do NOT subtract further).',
+    };
+  }
+  // Placement: `isDeleted` is NOT searchable on Placement (any value returns 0), and
+  // Placement search already excludes soft-deleted. Strip any model/user-supplied
+  // isDeleted clause so a freelanced `AND isDeleted:false` cannot collapse the count to 0.
+  if (entity === "Placement") {
+    if (!/\bisDeleted\s*:/i.test(query)) return { query };
+    let stripped = query
+      .replace(/\s*\b(?:AND|OR)\b\s*isDeleted\s*:\s*(?:true|false|0|1)\b/gi, "")
+      .replace(/\bisDeleted\s*:\s*(?:true|false|0|1)\b\s*\b(?:AND|OR)\b\s*/gi, "")
+      .replace(/\bisDeleted\s*:\s*(?:true|false|0|1)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!stripped) stripped = "id:[1 TO *]";
+    return {
+      query: stripped,
+      appliedDefinition:
+        "isDeleted is not searchable on Placement (it returns 0 for any value), so that filter was removed — Placement search already excludes soft-deleted records.",
     };
   }
   return { query };
@@ -1677,11 +1703,15 @@ async function opportunityActiveAnnotation(
   query: string,
 ): Promise<{ activeOpportunitiesTotal: number; note: string } | undefined> {
   if (entity !== "Opportunity") return undefined;
-  // Already the canonical active definition (guard-applied or caller-supplied) — no drift.
+  // Already the FULL canonical active definition (guard-applied or caller-supplied) — no
+  // drift. Must include the soft-delete exclusion too: a query with only the 3 Closed-*
+  // exclusions (no isDeleted:false) still returns the deleted-inclusive 24, so it is NOT
+  // canonical and must still be annotated with the official 23.
   if (
     /Closed-Won/i.test(query) &&
     /Closed-Lost/i.test(query) &&
-    /Converted/i.test(query)
+    /Converted/i.test(query) &&
+    /\bisDeleted\s*:\s*false\b/i.test(query)
   ) {
     return undefined;
   }

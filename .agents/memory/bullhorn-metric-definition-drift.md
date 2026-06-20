@@ -70,3 +70,34 @@ answer their own number. Single shared `ACTIVE_OPPS_DEFINITION` const feeds both
 **Why annotation > rewrite here:** rewriting a status query would break legitimate single-status
 drilldowns; the conditional note lets the model answer the specific question while still seeing
 the locked headline. Same trade as the placement-confirmed pattern.
+
+## Third drift hole: SOFT-DELETED records inflate headline metrics (operational-truth decision)
+
+**Observed:** AI returned **23** active opps and (would return) deleted-inclusive job counts. The
+gap was real, not freelancing: Bullhorn's Lucene `/search` INCLUDES soft-deleted records by
+default, so the locked definitions were silently counting them. Live-verified: active opps
+canonical=24 but isDeleted:false=23 (1 soft-deleted, a "New" status opp); open jobs canonical=414
+but isDeleted:false=398 (16 soft-deleted).
+
+**USER DECISION (operational truth):** soft-deleted records are NOT real pipeline — EXCLUDE them.
+New locked headline numbers: **open jobs = 398, active opps = 23** (placements unchanged).
+
+**CRITICAL per-entity gotcha — `isDeleted` is NOT a safe universal filter:**
+- JobOrder: `isDeleted:false`→398, `:true`→16. Works.
+- Opportunity: `isDeleted:false`→23, `:true`→1. Works.
+- Placement: `isDeleted:false`→**0** AND `isDeleted:true`→**0** — the field is NOT searchable on
+  Placement. Adding `isDeleted:false` would ZERO OUT placement counts. Since `:true`=0 too,
+  Placement `/search` already excludes soft-deleted, so it needs NO isDeleted filter and must
+  never get one.
+
+**How it was hardened:** appended `AND isDeleted:false` to JobOrder + Opportunity locked
+definitions ONLY — in `ACTIVE_OPPS_DEFINITION` (bullhorn-client.ts, feeds both guard + annotation),
+the JobOrder guard branch, and reports.ts `OPEN_JOBS_QUERY`/`ACTIVE_OPPS_QUERY`/`DEPT_DEFINITIONS`.
+Tool descriptions updated incl. an explicit "do NOT add isDeleted:false to Placement" warning.
+Verified all paths converge: isOpen:true→398/23, the AI's `isOpen AND isDeleted:false`→23,
+status-subset trap still annotates activeOpportunitiesTotal=23, open_jobs_report=398,
+sales_pipeline_report=23 (by stage 14/4/4/1).
+
+**Why per-entity, not global:** `/search` includes deleted but `/query` (where) excludes them, and
+field searchability varies by entity — so the deleted-exclusion MUST be applied and verified
+entity-by-entity, never blanket-applied.

@@ -27,15 +27,15 @@ export const DEPARTMENTS = [
 ] as const;
 
 /** Locked, instance-specific definitions (see tool descriptions / memory). */
-const OPEN_JOBS_QUERY = "isOpen:true AND NOT status:Archive";
+const OPEN_JOBS_QUERY = "isOpen:true AND NOT status:Archive AND isDeleted:false";
 const ACTIVE_OPPS_QUERY =
-  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted';
+  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false';
 const CONFIRMED_PLACEMENT_STATUSES = new Set(["Approved", "Completed", "Ended"]);
 
 const DEPT_DEFINITIONS = {
-  openJobs: "isOpen:true AND NOT status:Archive (includes on-hold/filled/placed; only Archived excluded)",
-  placementsMade: "Placement status Approved, Completed, or Ended (excludes Canceled, Archive, and pending Submitted)",
-  activeOpportunities: "Opportunity NOT in Closed-Won, Closed-Lost, or Converted",
+  openJobs: "isOpen:true AND NOT status:Archive AND isDeleted:false (includes on-hold/filled/placed; Archived AND soft-deleted excluded)",
+  placementsMade: "Placement status Approved, Completed, or Ended (excludes Canceled, Archive, and pending Submitted; Placement search already excludes soft-deleted, so no isDeleted filter)",
+  activeOpportunities: "Opportunity NOT in Closed-Won, Closed-Lost, or Converted, AND not soft-deleted (isDeleted:false)",
 } as const;
 
 const DAY_MS = 86_400_000;
