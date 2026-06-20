@@ -26,9 +26,22 @@ ignoring the documented convention. The model freelances.
 **Why:** AskToAct's entire value prop is accurate, consistent, permission-aware answers. Metric
 drift is the exact failure the product is meant to eliminate.
 
-**How to apply (hardening, when requested):** Steer the connector so headline asks (open jobs,
-placements, pipeline, aging, leaderboard) ALWAYS route to the pre-built report tools, not raw
-`count_entity`. Options: strengthen tool descriptions to forbid raw counts for these metrics,
-de-emphasize/guard generic count for JobOrder "open" semantics, or add dedicated count tools
-that hardcode the locked query. Verify against curated truth: open=414, placements YTD=98,
-active opps~24, leaderboard 14 recruiters/98.
+**How it was hardened ("Full lock"):** A server-side guard (`applyMetricDefinitionGuard` in
+bullhorn-client.ts) rewrites freelanced queries and is wired into BOTH `countEntity` AND
+`searchEntity` — count-only enforcement is NOT enough because the model also bulk-fetches via
+search/list tools and tallies client-side (that road is wrong AND slow — the minute-long
+"Thought for 1m12s" the user saw). The guard: JobOrder `isOpen:true` (no explicit `status:`)
+→ append `AND NOT status:Archive` (414); Opportunity `isOpen:true` (no `status:`) → append
+`NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted` (verified:
+isOpen:true 34 → with exclusions = 24, identical to the status-only definition; also stops the
+model hand-subtracting to 23). It skips when the query already has `status:` (prevents
+double-apply; lets power users override). It also returns `appliedDefinition` so the model is
+told NOT to subtract further.
+
+**Also required (speed + steering):** Cap ALL record-fetch MCP tools at `count` max **50**
+(was 500/100) and strip every "set count high / retrieve all in one call / aggregate" hint from
+tool descriptions — otherwise the model uses the fetch road. zod caps are MCP-layer only; the
+pre-built report builders call bullhorn-client directly and are unaffected.
+
+**Verify against curated truth:** open jobs=414, placements YTD=98, active opps=24,
+leaderboard 14 recruiters/98.

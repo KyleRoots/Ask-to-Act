@@ -380,6 +380,10 @@ async function searchEntity(
   start: number,
 ): Promise<unknown> {
   fields = sanitizeFields(fields);
+  // Enforce metric definitions on the SEARCH path too, so a freelanced raw
+  // isOpen:true returns the correct universe of records (jobs exclude Archived;
+  // opportunities exclude Closed-Won/Closed-Lost/Converted) — not just on count.
+  query = applyMetricDefinitionGuard(entity, query).query;
   query = normalizeSearchDateRanges(query, entity);
   query = anchorPureNegationQuery(query, entity);
 
@@ -1586,18 +1590,33 @@ async function searchTotal(entity: string, query: string): Promise<number> {
  * applied definition so the answer always matches the curated open_jobs report.
  * If the caller already mentions `status`/`Archive`, we leave their query untouched.
  */
-function applyOpenJobsGuard(
+function applyMetricDefinitionGuard(
   entity: string,
   query: string,
 ): { query: string; appliedDefinition?: string } {
-  if (entity !== "JobOrder") return { query };
-  if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
-  if (/\bstatus\s*:/i.test(query)) return { query };
-  return {
-    query: `${query} AND NOT status:Archive`,
-    appliedDefinition:
-      "open jobs = isOpen:true AND NOT status:Archive (Archived requisitions excluded to match the official open-jobs metric; on-hold/filled/placed still included)",
-  };
+  // Open jobs: a raw isOpen:true must not include Archived reqs (drifts 513 -> 414).
+  if (entity === "JobOrder") {
+    if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
+    if (/\bstatus\s*:/i.test(query)) return { query };
+    return {
+      query: `${query} AND NOT status:Archive`,
+      appliedDefinition:
+        "open jobs = isOpen:true AND NOT status:Archive (Archived requisitions excluded to match the official open-jobs metric; on-hold/filled/placed still included)",
+    };
+  }
+  // Active opportunities: pipeline intent (isOpen:true) maps to the status-based
+  // definition (exclude Closed-Won/Closed-Lost/Converted), which yields 24 — NOT the
+  // raw isOpen:true 34. Stops the AI from hand-subtracting to a wrong number (23).
+  if (entity === "Opportunity") {
+    if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
+    if (/\bstatus\s*:/i.test(query)) return { query };
+    return {
+      query: `${query} AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted`,
+      appliedDefinition:
+        'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted (the official active-pipeline metric = 24; do NOT subtract further for deleted/converted — they are already excluded).',
+    };
+  }
+  return { query };
 }
 
 /**
@@ -1664,8 +1683,9 @@ export async function countEntity(args: {
   }
   const baseRaw = (args.query ?? "").trim();
   const baseInput = baseRaw === "" ? "id:[1 TO *]" : baseRaw;
-  // Lock the "open jobs" definition so a raw isOpen:true cannot drift (513 -> 414).
-  const guard = applyOpenJobsGuard(entry.canonical, baseInput);
+  // Lock metric definitions so a raw isOpen:true cannot drift (jobs 513 -> 414;
+  // opportunities 34 -> 24).
+  const guard = applyMetricDefinitionGuard(entry.canonical, baseInput);
   const base = guard.query;
   const total = await searchTotal(entry.canonical, base);
   // Surface the confirmed-only placement figure (98) alongside an all-status total (123).

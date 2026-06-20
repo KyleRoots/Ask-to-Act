@@ -170,9 +170,9 @@ export function createMcpServer(): McpServer {
         .number()
         .int()
         .min(1)
-        .max(100)
+        .max(50)
         .optional()
-        .describe("Number of results to return (default: 20, max: 100)"),
+        .describe("Number of results to return (default: 20, max: 50). For viewing specific candidate records only — for ANY total/count, use count_entity."),
       start: z
         .number()
         .int()
@@ -201,7 +201,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Lucene query string, e.g. 'status:Open AND title:\"Software Engineer\"' or 'isOpen:true'",
         ),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 20, max: 500). For grouping/aggregation across all jobs, set this high to avoid paging."),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific job records only. Do NOT use to count/total/aggregate jobs — use count_entity (set groupBy:correlatedCustomText1 for a per-department breakdown) or the open_jobs report tool, which return exact totals in a tiny payload."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -218,7 +218,7 @@ export function createMcpServer(): McpServer {
       query: z
         .string()
         .describe("Lucene query string, e.g. 'name:\"Acme*\"' or 'status:Active'"),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -237,7 +237,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Lucene query string, e.g. 'lastName:\"Smith\" AND status:Active'",
         ),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -301,7 +301,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "list_submissions_for_job",
-    "List candidate submissions (applications) for a specific job order, optionally restricted to a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
+    "List candidate submissions (applications) for a specific job order, optionally restricted to a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`.",
     {
       jobId: z.number().int().positive().describe("Bullhorn job order ID"),
       dateAddedStart: z
@@ -316,7 +316,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include submissions added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-06-01' covers all of May.",
         ),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -331,7 +331,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "list_placements",
-    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. This instance stores each placement's \"Internal Department\" (office/branch) in field correlatedCustomText1. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd with a high `count` to retrieve them all in one call instead of paging. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`. To COUNT/total placements (e.g. 'how many placements in 2026', 'placements by department'), do NOT add them up from this list — use `count_entity` for an exact, fast total. CONVENTION for this instance: \"placements made\" / \"placements so far\" means CONFIRMED placements only — filter `status:Approved OR status:Completed OR status:Ended` (i.e. exclude Canceled, Archive, AND pending Submitted) unless the user explicitly asks for all/pending/canceled placements.",
+    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. This instance stores each placement's \"Internal Department\" (office/branch) in field correlatedCustomText1. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd; this tool is for viewing specific records only (page with `start` if needed). Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`. To COUNT/total placements (e.g. 'how many placements in 2026', 'placements by department'), do NOT add them up from this list — use `count_entity` for an exact, fast total. CONVENTION for this instance: \"placements made\" / \"placements so far\" means CONFIRMED placements only — filter `status:Approved OR status:Completed OR status:Ended` (i.e. exclude Canceled, Archive, AND pending Submitted) unless the user explicitly asks for all/pending/canceled placements.",
     {
       candidateId: z.number().int().positive().optional().describe("Filter by candidate Bullhorn ID"),
       jobId: z.number().int().positive().optional().describe("Filter by job order Bullhorn ID"),
@@ -347,7 +347,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include placements added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC. E.g. '2026-06-01' covers all of May.",
         ),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -362,7 +362,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "get_notes",
-    "Retrieve notes and activity log entries for a candidate or job order, optionally within a dateAdded range. Provide at least one of candidateId or jobId. Results are in `data`; `total` is the full match count. Raise `count` (max 500) or page with `start` for more.",
+    "Retrieve notes and activity log entries for a candidate or job order, optionally within a dateAdded range. Provide at least one of candidateId or jobId. Results are in `data`; `total` is the full match count. Raise `count` (max 50) or page with `start` for more.",
     {
       candidateId: z.number().int().positive().optional().describe("Bullhorn candidate ID"),
       jobId: z.number().int().positive().optional().describe("Bullhorn job order ID"),
@@ -378,7 +378,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include notes added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -406,7 +406,7 @@ export function createMcpServer(): McpServer {
       query: z
         .string()
         .describe("Lucene query string, e.g. 'status:Active AND city:\"Chicago\"'"),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
@@ -432,7 +432,7 @@ export function createMcpServer(): McpServer {
         .string()
         .optional()
         .describe("Optional sort field, e.g. '-dateAdded' (descending) or 'lastName'"),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
@@ -508,7 +508,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "list_submissions_for_candidate",
-    "List the job submissions (applications) for a specific candidate — i.e. which jobs a candidate has been submitted to — optionally within a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 500) or page with `start`.",
+    "List the job submissions (applications) for a specific candidate — i.e. which jobs a candidate has been submitted to — optionally within a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`.",
     {
       candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
       dateAddedStart: z
@@ -523,7 +523,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include submissions added before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -545,7 +545,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "list_appointments",
-    "List appointments/meetings, optionally for a specific owner (recruiter) and/or within a scheduled-time window (filters on the appointment's dateBegin). Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 500) or page with `start` for more.",
+    "List appointments/meetings, optionally for a specific owner (recruiter) and/or within a scheduled-time window (filters on the appointment's dateBegin). Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 50) or page with `start` for more.",
     {
       ownerId: z.number().int().positive().optional().describe("Filter to appointments owned by this Bullhorn user ID"),
       startAfter: z
@@ -560,7 +560,7 @@ export function createMcpServer(): McpServer {
         .describe(
           "Only include appointments starting before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -574,7 +574,7 @@ export function createMcpServer(): McpServer {
 
   tool(
     "list_tasks",
-    "List tasks, optionally for a specific owner (recruiter), filtered by a scheduled-date window (filters on the task's dateBegin) and/or completion status. Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 500) or page with `start` for more.",
+    "List tasks, optionally for a specific owner (recruiter), filtered by a scheduled-date window (filters on the task's dateBegin) and/or completion status. Use find_users to resolve a recruiter name to an ownerId. Results are in `data`; raise `count` (max 50) or page with `start` for more.",
     {
       ownerId: z.number().int().positive().optional().describe("Filter to tasks owned by this Bullhorn user ID"),
       dueStart: z
@@ -590,7 +590,7 @@ export function createMcpServer(): McpServer {
           "Only include tasks scheduled (dateBegin) before this date (exclusive). Accepts 'YYYY-MM-DD' or an ISO 8601 timestamp, interpreted as UTC.",
         ),
       isCompleted: z.boolean().optional().describe("Filter by completion status (true = completed, false = open)"),
-      count: z.number().int().min(1).max(500).optional().describe("Number of results (default: 50, max: 500)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 50, max: 50). For viewing specific records only — for ANY total/count/by-group number, use count_entity or the report tools."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -607,7 +607,7 @@ export function createMcpServer(): McpServer {
     "Search Bullhorn CRM leads (sales prospects) with a Lucene query. This instance stores each lead's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Active AND companyName:\"Acme*\"'"),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -622,7 +622,7 @@ export function createMcpServer(): McpServer {
     "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. This instance stores each opportunity's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Open AND title:\"Managed Services\"'"),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -638,7 +638,7 @@ export function createMcpServer(): McpServer {
     {
       name: z.string().optional().describe("Partial first/last/full name to match"),
       email: z.string().optional().describe("Partial email to match"),
-      count: z.number().int().min(1).max(100).optional().describe("Number of results (default: 20, max: 100)"),
+      count: z.number().int().min(1).max(50).optional().describe("Number of results (default: 20, max: 50). For viewing specific records only — for ANY total/count, use count_entity."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
