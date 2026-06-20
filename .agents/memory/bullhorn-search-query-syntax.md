@@ -50,6 +50,35 @@ EVERY group (parenthesized all-negative = 0). Fix: flat-anchor the base
 AND field:"X"`. Only parenthesize the base when it has a top-level OR (else precedence
 breaks). Verified: jobs by dept summed exactly to total (242/106/48/13/5 = 414).
 
+# /search date ranges: epoch ms is SILENTLY IGNORED — use yyyyMMdd
+A Bullhorn /search (Lucene) date range given in epoch MILLISECONDS returns EVERY record
+(no error). `dateAdded:[1767225600000 TO *]` → all 2775 placements; the correct
+`dateAdded:[20260101 TO *]` (or yyyyMMddHHmmss) → 123 (true YTD). A future yyyyMMdd → 0,
+confirming the format works. LLM clients reach for epoch ms because the /query path uses
+ms, so "placements this year" silently comes back as the full history.
+Fix (central, in searchEntity via normalizeSearchDateRanges): rewrite epoch bounds inside
+`<field>:[lo TO hi]` to yyyyMMddHHmmss(UTC) ONLY when the LEAF field name (after the last
+dot) is a real date — `/^date/i` or `/^(?:correlated)?customDate\d+$/i`. Detect on the
+LEAF, never the whole path: `candidate.id` contains "date" (candi-DATE) and must NOT be
+rewritten. Bounds of `*` or 8/14 digits (already Bullhorn format) and non-date numeric
+ranges (`id:[1 TO *]`, `salary:[...]`) are left untouched.
+NOTE: /query (where) uses epoch ms and works fine — the trap is /search only.
+
+# Status values are exact-match + silent; describe_entity does NOT list them
+Wrong status spelling silently no-ops (no error, filter ignored): `NOT status:Cancelled`
+(two L) → 414 unchanged; `NOT status:Canceled` (one L, the real value) → 412. The data
+uses `Canceled` and `Archive` (not "Cancelled"/"Archived"). describe_entity returns NO
+picklist for status (just type:String) — the only way to get valid values is
+`count_entity groupBy:"status"` (auto-discovers from a sample). Real JobOrder statuses
+seen: Accepting Candidates, Archive, Hold - Client Hold, Hold - Covered, Canceled, Filled,
+Placed, Lost - Competition, Placeholder/ MPC, Qualifying, Offer Out, Declined.
+
+# "Open jobs" (isOpen:true) is a BROAD flag, not "actively recruiting"
+isOpen:true = 513 and INCLUDES Archive(99), Hold(~99), Canceled(2), Filled(3), Placed(1),
+Declined(1), Lost(1). `isOpen AND NOT status:Archive` = 414 still includes Hold/Filled/
+Placed/Canceled. "Actively recruiting" (Accepting Candidates) alone = 287. So a "open
+jobs" scorecard number depends on a business definition — confirm with the user.
+
 # Three DIFFERENT ChatGPT "blocked" messages — do not conflate
 1. "blocked by the connector safety layer" (assistant narration) = client-side
    tool-output SIZE drop. Fix: compact JSON + scoped fields + pagination. See

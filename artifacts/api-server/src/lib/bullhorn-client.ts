@@ -313,6 +313,55 @@ function anchorPureNegationQuery(query: string, entity: string): string {
   return `id:[1 TO *] AND ${trimmed}`;
 }
 
+/**
+ * Bullhorn's Lucene /search SILENTLY IGNORES a date range expressed in epoch
+ * milliseconds (e.g. `dateAdded:[1767225600000 TO *]`) — it returns EVERY record
+ * instead of erroring, so "placements this year" comes back as the full history
+ * (2775 instead of 123). /search dates must be in Bullhorn's own `yyyyMMdd` /
+ * `yyyyMMddHHmmss` format. LLM clients reach for epoch ms because that is what the
+ * /query (SQL-like) path uses, so we transparently rewrite epoch bounds inside
+ * date-field range clauses to yyyyMMddHHmmss (UTC). Bounds already in Bullhorn date
+ * format (8 or 14 digits) and non-date numeric ranges (`id:[1 TO *]`,
+ * `salary:[50000 TO 100000]`) are left untouched. Only genuine date fields are
+ * converted, detected on the LEAF segment of the field path (the part after the last
+ * dot) so association ids like `candidate.id` are NOT mistaken for dates just because
+ * the path contains the letters "date" — only leaves like `dateAdded`/`dateBegin` or
+ * `customDate1`/`correlatedCustomDate1`, with a 10-digit (epoch s) or 13-digit
+ * (epoch ms) bound, are rewritten.
+ */
+function normalizeSearchDateRanges(query: string, entity: string): string {
+  let rewrote = false;
+  const out = query.replace(
+    /([A-Za-z_][\w.]*):\[\s*(\*|\d+)\s+TO\s+(\*|\d+)\s*\]/gi,
+    (full: string, field: string, lo: string, hi: string) => {
+      const dot = field.lastIndexOf(".");
+      const leaf = dot >= 0 ? field.slice(dot + 1) : field;
+      const isDateField =
+        /^date/i.test(leaf) || /^(?:correlated)?customDate\d+$/i.test(leaf);
+      if (!isDateField) return full;
+      const conv = (b: string): string => {
+        if (b === "*" || b.length === 8 || b.length === 14) return b; // * or Bullhorn date format
+        let ms: number | null = null;
+        if (b.length === 13) ms = Number(b); // epoch milliseconds
+        else if (b.length === 10) ms = Number(b) * 1000; // epoch seconds
+        if (ms === null || !Number.isFinite(ms)) return b;
+        const d = new Date(ms);
+        const p = (n: number) => String(n).padStart(2, "0");
+        rewrote = true;
+        return (
+          `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+          `${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`
+        );
+      };
+      return `${field}:[${conv(lo)} TO ${conv(hi)}]`;
+    },
+  );
+  if (rewrote) {
+    logger.info("Bullhorn search: rewrote epoch date range to yyyyMMddHHmmss", { entity });
+  }
+  return out;
+}
+
 async function searchEntity(
   entity: string,
   query: string,
@@ -321,6 +370,7 @@ async function searchEntity(
   start: number,
 ): Promise<unknown> {
   fields = sanitizeFields(fields);
+  query = normalizeSearchDateRanges(query, entity);
   query = anchorPureNegationQuery(query, entity);
   const session = await getSession();
   const url = new URL(`search/${entity}`, session.restUrl);
