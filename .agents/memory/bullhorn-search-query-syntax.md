@@ -78,6 +78,10 @@ isOpen:true = 513 and INCLUDES Archive(99), Hold(~99), Canceled(2), Filled(3), P
 Declined(1), Lost(1). `isOpen AND NOT status:Archive` = 414 still includes Hold/Filled/
 Placed/Canceled. "Actively recruiting" (Accepting Candidates) alone = 287. So a "open
 jobs" scorecard number depends on a business definition — confirm with the user.
+DECISION (Myticas, 2026-06-20): the user's scorecard definition of "open jobs" =
+`isOpen:true AND NOT status:Archive` (414), intentionally INCLUDING on-hold/filled/placed.
+This convention + the exact-spelling warning are baked into the search_jobs and
+count_entity tool descriptions so ChatGPT applies it consistently.
 
 # Three DIFFERENT ChatGPT "blocked" messages — do not conflate
 1. "blocked by the connector safety layer" (assistant narration) = client-side
