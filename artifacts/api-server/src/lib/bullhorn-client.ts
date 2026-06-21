@@ -1593,60 +1593,115 @@ async function searchTotal(entity: string, query: string): Promise<number> {
 // Standalone "active opportunities" definition (the official active-pipeline set).
 // Used both to EXTEND an isOpen:true query (guard) and as a SELF-CONTAINED query
 // (annotation), so the two enforcement paths never drift.
-const ACTIVE_OPPS_DEFINITION =
-  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false';
+const ACTIVE_OPPS_STATUS_CLAUSE =
+  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted';
+const ACTIVE_OPPS_DEFINITION = `${ACTIVE_OPPS_STATUS_CLAUSE} AND isDeleted:false`;
+
+/**
+ * AND-append a locking clause onto a caller's base query. If the base has a top-level
+ * `OR`, it is wrapped in parens FIRST: Lucene binds `AND` tighter than `OR`, so a raw
+ * `status:New OR status:Qualified AND isDeleted:false` parses as
+ * `status:New OR (status:Qualified AND isDeleted:false)` — the lock applies to only the
+ * last OR branch and soft-deleted/non-confirmed rows leak on that phrasing. We always
+ * append a POSITIVE lock (isDeleted:false or a parenthesized status group), so the
+ * combined query is never a bare all-negative set and needs no id-anchor here.
+ */
+function andLockClause(base: string, addition: string): string {
+  const wrapped = /\bOR\b/i.test(base) ? `(${base})` : base;
+  return `${wrapped} AND ${addition}`;
+}
 
 function applyMetricDefinitionGuard(
   entity: string,
   query: string,
 ): { query: string; appliedDefinition?: string } {
-  // Open jobs: a raw isOpen:true must not include Archived reqs (drifts 513 -> 414).
+  // Open jobs: soft-deleted records are operational-truth-excluded from EVERY JobOrder
+  // read (not just isOpen:true), so any phrasing or per-group breakdown reconciles to the
+  // locked universe. The Archived-requisition exclusion is specific to the open-jobs
+  // metric, so it is only added for the isOpen:true intent without an explicit status.
   if (entity === "JobOrder") {
-    if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
-    // Apply each exclusion independently: NOT Archive only if no explicit status:
-    // (lets power users override the status filter), and isDeleted:false unless the
-    // caller already pinned isDeleted — so even the old `isOpen:true AND NOT status:Archive`
-    // form (which has a status:) still gets the soft-delete exclusion (398, not 414).
+    const isOpenIntent =
+      /\bisOpen\s*:\s*true\b/i.test(query) && !/\bstatus\s*:/i.test(query);
     const additions: string[] = [];
-    if (!/\bstatus\s*:/i.test(query)) additions.push("NOT status:Archive");
+    if (isOpenIntent) additions.push("NOT status:Archive");
+    // Respect an explicit isDeleted (power-user opt-in to deleted records).
     if (!/\bisDeleted\s*:/i.test(query)) additions.push("isDeleted:false");
     if (additions.length === 0) return { query };
     return {
-      query: `${query} AND ${additions.join(" AND ")}`,
-      appliedDefinition:
-        "open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (Archived requisitions AND soft-deleted records excluded to match the official open-jobs metric = 398; on-hold/filled/placed still included)",
+      query: andLockClause(query, additions.join(" AND ")),
+      appliedDefinition: isOpenIntent
+        ? "open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (Archived requisitions AND soft-deleted records excluded to match the official open-jobs metric = 398; on-hold/filled/placed still included)"
+        : "soft-deleted job records are excluded (operational truth); pass isDeleted:true to include them.",
     };
   }
-  // Active opportunities: pipeline intent (isOpen:true) maps to the status-based
-  // definition (exclude Closed-Won/Closed-Lost/Converted) AND excludes soft-deleted
-  // records, yielding the official 23 — NOT the raw isOpen:true 34. Stops the AI from
-  // freelancing the status set or omitting the soft-delete exclusion.
+  // Active opportunities: soft-deleted records are operational-truth-excluded from EVERY
+  // Opportunity read, so alternate "open"/"still open" phrasings and per-group breakdowns
+  // reconcile to the locked 23 (e.g. the New status group is 4, not the deleted-inclusive
+  // 5). The full active-pipeline definition (exclude Closed-Won/Closed-Lost/Converted) is
+  // additionally applied for the isOpen:true intent without an explicit status.
   if (entity === "Opportunity") {
-    if (!/\bisOpen\s*:\s*true\b/i.test(query)) return { query };
-    if (/\bstatus\s*:/i.test(query)) return { query };
-    return {
-      query: `${query} AND ${ACTIVE_OPPS_DEFINITION}`,
-      appliedDefinition:
-        'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false (the official active-pipeline metric = 23; soft-deleted and closed/converted are already excluded — do NOT subtract further).',
-    };
+    const hasExplicitDeleted = /\bisDeleted\s*:/i.test(query);
+    const isOpenIntent =
+      /\bisOpen\s*:\s*true\b/i.test(query) && !/\bstatus\s*:/i.test(query);
+    if (isOpenIntent) {
+      // Add the active status exclusions; add isDeleted:false only if the caller did not
+      // already pin isDeleted (so a power-user `isOpen:true AND isDeleted:true` is honored,
+      // not zeroed by a contradictory isDeleted:false).
+      const clause = hasExplicitDeleted
+        ? ACTIVE_OPPS_STATUS_CLAUSE
+        : ACTIVE_OPPS_DEFINITION;
+      return {
+        query: andLockClause(query, clause),
+        appliedDefinition: hasExplicitDeleted
+          ? 'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted (the official active-pipeline metric = 23; your explicit isDeleted is honored, so soft-deleted records are NOT excluded here — drop isDeleted to get the canonical 23).'
+          : 'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false (the official active-pipeline metric = 23; soft-deleted and closed/converted are already excluded — do NOT subtract further).',
+      };
+    }
+    if (!hasExplicitDeleted) {
+      return {
+        query: andLockClause(query, "isDeleted:false"),
+        appliedDefinition:
+          "soft-deleted opportunities are excluded (operational truth); pass isDeleted:true to include them.",
+      };
+    }
+    return { query };
   }
-  // Placement: `isDeleted` is NOT searchable on Placement (any value returns 0), and
-  // Placement search already excludes soft-deleted. Strip any model/user-supplied
-  // isDeleted clause so a freelanced `AND isDeleted:false` cannot collapse the count to 0.
+  // Placement: two corrections. (1) `isDeleted` is NOT searchable on Placement (any value
+  // returns 0) and Placement search already excludes soft-deleted, so strip any supplied
+  // isDeleted clause. (2) "Placements made" means CONFIRMED only — when the caller pins no
+  // status, lock the base to confirmed so totals AND per-group breakdowns match the
+  // official metric (YTD 98 / all-time 2650), instead of the all-status 123/2775. A power
+  // user wanting pending/canceled/all passes an explicit status filter to override.
   if (entity === "Placement") {
-    if (!/\bisDeleted\s*:/i.test(query)) return { query };
-    let stripped = query
-      .replace(/\s*\b(?:AND|OR)\b\s*isDeleted\s*:\s*(?:true|false|0|1)\b/gi, "")
-      .replace(/\bisDeleted\s*:\s*(?:true|false|0|1)\b\s*\b(?:AND|OR)\b\s*/gi, "")
-      .replace(/\bisDeleted\s*:\s*(?:true|false|0|1)\b/gi, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!stripped) stripped = "id:[1 TO *]";
-    return {
-      query: stripped,
-      appliedDefinition:
-        "isDeleted is not searchable on Placement (it returns 0 for any value), so that filter was removed — Placement search already excludes soft-deleted records.",
-    };
+    let q = query;
+    if (/\bisDeleted\s*:/i.test(q)) {
+      q = q
+        .replace(/\s*\b(?:AND|OR)\b\s*isDeleted\s*:\s*(?:true|false|0|1)\b/gi, "")
+        .replace(/\bisDeleted\s*:\s*(?:true|false|0|1)\b\s*\b(?:AND|OR)\b\s*/gi, "")
+        .replace(/\bisDeleted\s*:\s*(?:true|false|0|1)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!q) q = "id:[1 TO *]";
+    }
+    if (!/\bstatus\s*:/i.test(q)) {
+      const base =
+        q === "id:[1 TO *]"
+          ? CONFIRMED_PLACEMENT_CLAUSE
+          : andLockClause(q, CONFIRMED_PLACEMENT_CLAUSE);
+      return {
+        query: base,
+        appliedDefinition:
+          `placements made = confirmed only ${CONFIRMED_PLACEMENT_CLAUSE} (the official metric: YTD 98 / all-time 2650; pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them.`,
+      };
+    }
+    if (q !== query) {
+      return {
+        query: q,
+        appliedDefinition:
+          "isDeleted is not searchable on Placement (it returns 0 for any value), so that filter was removed — Placement search already excludes soft-deleted records.",
+      };
+    }
+    return { query: q };
   }
   return { query };
 }

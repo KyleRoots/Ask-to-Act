@@ -101,3 +101,40 @@ sales_pipeline_report=23 (by stage 14/4/4/1).
 **Why per-entity, not global:** `/search` includes deleted but `/query` (where) excludes them, and
 field searchability varies by entity — so the deleted-exclusion MUST be applied and verified
 entity-by-entity, never blanket-applied.
+
+## Fourth drift hole: per-group breakdowns + phrasing bypass the headline lock
+
+**Three failure modes found in QA, all "the lock applied to only SOME query shapes":**
+
+1. **Alternate phrasing** — "still open opps" expressed as the 3 closed-status exclusions WITHOUT
+   `isOpen:true` skipped the soft-delete exclusion (lock was gated on isOpen-intent), so it
+   returned the deleted-inclusive count and a per-status breakdown summed to one over the locked
+   total (a soft-deleted "New" opp). **Fix:** make the soft-delete exclusion UNIVERSAL per entity
+   — JobOrder & Opportunity append `isDeleted:false` to EVERY query (unless caller pins isDeleted);
+   the metric-SPECIFIC parts (NOT Archive for jobs, the 3 closed-status exclusions for opps) stay
+   gated on isOpen-intent-without-status.
+
+2. **Breakdown can't reconcile** — "placements by employment type" with no status returned the
+   all-status total and a breakdown summing above the confirmed headline, because confirmed-status
+   was only an ANNOTATION, not enforced on the base. **Fix/decision:** Placement now DEFAULTS to the
+   confirmed-status definition in the guard when the caller pins no `status:` (so total AND every
+   group reconcile to YTD/all-time confirmed). An explicit `status:` overrides. This is a semantic
+   change to the raw number but it ENFORCES the already-locked "placements made = confirmed" def.
+
+3. **Top-level OR precedence (Lucene)** — `AND` binds tighter than `OR`, so appending a lock as
+   `base AND isDeleted:false` onto a base like `status:New OR status:Qualified` parses as
+   `status:New OR (status:Qualified AND isDeleted:false)` — the lock hits only the LAST OR branch
+   and the others leak (Bullhorn even returned a nonsensical partial count). **Fix:** an
+   `andLockClause(base, addition)` helper PARENTHESIZES the base whenever it contains a top-level
+   `OR` before AND-appending. Used at every guard append site. The grouped-breakdown path already
+   did this (`hasTopLevelOr` → `(base) AND clause`); the guard itself did not.
+
+**Durable rule:** any server-side metric lock must be (a) applied to EVERY query shape for the
+entity, not just the canonical one, and (b) AND-appended with the base parenthesized if it has a
+top-level OR. A lock that fires on only one phrasing is worse than no lock — it makes drift
+look authoritative. **Why:** the product's value is that the headline AND its breakdown always
+reconcile to the same locked universe regardless of how the AI phrases the query.
+
+**Honor explicit power-user isDeleted:** when the caller pins `isDeleted:true`, do NOT also append
+`isDeleted:false` (contradiction → 0). The isOpen-opps branch appends only the status exclusions
+in that case (matches JobOrder), and its `appliedDefinition` text must NOT claim isDeleted:false.
