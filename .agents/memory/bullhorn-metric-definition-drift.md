@@ -161,3 +161,37 @@ only safe speed lever here — never collapse or approximate a count to save a r
 used to discard the guard note). Surfacing the locked definition on the browse path tells the AI
 WHY the universe is what it is so it reports the locked number instead of re-tallying records.
 Safe for internal callers (`searchTotal` reads only `.total`; group-discovery reads only `.data`).
+
+## Fifth drift hole: the /query SQL-where path (query_entity) bypassed the lock entirely
+
+**Observed:** count_entity/search were locked, but the raw `query_entity` MCP tool — which speaks
+Bullhorn's SQL-like `/query` where-syntax (`isOpen=true`, `status<>'X'`, `isDeleted=false`), NOT
+Lucene — had NO guard, so an AI browsing/self-counting its rows drifted (24 vs 23, 19 vs 18).
+`/query` returns soft-deleted/archived/non-confirmed rows by default just like `/search`.
+
+**Durable rule — enforce the locked universe on EVERY query SHAPE, in BOTH dialects.** The lock
+must exist twice: in Lucene (for /search & /count) and in SQL-where (for /query). The syntaxes
+differ (`status:X` vs `status='X'`; `NOT status:X` vs `status<>'X'`; `isOpen:true` vs
+`isOpen=true`), so derive BOTH renderings from ONE shared status-array source of truth — never
+hand-maintain two parallel lists (they will drift).
+
+**Place the guard at the RAW-TOOL boundary, NOT the shared low-level fetch.** The SQL-where guard
+belongs on the function backing the raw query_entity tool — never the low-level query helper that
+curated list/report functions also call. Those curated functions (e.g. the broad placements list)
+apply their OWN deliberate locking/annotation; guarding the shared helper silently overrides them
+and makes their notes self-contradictory. Guard the AI-authored door only.
+**Why:** the hole is AI-freelanced queries; curated tools are already correct by construction.
+
+**CRITICAL — field-detection regexes must match the ENTITY'S OWN field, never a dotted association
+field.** Deciding "did the caller already specify status / isDeleted?" gates whether the default
+lock is applied. A bare `\bstatus` / `\bisDeleted` ALSO matches right after a dot, so
+`isOpen=true AND clientCorporation.status='Active'` masquerades as an explicit status and SKIPS
+the lock (leaks all-status), and `candidate.isDeleted=...` suppresses the soft-delete guard.
+Prefix every such detector with `(?<![\w.])` so only the entity's own top-level field counts; the
+Placement isDeleted-strip must likewise leave valid association fields (candidate.isDeleted) alone.
+
+**SQL-where per-entity gotchas (differ from Lucene):** `/query` accepts `isOpen=true` (NOT
+`isOpen=1` — numeric 400s), `status<>'X'`, `status IN (...)`, and `isDeleted=false` on JobOrder &
+Opportunity ONLY. `isDeleted` is NOT a valid field on Placement (errors as both a field and in
+where) — strip an AND-joined one, but REFUSE (throw) an OR-joined one rather than silently broaden
+the result (`status='Approved' OR isDeleted=false` → all statuses).

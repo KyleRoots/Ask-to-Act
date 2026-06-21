@@ -1604,12 +1604,39 @@ async function searchTotal(entity: string, query: string): Promise<number> {
  * applied definition so the answer always matches the curated open_jobs report.
  * If the caller already mentions `status`/`Archive`, we leave their query untouched.
  */
+// ── Single source of truth for status-based metric definitions ──────────────────
+// The SAME status sets are rendered to BOTH Lucene (/search, count_entity) and
+// SQL-where (/query, query_entity) below, so the two query paths can never drift.
+const OPP_CLOSED_STATUSES = ["Closed-Won", "Closed-Lost", "Converted"] as const;
+const PLACEMENT_CONFIRMED_STATUSES = ["Approved", "Completed", "Ended"] as const;
+const JOBORDER_ARCHIVE_STATUS = "Archive";
+
+/** Lucene status term: quote values with non-alphanumerics (e.g. "Closed-Won") so a
+ *  hyphen isn't parsed as an operator; bare alphanumerics (Converted) stay unquoted. */
+function luceneStatusTerm(v: string): string {
+  return /^[A-Za-z0-9]+$/.test(v) ? v : `"${v}"`;
+}
+/** SQL-where string literal: single-quoted, with embedded quotes doubled. */
+function sqlStatusValue(v: string): string {
+  return `'${v.replace(/'/g, "''")}'`;
+}
+
 // Standalone "active opportunities" definition (the official active-pipeline set).
 // Used both to EXTEND an isOpen:true query (guard) and as a SELF-CONTAINED query
 // (annotation), so the two enforcement paths never drift.
-const ACTIVE_OPPS_STATUS_CLAUSE =
-  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted';
+const ACTIVE_OPPS_STATUS_CLAUSE = OPP_CLOSED_STATUSES.map(
+  (s) => `NOT status:${luceneStatusTerm(s)}`,
+).join(" AND ");
 const ACTIVE_OPPS_DEFINITION = `${ACTIVE_OPPS_STATUS_CLAUSE} AND isDeleted:false`;
+
+// SQL-where equivalents for the /query path (query_entity).
+const OPP_ACTIVE_STATUS_WHERE = OPP_CLOSED_STATUSES.map(
+  (s) => `status<>${sqlStatusValue(s)}`,
+).join(" AND ");
+const JOBORDER_ARCHIVE_WHERE = `status<>${sqlStatusValue(JOBORDER_ARCHIVE_STATUS)}`;
+const CONFIRMED_PLACEMENT_WHERE = `(${PLACEMENT_CONFIRMED_STATUSES.map(
+  (s) => `status=${sqlStatusValue(s)}`,
+).join(" OR ")})`;
 
 /**
  * AND-append a locking clause onto a caller's base query. If the base has a top-level
@@ -1668,7 +1695,8 @@ function applyMetricDefinitionGuard(
     const isOpenIntent =
       /\bisOpen\s*:\s*true\b/i.test(query) && !/\bstatus\s*:/i.test(query);
     const additions: string[] = [];
-    if (isOpenIntent) additions.push("NOT status:Archive");
+    if (isOpenIntent)
+      additions.push(`NOT status:${luceneStatusTerm(JOBORDER_ARCHIVE_STATUS)}`);
     // Respect an explicit isDeleted (power-user opt-in to deleted records).
     if (!/\bisDeleted\s*:/i.test(query)) additions.push("isDeleted:false");
     if (additions.length === 0) return { query };
@@ -1751,13 +1779,164 @@ function applyMetricDefinitionGuard(
   return { query };
 }
 
+// ── SQL-where guard (the /query path, exposed as query_entity) ───────────────────
+// query_entity speaks Bullhorn's SQL-like `where` syntax (isOpen=true, status<>'X',
+// status IN (...), isDeleted=false, AND/OR) — NOT Lucene — so it cannot reuse the
+// guard above. This mirror enforces the SAME locked universe on /query, because the
+// /query path otherwise returns soft-deleted/archived/non-confirmed records (live
+// proof: a raw `isOpen=true` Opportunity query returned 2 soft-deleted rows). Without
+// this, an AI that browses or self-counts query_entity records drifts off the locked
+// numbers (24 vs 23, 19 vs 18).
+// These detect a predicate on the ENTITY'S OWN field only. The leading `(?<![\w.])`
+// rejects dotted association fields (clientCorporation.status, candidate.isDeleted,
+// jobOrder.isOpen): `\b` alone matches right after a dot, which would let e.g.
+// `isOpen=true AND clientCorporation.status='Active'` masquerade as an explicit
+// status and bypass the status lock, or let `candidate.isDeleted=...` suppress the
+// entity soft-delete guard.
+const WHERE_ISDELETED_PRED_RE =
+  /(?<![\w.])isDeleted\s*(?:=|<>|!=)\s*(?:true|false|0|1)\b/i;
+const WHERE_ISOPEN_TRUE_RE = /(?<![\w.])isOpen\s*=\s*(?:true|1)\b/i;
+const WHERE_STATUS_PRED_RE =
+  /(?<![\w.])status\s*(?:=|<>|!=)|(?<![\w.])status\s+(?:in|like)\b/i;
+
+/**
+ * AND-append a SQL-where lock onto a caller's base. If the base has a top-level `OR`,
+ * it is wrapped in parens first: SQL (like Lucene) binds `AND` tighter than `OR`, so
+ * `status='New' OR status='Qualified' AND isDeleted=false` would otherwise lock only
+ * the last branch and leak soft-deleted rows on the first.
+ */
+function andWhereClause(base: string, addition: string): string {
+  const b = base.trim();
+  if (b === "") return addition;
+  const wrapped = /\bOR\b/i.test(b) ? `(${b})` : b;
+  return `${wrapped} AND ${addition}`;
+}
+
+function applyMetricDefinitionGuardWhere(
+  entity: string,
+  where: string,
+): { where: string; appliedDefinition?: string } {
+  const w = (where ?? "").trim();
+  if (entity === "JobOrder") {
+    const hasExplicitDeleted = WHERE_ISDELETED_PRED_RE.test(w);
+    const isOpenIntent =
+      WHERE_ISOPEN_TRUE_RE.test(w) && !WHERE_STATUS_PRED_RE.test(w);
+    const additions: string[] = [];
+    if (isOpenIntent) additions.push(JOBORDER_ARCHIVE_WHERE);
+    if (!hasExplicitDeleted) additions.push("isDeleted=false");
+    if (additions.length === 0) return { where: w };
+    let appliedDefinition: string;
+    if (isOpenIntent) {
+      appliedDefinition = hasExplicitDeleted
+        ? `open jobs = isOpen=true AND ${JOBORDER_ARCHIVE_WHERE} (Archived requisitions excluded; your explicit isDeleted is honored — drop it to match the locked open-jobs metric = 398). query_entity returns at most a page of records — use count_entity for the total.`
+        : `open jobs = isOpen=true AND ${JOBORDER_ARCHIVE_WHERE} AND isDeleted=false (Archived requisitions AND soft-deleted records excluded to match the locked open-jobs metric = 398). query_entity returns at most a page of records — use count_entity for the total.`;
+    } else {
+      appliedDefinition =
+        "soft-deleted job records are excluded (operational truth); pass isDeleted=true to include them.";
+    }
+    return {
+      where: andWhereClause(w, additions.join(" AND ")),
+      appliedDefinition,
+    };
+  }
+  if (entity === "Opportunity") {
+    const hasExplicitDeleted = WHERE_ISDELETED_PRED_RE.test(w);
+    const isOpenIntent =
+      WHERE_ISOPEN_TRUE_RE.test(w) && !WHERE_STATUS_PRED_RE.test(w);
+    if (isOpenIntent) {
+      const clause = hasExplicitDeleted
+        ? OPP_ACTIVE_STATUS_WHERE
+        : `${OPP_ACTIVE_STATUS_WHERE} AND isDeleted=false`;
+      return {
+        where: andWhereClause(w, clause),
+        appliedDefinition: hasExplicitDeleted
+          ? `active opportunities = isOpen=true AND ${OPP_ACTIVE_STATUS_WHERE} (the locked active-pipeline metric = 23; your explicit isDeleted is honored — drop it to get the canonical 23). Use count_entity for the total.`
+          : `active opportunities = isOpen=true AND ${OPP_ACTIVE_STATUS_WHERE} AND isDeleted=false (the locked active-pipeline metric = 23; soft-deleted and closed/converted are already excluded — do NOT subtract further). Use count_entity for the total.`,
+      };
+    }
+    if (!hasExplicitDeleted) {
+      return {
+        where: andWhereClause(w, "isDeleted=false"),
+        appliedDefinition:
+          "soft-deleted opportunities are excluded (operational truth); pass isDeleted=true to include them.",
+      };
+    }
+    return { where: w };
+  }
+  if (entity === "Placement") {
+    // isDeleted does not exist on Placement (any reference errors) and Placement /query
+    // already excludes soft-deleted, so strip an AND-joined isDeleted predicate. If it
+    // is OR-joined we refuse rather than silently broaden the result set.
+    let q = w;
+    let strippedDeleted = false;
+    // Only the entity's OWN isDeleted is invalid on Placement; a dotted association
+    // field (candidate.isDeleted, jobOrder.isDeleted) IS valid and must be left alone,
+    // hence the `(?<![\w.])` guard on every isDeleted match here.
+    if (/(?<![\w.])isDeleted\b/i.test(q)) {
+      // Strip AND-joined isDeleted predicates first (safe — narrows nothing real
+      // since the field doesn't exist on Placement).
+      const afterAnd = q
+        .replace(
+          /\s*\bAND\b\s*(?<![\w.])isDeleted\s*(?:=|<>|!=)\s*(?:true|false|0|1)\b/gi,
+          "",
+        )
+        .replace(
+          /(?<![\w.])isDeleted\s*(?:=|<>|!=)\s*(?:true|false|0|1)\b\s*\bAND\b\s*/gi,
+          "",
+        )
+        .replace(/\s+/g, " ")
+        .trim();
+      if (/(?<![\w.])isDeleted\b/i.test(afterAnd)) {
+        // Survived the AND-strip → isDeleted is OR-joined or standalone.
+        if (/\bOR\b/i.test(afterAnd)) {
+          // OR-joined: silently stripping it would BROADEN the result set
+          // (status='Approved' OR isDeleted=false → all statuses). Refuse instead.
+          throw new Error(
+            "isDeleted is not filterable on Placement (the field does not exist there, and Placement already excludes soft-deleted records). Remove the isDeleted condition and retry.",
+          );
+        }
+        // Standalone predicate (no AND/OR): safe to drop entirely.
+        q = afterAnd
+          .replace(/(?<![\w.])isDeleted\s*(?:=|<>|!=)\s*(?:true|false|0|1)\b/gi, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      } else {
+        q = afterAnd;
+      }
+      strippedDeleted = q !== w;
+      if (q === "") q = "id>0";
+    }
+    const hasStatus = WHERE_STATUS_PRED_RE.test(q);
+    if (!hasStatus) {
+      const base =
+        q === "" || q === "id>0"
+          ? CONFIRMED_PLACEMENT_WHERE
+          : andWhereClause(q, CONFIRMED_PLACEMENT_WHERE);
+      return {
+        where: base,
+        appliedDefinition: `placements made = confirmed only ${CONFIRMED_PLACEMENT_WHERE} (the official metric: YTD 98 / all-time 2650; pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them. Use count_entity for the total.`,
+      };
+    }
+    if (strippedDeleted) {
+      return {
+        where: q,
+        appliedDefinition:
+          "isDeleted is not filterable on Placement, so that condition was removed — Placement already excludes soft-deleted records.",
+      };
+    }
+    return { where: q };
+  }
+  return { where: w };
+}
+
 /**
  * Confirmed-placement statuses for this instance. "Placements made / this year" means
  * CONFIRMED only; Submitted (pending), Canceled, and Archive are NOT real placements
  * (counting all statuses gives the 123-vs-98 drift we observed live).
  */
-const CONFIRMED_PLACEMENT_CLAUSE =
-  "(status:Approved OR status:Completed OR status:Ended)";
+const CONFIRMED_PLACEMENT_CLAUSE = `(${PLACEMENT_CONFIRMED_STATUSES.map(
+  (s) => `status:${luceneStatusTerm(s)}`,
+).join(" OR ")})`;
 
 /**
  * For a Placement count with NO status filter, the raw `total` includes pending/
@@ -1982,14 +2161,31 @@ export async function queryAnyEntity(args: {
     );
   }
   const fields = args.fields ?? entry.defaultFields;
-  return queryEntity(
+  // Enforce the locked operational universe on the raw /query tool. This guard lives
+  // HERE (not in low-level queryEntity) so the curated list/report functions —
+  // listPlacements et al, which already apply their own deliberate locking/notes —
+  // keep their behavior; only AI-authored query_entity calls are guarded.
+  const guarded = applyMetricDefinitionGuardWhere(entry.canonical, args.where);
+  const result = await queryEntity(
     entry.canonical,
-    args.where,
+    guarded.where,
     fields,
     args.count ?? 20,
     args.start ?? 0,
     args.orderBy,
   );
+  if (
+    guarded.appliedDefinition &&
+    result &&
+    typeof result === "object" &&
+    !Array.isArray(result)
+  ) {
+    return {
+      ...(result as Record<string, unknown>),
+      appliedDefinition: guarded.appliedDefinition,
+    };
+  }
+  return result;
 }
 
 /** Generic get-by-id over any catalog entity. */
