@@ -138,3 +138,26 @@ reconcile to the same locked universe regardless of how the AI phrases the query
 **Honor explicit power-user isDeleted:** when the caller pins `isDeleted:true`, do NOT also append
 `isDeleted:false` (contradiction → 0). The isOpen-opps branch appends only the status exclusions
 in that case (matches JobOrder), and its `appliedDefinition` text must NOT claim isDeleted:false.
+
+## Speed: parallelize independent reads, never sequential per-group counts
+
+**Decision:** Counting/breakdowns must go through `count_entity` (server-side, locked), NOT the
+fetch-records-and-tally road (slow + hits the 50-record cap). To keep `count_entity` fast: the
+per-group breakdown fans out with BOUNDED concurrency (`mapWithLimit`, limit 5) instead of a
+sequential `for...await`, and the headline total + the two entity-gated annotations
+(placement-confirmed, opportunity-active) run in one `Promise.all`. An 8-group cold breakdown
+dropped from ~8 serial round-trips to ~1.2s.
+
+**Why limit 5, not unbounded:** Bullhorn REST is 120 req / 60s. A 50-group breakdown at limit 5
+runs in ~10 waves — far under a dangerous burst — while concurrent user traffic still shares that
+budget. Unbounded fan-out on a wide groupBy could 429 the whole request.
+
+**Invariant when parallelizing:** locked numbers must not move. `mapWithLimit` preserves input
+order (write results by index, sort after), and per-group failures stay isolated
+(`{count:null,error}` per group, never fail the batch). Independent-read parallelization is the
+only safe speed lever here — never collapse or approximate a count to save a round-trip.
+
+**Steering note on search/list paths:** `searchEntity` now also returns `appliedDefinition` (it
+used to discard the guard note). Surfacing the locked definition on the browse path tells the AI
+WHY the universe is what it is so it reports the locked number instead of re-tallying records.
+Safe for internal callers (`searchTotal` reads only `.total`; group-discovery reads only `.data`).

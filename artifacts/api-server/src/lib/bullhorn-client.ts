@@ -383,7 +383,8 @@ async function searchEntity(
   // Enforce metric definitions on the SEARCH path too, so a freelanced raw
   // isOpen:true returns the correct universe of records (jobs exclude Archived;
   // opportunities exclude Closed-Won/Closed-Lost/Converted) — not just on count.
-  query = applyMetricDefinitionGuard(entity, query).query;
+  const guard = applyMetricDefinitionGuard(entity, query);
+  query = guard.query;
   query = normalizeSearchDateRanges(query, entity);
   query = anchorPureNegationQuery(query, entity);
 
@@ -426,11 +427,24 @@ async function searchEntity(
     cacheSet(cacheKey, raw);
   }
 
-  return redactCandidateDescriptions(
+  const processed = redactCandidateDescriptions(
     entity,
     await enrichWithProfileUrls(entity, raw),
     { capDescription: true },
   );
+  // Surface the same locked-definition note the count path returns, so an AI browsing
+  // records via search/list tools sees WHY the universe is what it is (e.g. "open jobs =
+  // isOpen AND NOT Archive AND isDeleted:false") and reports the locked number instead of
+  // re-tallying records itself (slow, and caps out). Only attach to object responses.
+  if (
+    guard.appliedDefinition &&
+    processed &&
+    typeof processed === "object" &&
+    !Array.isArray(processed)
+  ) {
+    return { ...(processed as Record<string, unknown>), appliedDefinition: guard.appliedDefinition };
+  }
+  return processed;
 }
 
 async function queryEntity(
@@ -1611,6 +1625,37 @@ function andLockClause(base: string, addition: string): string {
   return `${wrapped} AND ${addition}`;
 }
 
+/**
+ * Bounded-concurrency map preserving input order. Used to fan out many independent
+ * read-only counts (e.g. per-group breakdowns) so a wide groupBy resolves in
+ * O(N/limit) round-trips instead of O(N) sequential ones, while staying well under
+ * Bullhorn's REST rate limit (120 req / 60s).
+ */
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) || 1 },
+    async () => {
+      while (cursor < items.length) {
+        const i = cursor++;
+        out[i] = await fn(items[i]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return out;
+}
+
+// Max concurrent per-group count requests in a single grouped count_entity call.
+// 5 keeps a 50-group breakdown to ~10 sequential waves, comfortably under the
+// 120/60s REST limit even with other in-flight reads.
+const GROUP_COUNT_CONCURRENCY = 5;
+
 function applyMetricDefinitionGuard(
   entity: string,
   query: string,
@@ -1816,10 +1861,15 @@ export async function countEntity(args: {
   // opportunities 34 -> 24).
   const guard = applyMetricDefinitionGuard(entry.canonical, baseInput);
   const base = guard.query;
-  const total = await searchTotal(entry.canonical, base);
-  // Surface the confirmed-only placement figure (98) alongside an all-status total (123).
-  const placementAnnotation = await placementConfirmedAnnotation(entry.canonical, base);
-  const opportunityAnnotation = await opportunityActiveAnnotation(entry.canonical, base);
+  // The headline total and the two entity-gated annotations are independent reads —
+  // fan them out in parallel instead of three sequential round-trips. The annotation
+  // helpers return undefined for non-matching entities, so this adds no extra calls.
+  const [total, placementAnnotation, opportunityAnnotation] = await Promise.all([
+    searchTotal(entry.canonical, base),
+    // Surface the confirmed-only placement figure (98) alongside an all-status total (123).
+    placementConfirmedAnnotation(entry.canonical, base),
+    opportunityActiveAnnotation(entry.canonical, base),
+  ]);
 
   if (!args.groupBy) {
     return {
@@ -1882,18 +1932,23 @@ export async function countEntity(args: {
   // precedence (a pure-negation+OR base is the known unsupported case and stays 0).
   const hasTopLevelOr = /\bOR\b/i.test(base);
   const flatBase = anchorPureNegationQuery(base, entry.canonical);
-  // One tiny /search per value, sequential to stay well under the rate limit; a single
-  // bad value yields a per-group error instead of failing the whole batch.
-  const groups: Array<{ value: string; count: number | null; error?: string }> = [];
-  for (const value of values) {
-    const clause = `${groupBy}:"${escapeLucenePhrase(value)}"`;
-    const q = hasTopLevelOr ? `(${base}) AND ${clause}` : `${flatBase} AND ${clause}`;
-    try {
-      groups.push({ value, count: await searchTotal(entry.canonical, q) });
-    } catch (e) {
-      groups.push({ value, count: null, error: (e as Error).message.slice(0, 160) });
-    }
-  }
+  // One tiny /search per value, fanned out with bounded concurrency to stay well under
+  // the rate limit; a single bad value yields a per-group error instead of failing the
+  // whole batch.
+  const groups: Array<{ value: string; count: number | null; error?: string }> =
+    await mapWithLimit(
+      values,
+      GROUP_COUNT_CONCURRENCY,
+      async (value): Promise<{ value: string; count: number | null; error?: string }> => {
+        const clause = `${groupBy}:"${escapeLucenePhrase(value)}"`;
+        const q = hasTopLevelOr ? `(${base}) AND ${clause}` : `${flatBase} AND ${clause}`;
+        try {
+          return { value, count: await searchTotal(entry.canonical, q) };
+        } catch (e) {
+          return { value, count: null, error: (e as Error).message.slice(0, 160) };
+        }
+      },
+    );
   groups.sort((a, b) => (b.count ?? -1) - (a.count ?? -1));
 
   return {
