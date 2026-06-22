@@ -45,7 +45,7 @@ export default function ExecSummary() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
           <Stat number="5–8h" label="Recruiter time lost per week to manual copy-paste between AI and ATS" />
           <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do" accent="#fbbf24" />
-          <Stat number="37" label="MCP tools live in production: 33 reads + 4 writes, all running under per-user Bullhorn sessions" accent="#4ade80" />
+          <Stat number="37" label="Specific recruiting actions a recruiter can take from ChatGPT or Claude — search, read, submit, note, update — all live in production today" accent="#4ade80" />
         </div>
 
         {/* Section: The Problem */}

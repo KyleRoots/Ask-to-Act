@@ -54,12 +54,12 @@ app.get("/", (_req, res) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Myticas AI Connector</title>
+  <title>AskToAct</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0b1020;color:#e8ecf3;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
     main{max-width:480px;text-align:center}
-    .logo{font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#4f6ef7;margin-bottom:32px}
+    .logo{font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#38bdf8;margin-bottom:32px}
     h1{font-size:26px;font-weight:600;margin-bottom:16px;line-height:1.3}
     p{font-size:15px;line-height:1.65;color:#8a99b3}
     .divider{width:40px;height:2px;background:#1e2a45;margin:28px auto}
@@ -68,11 +68,11 @@ app.get("/", (_req, res) => {
 </head>
 <body>
   <main>
-    <div class="logo">Myticas Consulting</div>
-    <h1>AI Connector</h1>
+    <div class="logo">AskToAct</div>
+    <h1>AI Action Layer for Recruiting</h1>
     <div class="divider"></div>
-    <p>This is a private API service that connects Myticas recruiters to their AI tools. It is not a public website.</p>
-    <p class="note">Authorized personnel only. If you are a Myticas recruiter, your administrator will provide your enrollment link.</p>
+    <p>This is a private API service. It connects authorized recruiters to their AI tools — so they can work inside their ATS directly from ChatGPT or Claude.</p>
+    <p class="note">Authorized personnel only. Your administrator will provide your personal enrollment link.</p>
   </main>
 </body>
 </html>`);
