@@ -41,6 +41,13 @@ description: Why AskToAct leans connector-first (BYO AI), what the connector can
 - The confidence engine = a **golden-answer regression harness run ACROSS models (GPT/Claude/Gemini)**.
   Turns "do we feel robust?" into "are all N golden checks green across every model?" It also signals
   when to STOP (suite green across models = done; don't chase the asymptote).
+- HARNESS BLIND SPOT (don't over-trust green): the connector-side harness asserts CONSISTENCY
+  (cross-tool agreement + structural invariants), NOT absolute correctness — a wrong-but-consistent
+  definition passes green, and because the active-opps predicate is now a single shared constant, a
+  bad edit makes BOTH tools agree on the wrong number. Snapshot drift is WARNING-ONLY unless `--strict`.
+  So green is necessary, not sufficient: absolute truth still needs a definition-lock test (assert the
+  exact predicates/constants + that `appliedDefinition` strings carry no stale absolute counts) and
+  `--strict` for release validation.
 - Generalizing to ANY ATS = a **canonical adapter layer**: map each ATS's quirks ONCE (Bullhorn's
   correlatedCustomText1 etc.) into a normalized model; new ATS = one adapter + permission map +
   golden suite. "Any ATS" really means "any ATS with a built + golden-verified adapter" — bounded and
