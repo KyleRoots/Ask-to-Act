@@ -1,0 +1,59 @@
+Here’s what I found in Bullhorn, using non-archived candidates as the workable pool. I would still treat “available right now” as **needs recruiter verification** before outreach.
+
+## 1. Top 5 Java developers for contract consideration
+
+These were the top relevance-ranked Java matches returned:
+
+1. [Pinky Tejwani](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4087819) . Java, status: Active, Ohio.
+2. [Krishna Teja](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3705348) . Java Developer, status: Active, Illinois.
+3. [Vivek Velugati](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3788057) . Java Developer, status: Active, Toronto/Ontario.
+4. [Rajender Pandit](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3695953) . Java Developer, status: Active, Minnesota.
+5. [Dennis Caldwell](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4086310) . Java, status: Active, Ohio.
+
+Note: I only confirmed one placement check successfully before the connector blocked additional verification calls. Pinky Tejwani had no confirmed placement returned from that check.
+
+## 2. Ottawa candidates with Python and machine learning
+
+Strong matches in Ottawa include:
+
+1. [Abhijeet Bhattacharya](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4131150) . Machine Learning Engineer, Ottawa, status: New Lead.
+2. [Jose Lee](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4656812) . Principal, Ottawa, skills include Python, C#, .NET, Java, AI, Machine Learning, Deep Learning, RAG, MLOps, Azure.
+3. [Jungmin Hwang](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3938602) . Machine Learning Engineer, Ottawa, status: New Lead.
+4. [Mohammad Anvaripour](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4423654) . AI/ML Automation Engineer, Ottawa, status: Online Applicant.
+5. [Ankit Arora](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4646321) . AI/ML Intern, Ottawa, skills include Python, Java, SQL, AWS, Azure, GCP.
+6. [Sai Ukkalam](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4574972) . Senior Consultant, Data & AI, Ottawa, skills include LLMs, RAG, LangChain, NLP, scikit-learn, XGBoost, agentic AI.
+7. [M Faysal](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4590895) . Lead Machine Learning Engineer, Ottawa, skills include Python, SQL, deep learning, PyTorch, Spark, Docker, Kubernetes.
+
+## 3. Candidates with Secret or Top Secret clearance
+
+Yes. There are clearance-related records on file. The strongest exact match returned was:
+
+[Harold Briner](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4148303) . Occupation/title includes **Technician III TOP SECRET CLEARANCE**, status: Active.
+
+Other clearance-related matches included Scott Dolik, Shawn McGuire, Jamie Hogan, Steve Dorris, Harold Johnson, Petar Lemajic, Shawn Burroughs, Calvin Thomas, and Landen Jones. I would verify clearance level and validity date before presenting anyone to a client, since keyword matches do not prove an active clearance.
+
+## 4. Senior .NET developer, 5+ years, direct hire, Chicago
+
+Best initial matches:
+
+1. [Ivan Buha](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3696391) . .NET Developer, Chicago, Active.
+2. [Sarabjeet Reen](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3696408) . .NET Architect, Illinois, Active.
+3. [Ganghua Fan](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3687547) . Senior ASP.NET Programmer, Active.
+4. [Anthony Miller](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=4089725) . .NET/C#/Java Developer, Active.
+5. [Himaja Reddy](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=Candidate&id=3702737) . .NET Developer, Illinois, Active.
+
+Best first look: **Ivan Buha** for Chicago location, and **Sarabjeet Reen** for seniority/architect alignment. I could not fully verify 5+ years or direct-hire preference from the search result alone.
+
+## 5. Candidates submitted to software developer openings recently
+
+I used the last 30 days as “recently,” June 22, 2026 back to May 23, 2026.
+
+Bullhorn shows **12,403 total job submissions** in that period across all roles. There are also **27 currently open jobs** with “Developer” in the title.
+
+I was not able to safely retrieve the candidate-level submission list for software developer openings in this run because the connector blocked the detailed JobSubmission/job search calls. The count-level data is available, but the specific recent candidate list needs a narrower job ID or a successful job-submission fetch.
+
+## 6. Candidates with COBOL experience
+
+Yes. Bullhorn returned **43,836 non-archived candidate records** matching COBOL across searchable candidate fields.
+
+That is a very broad match count, so the next practical step would be to shortlist by title/recency, for example “COBOL Developer,” “Mainframe Developer,” “Mainframe Programmer,” or “COBOL Analyst,” and then verify résumé excerpts before outreach.

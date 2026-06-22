@@ -61,26 +61,27 @@ function capFetch(v: number | undefined): number | undefined {
   return typeof v === "number" ? Math.min(v, FETCH_CAP) : v;
 }
 
-// When a browse/list page comes back full (a `data` array of exactly FETCH_CAP
-// rows) AND Bullhorn's reported `total` exceeds the cap, tell the model the page
-// is a partial slice — so it never mistakes a capped page for a complete total
-// after a silent trim. Both conditions are required to avoid false positives:
-//   - keying on a `data` ARRAY (not a scalar `count`) excludes count-only and
-//     single-entity results, plus tools whose `count` is a real length
-//     (e.g. listCandidateAttachments returns {count, attachments}, no `data`);
-//   - requiring an explicit `total > FETCH_CAP` excludes naturally-complete
-//     pages (a query with exactly/at most 50 matches is not truncated).
-// Bullhorn /search and /query always return `total`, so this never false-negates
-// a genuinely truncated page in practice.
+// When a browse/list page comes back with fewer records than the total pool,
+// inject a `_truncatedNote` so the model never mistakes a partial page for a
+// complete or ranked list. Two forms:
+//   - AT HARD CAP (data.length === FETCH_CAP && total > cap): classic truncation
+//     note telling the model to use count_entity for totals.
+//   - PARTIAL SAMPLE (data.length < total, below cap): tells the model these are
+//     a relevance-ranked sample, NOT the globally "top N", and that the rest of
+//     the pool was not evaluated — suppresses superlative labelling ("top 5").
+// Guard: keying on a `data` ARRAY excludes count-only and single-entity results;
+// `data.length >= total` passes naturally-complete pages through without a note.
+// Bullhorn /search and /query always return `total`, so this never false-negates.
 function annotateIfTruncated(result: unknown): unknown {
   if (!result || typeof result !== "object" || Array.isArray(result)) return result;
   const r = result as Record<string, unknown>;
-  if (!Array.isArray(r.data) || r.data.length !== FETCH_CAP) return result;
-  if (typeof r.total !== "number" || r.total <= FETCH_CAP) return result;
-  return {
-    ...r,
-    _truncatedNote: `Returned the per-call maximum of ${FETCH_CAP} records — this is a PARTIAL page, NOT a complete total (Bullhorn reports ${r.total} matches). For any count/total/by-department number use count_entity or a report tool; to read more records, call again with a higher 'start'.`,
-  };
+  if (!Array.isArray(r.data)) return result;
+  if (typeof r.total !== "number" || r.data.length >= r.total) return result;
+  const atHardCap = r.data.length === FETCH_CAP;
+  const note = atHardCap
+    ? `Returned the per-call maximum of ${FETCH_CAP} records — this is a PARTIAL page, NOT a complete total (Bullhorn reports ${r.total} matches). For any count/total/by-department number use count_entity or a report tool; to read more records, call again with a higher 'start'.`
+    : `Showing ${r.data.length} of ${r.total} total matches — this is a relevance-ranked SAMPLE, not the globally "top ${r.data.length}". The other ${r.total - (r.data as unknown[]).length} matching records were not returned and were NOT evaluated. Do NOT call these results "top N", "most qualified", or any superlative. To find the best fit, narrow your search criteria; use count_entity to size the full pool.`;
+  return { ...r, _truncatedNote: note };
 }
 
 function withLogging<T>(
@@ -214,7 +215,7 @@ export function createMcpServer(): McpServer {
         .string()
         .optional()
         .describe(
-          "Comma-separated list of fields to return (uses sensible defaults if omitted). Do NOT include `description` here — in search results résumé text is returned only as a short preview, and requesting full résumés for many candidates makes the client drop the result; use get_candidate_resume for a candidate's full résumé text.",
+          "Comma-separated list of fields to return (uses sensible defaults if omitted). Candidate location is nested in the `address` field (already in defaults) — do NOT request `city` or `state` as standalone fields (they are invalid for Candidate and will error). To filter by location, use the `query` argument instead (e.g., `address.city:Ottawa` or `address.state:Illinois`). Do NOT include `description` here — in search results résumé text is returned only as a short preview, and requesting full résumés for many candidates makes the client drop the result; use get_candidate_resume for a candidate's full résumé text.",
         ),
     },
     async ({ query, keywords, count, start, fields }) =>
