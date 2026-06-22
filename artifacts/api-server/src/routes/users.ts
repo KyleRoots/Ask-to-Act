@@ -143,7 +143,7 @@ ${err}
 <form method="POST" action="/api/auth/user/enroll">
   <input type="hidden" name="id" value="${e(userId)}">
   <label for="u">Bullhorn username</label>
-  <input id="u" type="text" name="bhUsername" autocomplete="username" required placeholder="e.g. Kyle.Roots.Myticas">
+  <input id="u" type="text" name="bhUsername" autocomplete="username" required placeholder="Your Bullhorn username">
   <label for="p">Bullhorn password</label>
   <input id="p" type="password" name="bhPassword" autocomplete="current-password" required>
   <button type="submit">Connect account</button>
