@@ -3,6 +3,16 @@ import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
 
 const MAX_RETRIES = 1;
+const RATE_LIMIT_RETRIES = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Returns the number of ms to wait before retry attempt n (1-indexed, exponential). */
+function backoffMs(attempt: number): number {
+  return Math.min(1000 * Math.pow(2, attempt - 1), 8000); // 1s, 2s, 4s, 8s cap
+}
 
 /**
  * Turns a raw Bullhorn error body into a concise, ACTIONABLE message so an LLM client
@@ -51,6 +61,7 @@ async function bullhornFetch(
   path: string,
   params: Record<string, string | number>,
   retries = MAX_RETRIES,
+  rlRetries = RATE_LIMIT_RETRIES,
 ): Promise<unknown> {
   // Cache key excludes the rotating BhRestToken; same path+params => same read.
   const cacheKey = `fetch:${path}:${JSON.stringify(
@@ -67,18 +78,25 @@ async function bullhornFetch(
     url.searchParams.set(k, String(v));
   }
 
-  let res = await fetch(url.toString(), {
-    redirect: "follow",
-  });
+  const res = await fetch(url.toString(), { redirect: "follow" });
 
   if (res.status === 401 && retries > 0) {
     logger.warn("Bullhorn: 401 received, re-authenticating");
     await invalidateSession();
-    return bullhornFetch(path, params, retries - 1);
+    return bullhornFetch(path, params, retries - 1, rlRetries);
   }
 
   if (res.status === 429) {
-    throw new Error("Bullhorn API rate limit exceeded. Please try again shortly.");
+    if (rlRetries > 0) {
+      const attempt = RATE_LIMIT_RETRIES - rlRetries + 1;
+      const delay = backoffMs(attempt);
+      logger.warn({ attempt, delay }, "Bullhorn: read rate limit hit — backing off");
+      await sleep(delay);
+      return bullhornFetch(path, params, retries, rlRetries - 1);
+    }
+    throw new Error(
+      "Bullhorn API rate limit exceeded after multiple retries. Wait 60 seconds and try again.",
+    );
   }
 
   if (!res.ok) {
@@ -2483,6 +2501,7 @@ async function writeFetch(
   method: "PUT" | "POST" | "DELETE",
   path: string,
   body: unknown,
+  rlRetries = RATE_LIMIT_RETRIES,
 ): Promise<unknown> {
   const url = new URL(path, session.restUrl);
   url.searchParams.set("BhRestToken", session.BhRestToken);
@@ -2498,12 +2517,75 @@ async function writeFetch(
     throw new BullhornPermissionError(action);
   }
 
+  if (res.status === 429) {
+    if (rlRetries > 0) {
+      const attempt = RATE_LIMIT_RETRIES - rlRetries + 1;
+      const delay = backoffMs(attempt);
+      logger.warn({ attempt, delay }, "Bullhorn: write rate limit hit — backing off");
+      await sleep(delay);
+      return writeFetch(session, method, path, body, rlRetries - 1);
+    }
+    throw new Error(
+      "Bullhorn API rate limit exceeded after multiple retries. Wait 60 seconds and try again.",
+    );
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw formatBullhornError("write", res.status, text);
   }
 
   return res.json();
+}
+
+/**
+ * Checks whether a JobSubmission already exists for this candidate+job pair.
+ * Throws a descriptive error if a duplicate is found — prevents dirty data.
+ * Uses the write session (per-user) so the check runs against the same
+ * Bullhorn instance as the subsequent write.
+ *
+ * Non-fatal: if the check itself fails (e.g. unexpected API error), we log
+ * a warning and allow the write to proceed rather than blocking on a check
+ * failure. The error message from Bullhorn on a true duplicate is a safe
+ * fallback.
+ */
+async function checkExistingSubmission(
+  session: BullhornWriteSession,
+  candidateId: number,
+  jobOrderId: number,
+): Promise<void> {
+  try {
+    const url = new URL("query/JobSubmission", session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set(
+      "where",
+      `candidate.id=${candidateId} AND jobOrder.id=${jobOrderId} AND isDeleted=false`,
+    );
+    url.searchParams.set("fields", "id,status,dateAdded");
+    url.searchParams.set("count", "1");
+
+    const res = await fetch(url.toString());
+    if (!res.ok) return; // allow write to proceed if check fails
+
+    const data = (await res.json()) as {
+      data?: Array<{ id: number; status: string }>;
+    };
+    if (data.data && data.data.length > 0) {
+      const existing = data.data[0];
+      throw new Error(
+        `Duplicate submission blocked: candidate ${candidateId} is already submitted to job ${jobOrderId} ` +
+          `(existing submission ID: ${existing.id}, status: "${existing.status}"). ` +
+          `Use list_submissions_for_job to view all submissions for this job, ` +
+          `or use update_submission_status if you need to change the status of the existing one.`,
+      );
+    }
+  } catch (err) {
+    // Re-throw duplicate errors; swallow unexpected check failures.
+    if (err instanceof Error && err.message.startsWith("Duplicate submission blocked")) {
+      throw err;
+    }
+    logger.warn({ err }, "Bullhorn: duplicate-check query failed — proceeding with write");
+  }
 }
 
 /**
@@ -2589,6 +2671,7 @@ export async function createJobSubmission(
     status: string;
   },
 ): Promise<{ submissionId: number; sendingUserId: number }> {
+  await checkExistingSubmission(session, args.candidateId, args.jobOrderId);
   const sendingUserId = await getSessionUserId(session);
   const body = {
     candidate: { id: args.candidateId },
@@ -2648,6 +2731,8 @@ export async function bulkCreateSubmissions(
 
   const settled = await Promise.allSettled(
     args.submissions.map(async (item) => {
+      // Duplicate check runs per-item so bulk reports which pairs conflict.
+      await checkExistingSubmission(session, item.candidateId, item.jobOrderId);
       const body = {
         candidate: { id: item.candidateId },
         jobOrder: { id: item.jobOrderId },
