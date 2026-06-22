@@ -2562,10 +2562,24 @@ export async function updateCandidateStatus(
 }
 
 /**
+ * Returns the Bullhorn internal integer user ID for the current session.
+ * Calls /settings/userId — a lightweight endpoint that returns the session
+ * owner's ID without fetching a full user record.
+ */
+async function getSessionUserId(session: BullhornWriteSession): Promise<number> {
+  const url = new URL("settings/userId", session.restUrl);
+  url.searchParams.set("BhRestToken", session.BhRestToken);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Failed to resolve session user ID: ${res.status}`);
+  const data = (await res.json()) as { userId?: number };
+  if (!data.userId) throw new Error("Bullhorn /settings/userId returned no userId");
+  return data.userId;
+}
+
+/**
  * Submits a candidate to a job order (creates a JobSubmission).
- * Uses PUT /entity/JobSubmission. The `sendingUserId` should be the Bullhorn
- * internal user ID of the recruiter submitting — use find_users to look it up.
- * Common `status` values: "New Lead", "Reviewing", "Submitted", "Interviewing".
+ * Uses PUT /entity/JobSubmission. sendingUser is auto-derived from the
+ * session so the caller never needs to look up their own Bullhorn user ID.
  */
 export async function createJobSubmission(
   session: BullhornWriteSession,
@@ -2573,22 +2587,29 @@ export async function createJobSubmission(
     candidateId: number;
     jobOrderId: number;
     status: string;
-    sendingUserId: number;
   },
-): Promise<{ submissionId: number }> {
+): Promise<{ submissionId: number; sendingUserId: number }> {
+  const sendingUserId = await getSessionUserId(session);
   const body = {
     candidate: { id: args.candidateId },
     jobOrder: { id: args.jobOrderId },
     status: args.status,
-    sendingUser: { id: args.sendingUserId },
+    sendingUser: { id: sendingUserId },
   };
   const data = (await writeFetch(session, "PUT", "entity/JobSubmission", body)) as {
     changedEntityId?: number;
   };
-  return { submissionId: data.changedEntityId ?? 0 };
+  return { submissionId: data.changedEntityId ?? 0, sendingUserId };
 }
 
-/** Finds internal Bullhorn users (recruiters) by name and/or email. */
+/**
+ * Finds internal Bullhorn users (recruiters) by name and/or email.
+ *
+ * CorporateUser's /query endpoint does not support LIKE on name/firstName/
+ * lastName/email fields in this Bullhorn instance — those predicates return
+ * a 400 "not a valid field name" error. We work around this by fetching all
+ * active users (up to 200) and doing the name/email filtering in JavaScript.
+ */
 export async function findUsers(args: {
   name?: string;
   email?: string;
@@ -2596,27 +2617,46 @@ export async function findUsers(args: {
   count?: number;
   start?: number;
 }) {
-  const conditions: string[] = [];
-  if (args.name) {
-    const n = escapeQueryValue(args.name.trim());
-    conditions.push(
-      `(firstName LIKE '%${n}%' OR lastName LIKE '%${n}%' OR name LIKE '%${n}%')`,
-    );
-  }
-  if (args.email) {
-    const e = escapeQueryValue(args.email.trim());
-    conditions.push(`email LIKE '%${e}%'`);
-  }
-  if (conditions.length === 0) conditions.push("id IS NOT NULL");
   const fields =
     args.fields ??
     "id,firstName,lastName,name,email,username,phone,occupation,isDeleted";
-  return queryEntity(
+
+  const raw = await queryEntity(
     "CorporateUser",
-    conditions.join(" AND "),
+    "isDeleted=false",
     fields,
-    args.count ?? 20,
-    args.start ?? 0,
-    "lastName",
+    200,
+    0,
+    "name",
   );
+
+  let data = (raw as { data?: Array<Record<string, unknown>> }).data ?? [];
+
+  if (args.name) {
+    const lower = args.name.toLowerCase();
+    data = data.filter(
+      (u) =>
+        (typeof u.name === "string" && u.name.toLowerCase().includes(lower)) ||
+        (typeof u.firstName === "string" &&
+          u.firstName.toLowerCase().includes(lower)) ||
+        (typeof u.lastName === "string" &&
+          u.lastName.toLowerCase().includes(lower)) ||
+        (typeof u.username === "string" &&
+          u.username.toLowerCase().includes(lower)),
+    );
+  }
+
+  if (args.email) {
+    const lower = args.email.toLowerCase();
+    data = data.filter(
+      (u) =>
+        typeof u.email === "string" && u.email.toLowerCase().includes(lower),
+    );
+  }
+
+  const start = args.start ?? 0;
+  const limit = args.count ?? 20;
+  const page = data.slice(start, start + limit);
+
+  return { total: data.length, start, count: page.length, data: page };
 }

@@ -965,21 +965,21 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "create_job_submission",
     "WRITE: Submits a candidate to a job order, creating a JobSubmission record in Bullhorn. " +
-      "Requires a personal Bullhorn account — the submission is created as YOU (sendingUserId) and respects your Bullhorn permissions. " +
-      "Use find_users to look up your Bullhorn internal user ID (sendingUserId) before calling. " +
-      "Common status values: 'New Lead', 'Reviewing', 'Submitted', 'Interviewing'. " +
+      "Requires a personal Bullhorn account — the submission is created as YOU and respects your Bullhorn permissions. " +
+      "Your Bullhorn user ID is auto-derived from your session — you do NOT need to call find_users first. " +
+      "Call list_field_options(JobSubmission, status) first to confirm valid status values. " +
+      "Common status values in this instance: 'New Lead', 'Internally Submitted', 'Candidate Interested'. " +
       "ALWAYS confirm candidateId, jobOrderId, and status with the user before submitting — this creates a live record in Bullhorn visible to all recruiters. " +
       "Check for existing submissions with list_submissions_for_job first to avoid duplicates.",
     {
       candidateId: z.number().int().positive().describe("Bullhorn candidate ID to submit."),
       jobOrderId: z.number().int().positive().describe("Bullhorn job order ID to submit the candidate to."),
-      status: z.string().min(1).describe("Submission status, e.g. 'New Lead', 'Reviewing', 'Submitted'."),
-      sendingUserId: z.number().int().positive().describe("Your Bullhorn internal user ID (use find_users to look up your own ID before calling this tool)."),
+      status: z.string().min(1).describe("Submission status — must be a valid value from list_field_options(JobSubmission, status)."),
     },
-    async ({ candidateId, jobOrderId, status, sendingUserId }) =>
-      runWriteTool("create_job_submission", { candidateId, jobOrderId, status, sendingUserId }, async () => {
+    async ({ candidateId, jobOrderId, status }) =>
+      runWriteTool("create_job_submission", { candidateId, jobOrderId, status }, async () => {
         const session = await resolveWriteSession();
-        return createJobSubmission(session, { candidateId, jobOrderId, status, sendingUserId });
+        return createJobSubmission(session, { candidateId, jobOrderId, status });
       }),
   );
 

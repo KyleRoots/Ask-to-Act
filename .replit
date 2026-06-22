@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-3.11"]
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -78,3 +78,6 @@ externalPort = 6800
 [userenv]
 
 [userenv.shared]
+
+[nix]
+channel = "stable-25_05"

@@ -1,4 +1,5 @@
 - [Bullhorn Note write payload](bullhorn-note-payload.md) — personReference required + noteEntities needs targetEntityID (not person.id); missing = silent 400.
+- [CorporateUser query limits](corporateuser-query-limits.md) — /query LIKE unsupported on name/firstName/lastName/email; fix = fetch all (isDeleted=false, count=200) + JS filter. sendingUserId: use /settings/userId not find_users.
 - [Bullhorn OAuth](bullhorn-oauth.md) — headless auth end-to-end: authorization_code + refresh tokens; first-time consent approved by POSTing the consentForm server-side (browser "Agree" bounces); incl. lockout self-unlock.
 - [Bullhorn résumés & Files API](bullhorn-resumes-files.md) — résumés live in candidate.description AND as file attachments; list key is `EntityFiles` (miss it → count 0); REST limit 120/60s.
 - [Candidate search & résumé PII](bullhorn-candidate-search.md) — clearance/skills live in résumé TEXT (description)+skillSet/comments, no structured field; field-scope every Lucene term; ChatGPT withholds bulk-PII → use get_candidate_resume VERIFY (highlight) excerpt mode.
