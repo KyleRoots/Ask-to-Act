@@ -32,6 +32,7 @@ import {
   updateCandidateStatus,
   createJobSubmission,
   BullhornPermissionError,
+  listFieldOptions,
   SUPPORTED_ENTITIES,
 } from "./bullhorn-client.js";
 import { getUserSession } from "./bullhorn-auth.js";
@@ -589,6 +590,27 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     async ({ entityType }) =>
       runTool("describe_entity", { entityType }, () =>
         describeEntity({ entityType }),
+      ),
+  );
+
+  tool(
+    "list_field_options",
+    "Returns the EXACT valid dropdown values configured in THIS Bullhorn instance for picklist fields (e.g. Note action types, Candidate status, JobSubmission status). " +
+      "ALWAYS call this before any write tool that sets a picklist field — the AI must never guess or invent values. " +
+      "If the user gives a value that is not in the returned list, show them the real options and ask them to choose. " +
+      "When `fieldName` is provided, returns only that field's options. When omitted, returns ALL picklist fields on the entity so you can present a full menu in one call. " +
+      "Common uses: list_field_options(Note, action) before add_note; list_field_options(Candidate, status) before update_candidate_status; list_field_options(JobSubmission, status) before create_job_submission.",
+    {
+      entityType: z.string().describe(
+        "The Bullhorn entity to inspect. Common values: Note, Candidate, JobOrder, JobSubmission, Placement, ClientContact, ClientCorporation, Lead, Opportunity.",
+      ),
+      fieldName: z.string().optional().describe(
+        "Optional: the specific field to get options for (e.g. 'action', 'status'). If omitted, all picklist fields on the entity are returned.",
+      ),
+    },
+    async ({ entityType, fieldName }) =>
+      runTool("list_field_options", { entityType, fieldName }, () =>
+        listFieldOptions({ entityType, fieldName }),
       ),
   );
 

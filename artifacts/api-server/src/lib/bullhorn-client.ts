@@ -2220,7 +2220,72 @@ function isConfiguredCustomField(name: unknown, label: unknown): boolean {
   return !DEFAULT_LABEL_PATTERNS.some((re) => re.test(trimmed));
 }
 
-/** Returns a compact field catalog for an entity via Bullhorn /meta. */
+/**
+ * Returns the valid dropdown options for one or all picklist fields on an
+ * entity — e.g. the valid "action" values for Note, or "status" for Candidate.
+ * Queries Bullhorn's /meta endpoint which always reflects the live configured
+ * values for this specific Bullhorn instance.
+ *
+ * When fieldName is provided, returns only that field's options (or an error
+ * if the field isn't a picklist). When omitted, returns all picklist fields
+ * and their options so the AI can show a complete menu in one call.
+ */
+export async function listFieldOptions(args: {
+  entityType: string;
+  fieldName?: string;
+}): Promise<{
+  entity: string;
+  fields: Array<{ name: string; label?: string; options: Array<{ value: string; label: string }> }>;
+}> {
+  const entry = resolveEntity(args.entityType);
+  const meta = (await bullhornFetch(`meta/${entry.canonical}`, {
+    fields: "*",
+    meta: "basic",
+  })) as {
+    entity?: string;
+    fields?: Array<Record<string, unknown>>;
+  };
+
+  const allFields = Array.isArray(meta.fields) ? meta.fields : [];
+  const picklistFields = allFields.filter(
+    (f) =>
+      Array.isArray(f.options) &&
+      (f.options as unknown[]).length > 0 &&
+      typeof f.name === "string" &&
+      !isSensitiveField(f.name as string),
+  );
+
+  let targetFields = picklistFields;
+  if (args.fieldName) {
+    const lower = args.fieldName.toLowerCase();
+    const match = picklistFields.find(
+      (f) =>
+        (f.name as string).toLowerCase() === lower ||
+        (typeof f.label === "string" && f.label.toLowerCase() === lower),
+    );
+    if (!match) {
+      const allNames = picklistFields.map((f) => f.name as string).join(", ");
+      throw new Error(
+        `Field "${args.fieldName}" is not a picklist on ${entry.canonical}, or it has no configured options. ` +
+          `Picklist fields on this entity: ${allNames || "(none found)"}`,
+      );
+    }
+    targetFields = [match];
+  }
+
+  return {
+    entity: (meta.entity as string | undefined) ?? entry.canonical,
+    fields: targetFields.map((f) => ({
+      name: f.name as string,
+      ...(typeof f.label === "string" && f.label ? { label: f.label } : {}),
+      options: (f.options as Array<{ value?: unknown; label?: unknown }>).map((o) => ({
+        value: String(o.value ?? ""),
+        label: String(o.label ?? o.value ?? ""),
+      })),
+    })),
+  };
+}
+
 export async function describeEntity(args: { entityType: string }) {
   const entry = resolveEntity(args.entityType);
   const meta = (await bullhornFetch(`meta/${entry.canonical}`, {
