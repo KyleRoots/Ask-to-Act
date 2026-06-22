@@ -1,12 +1,15 @@
 import { pgTable, text, timestamp, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { firmsTable } from "./firms";
 
 export const usersTable = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email"),
   apiKey: text("api_key").notNull().unique(),
+  firmId: text("firm_id").references(() => firmsTable.id, { onDelete: "set null" }),
+  role: text("role").notNull().default("recruiter"),
   refreshToken: text("refresh_token"),
   bhRestToken: text("bh_rest_token"),
   restUrl: text("rest_url"),

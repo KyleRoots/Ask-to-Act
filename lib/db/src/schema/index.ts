@@ -18,4 +18,5 @@
 //   export type Post = typeof postsTable.$inferSelect;
 
 export * from "./bullhorn-tokens";
+export * from "./firms";
 export * from "./users";

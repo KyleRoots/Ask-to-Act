@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, firmsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
 import {
   invalidateUserSession,
   enrollUserHeadless,
 } from "../lib/bullhorn-auth.js";
+import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -33,14 +34,57 @@ function page(title: string, message: string): string {
  * After creation, the user enrolls their Bullhorn account at the returned enrollUrl.
  */
 router.post("/users", bearerAuth, async (req: Request, res: Response) => {
-  const { name, email } = req.body as { name?: string; email?: string };
+  const { name, email, firmId, role } = req.body as {
+    name?: string;
+    email?: string;
+    firmId?: string;
+    role?: string;
+  };
+
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     res.status(400).json({ error: "name is required" });
     return;
   }
 
+  // If a firmId is provided, validate the firm exists and has an active subscription
+  if (firmId) {
+    const [firm] = await db
+      .select()
+      .from(firmsTable)
+      .where(eq(firmsTable.id, firmId))
+      .limit(1);
+
+    if (!firm) {
+      res.status(400).json({ error: `Firm '${firmId}' not found` });
+      return;
+    }
+
+    const status = await stripeStorage.resolveFirmStatus(firmId);
+    if (status !== "active" && status !== "trialing") {
+      res.status(402).json({
+        error: `Firm subscription is not active (status: ${status}). Complete checkout before adding users.`,
+        subscriptionStatus: status,
+        firmId,
+      });
+      return;
+    }
+
+    if (firm.seatLimit != null) {
+      const enrolled = await stripeStorage.countFirmUsers(firmId);
+      if (enrolled >= firm.seatLimit) {
+        res.status(402).json({
+          error: `Seat limit reached (${enrolled}/${firm.seatLimit}). Upgrade the subscription to add more users.`,
+          enrolled,
+          seatLimit: firm.seatLimit,
+        });
+        return;
+      }
+    }
+  }
+
   const id = randomBytes(12).toString("hex");
   const apiKey = randomBytes(32).toString("hex");
+  const assignedRole = role === "admin" ? "admin" : "recruiter";
 
   try {
     await db.insert(usersTable).values({
@@ -48,13 +92,17 @@ router.post("/users", bearerAuth, async (req: Request, res: Response) => {
       name: name.trim(),
       email: email?.trim() ?? null,
       apiKey,
+      firmId: firmId ?? null,
+      role: assignedRole,
     });
-    logger.info({ userId: id, name: name.trim() }, "User created");
+    logger.info({ userId: id, name: name.trim(), firmId, role: assignedRole }, "User created");
     res.status(201).json({
       id,
       name: name.trim(),
       email: email?.trim() ?? null,
       apiKey,
+      firmId: firmId ?? null,
+      role: assignedRole,
       enrollUrl: `/api/auth/user/enroll?id=${id}`,
       message:
         "Store this apiKey securely — it will not be shown again. " +
@@ -166,7 +214,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
   }
   try {
     const rows = await db
-      .select({ id: usersTable.id, name: usersTable.name })
+      .select({ id: usersTable.id, name: usersTable.name, firmId: usersTable.firmId })
       .from(usersTable)
       .where(eq(usersTable.id, userId))
       .limit(1);
@@ -174,6 +222,20 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       res.status(404).send(page("User not found", "This enrollment link is invalid. Ask your administrator to create your account."));
       return;
     }
+
+    // Subscription gate: if this user belongs to a firm, verify the firm has an active subscription
+    const { firmId } = rows[0];
+    if (firmId) {
+      const status = await stripeStorage.resolveFirmStatus(firmId);
+      if (status !== "active" && status !== "trialing") {
+        res.status(402).send(page(
+          "Subscription required",
+          "Your firm's AskToAct subscription is not active. Ask your administrator to complete payment before enrolling.",
+        ));
+        return;
+      }
+    }
+
     res.send(enrollForm(userId, rows[0].name));
   } catch (err) {
     logger.error({ err, userId }, "Enrollment form failed");
