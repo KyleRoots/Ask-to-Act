@@ -672,24 +672,91 @@ export function invalidateUserSession(userId: string): void {
 }
 
 /**
- * Builds the Bullhorn authorize URL for a user's browser-based enrollment.
- * The state encodes `user:{userId}:{random}` so the shared OAuth callback can
- * route user-enrollment vs. service-account flows correctly.
+ * Headless authorization-code retrieval for a specific user's credentials.
+ * Identical logic to fetchAuthCodeHeadless but parameterised — handles the
+ * "Get Consent" bounce server-side exactly as the service-account flow does.
  */
-export async function getUserEnrollUrl(userId: string, state: string): Promise<string> {
-  const { oauthUrl } = await discoverEndpoints();
+async function fetchAuthCodeHeadlessForUser(
+  oauthUrl: string,
+  username: string,
+  password: string,
+): Promise<string> {
   const url = new URL(`${oauthUrl}/authorize`);
   url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
-  url.searchParams.set("state", state);
-  return url.toString();
+  url.searchParams.set("username", username);
+  url.searchParams.set("password", password);
+  url.searchParams.set("action", "Login");
+  const authorizeUrl = url.toString();
+
+  const res = await fetch(authorizeUrl, { redirect: "manual" });
+  const location = res.headers.get("location") ?? "";
+
+  const directCode = codeFromLocation(location);
+  if (directCode) return directCode;
+  const directErr = errorFromLocation(location);
+  if (directErr) throw new Error(`Bullhorn authorization returned an error: ${directErr}`);
+
+  if (res.status === 200) {
+    const html = await res.text();
+    if (/consentForm|Get Consent/i.test(html)) {
+      const setCookies =
+        res.headers.getSetCookie?.() ??
+        (res.headers.get("set-cookie")
+          ? [res.headers.get("set-cookie") as string]
+          : []);
+      const jsession =
+        setCookies
+          .map((c) => c.split(";")[0])
+          .find((c) => c.startsWith("JSESSIONID=")) ?? null;
+      logger.info("Bullhorn: consent screen returned for per-user enrollment; approving headlessly");
+      return approveConsent(authorizeUrl, html, jsession);
+    }
+    const preview = html.replace(/\s+/g, " ").slice(0, 200);
+    if (/invalid.*credential|incorrect.*password|login.*fail/i.test(html)) {
+      throw new Error("Bullhorn credentials are incorrect. Check your username and password and try again.");
+    }
+    throw new Error(
+      `Bullhorn enrollment returned an unexpected page. ` +
+        `Verify your Bullhorn username and password. Details: ${preview}`,
+    );
+  }
+
+  throw new Error(
+    `Bullhorn enrollment did not return an authorization code (status=${res.status}). ` +
+      `Check that the redirect URI is whitelisted for this client.`,
+  );
 }
 
 /**
- * Completes a user's Bullhorn enrollment: exchanges the authorization code
- * for tokens, establishes a REST session, and persists the refresh token
- * against the user row. After this, getUserSession() will succeed for this user.
+ * Fully headless per-user enrollment. Sends the user's Bullhorn credentials
+ * to /authorize server-side (handling any consent form automatically), then
+ * exchanges the code for tokens and persists them. After this call,
+ * getUserSession(userId) will succeed without any browser interaction.
+ *
+ * This avoids the browser "Agree" bounce Bullhorn exhibits when a user clicks
+ * the consent form in a real browser — the same issue the service-account flow
+ * solves with fetchAuthCodeHeadless.
+ */
+export async function enrollUserHeadless(
+  userId: string,
+  bhUsername: string,
+  bhPassword: string,
+): Promise<void> {
+  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  const code = await fetchAuthCodeHeadlessForUser(oauthUrl, bhUsername, bhPassword);
+  const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const loginData = await login(tokens.access_token, loginUrl);
+  const sessionExpiresAt = await resolveSessionExpiry(loginData);
+  const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
+  userSessions.set(userId, s);
+  logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: per-user headless enrollment complete");
+}
+
+/**
+ * Completes a user's Bullhorn enrollment via the browser-based OAuth callback
+ * (kept for compatibility; headless enrollment is now preferred via enrollUserHeadless).
  */
 export async function completeUserEnrollment(userId: string, code: string): Promise<void> {
   const { oauthUrl, loginUrl } = await discoverEndpoints();
@@ -698,5 +765,5 @@ export async function completeUserEnrollment(userId: string, code: string): Prom
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
   const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
   userSessions.set(userId, s);
-  logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: user enrollment complete");
+  logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: user enrollment complete (browser callback)");
 }

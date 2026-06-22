@@ -4,10 +4,9 @@ import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
 import {
-  getUserEnrollUrl,
   invalidateUserSession,
+  enrollUserHeadless,
 } from "../lib/bullhorn-auth.js";
-import { rememberState } from "../lib/oauth-state.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -114,27 +113,57 @@ router.delete("/users/:id", bearerAuth, async (req: Request, res: Response) => {
   }
 });
 
+function enrollForm(userId: string, userName: string, errorMsg?: string): string {
+  const e = escapeHtml;
+  const err = errorMsg
+    ? `<p style="color:#f87171;margin:0 0 16px;font-size:14px">${e(errorMsg)}</p>`
+    : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect Bullhorn — ${e(userName)}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
+  display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+main{max-width:420px;width:100%;padding:40px 32px;background:#141927;border-radius:12px;border:1px solid #1e2a3a}
+h1{font-size:20px;margin:0 0 6px}
+.sub{font-size:14px;color:#7a8ba0;margin:0 0 28px}
+label{display:block;font-size:13px;color:#aab4c5;margin-bottom:6px}
+input{width:100%;padding:10px 14px;background:#0b1020;border:1px solid #1e2a3a;border-radius:8px;
+  color:#e8ecf3;font-size:15px;margin-bottom:16px;outline:none}
+input:focus{border-color:#3b82f6}
+button{width:100%;padding:12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;
+  font-size:15px;font-weight:600;cursor:pointer}
+button:hover{background:#2563eb}
+.note{font-size:12px;color:#4a5568;margin-top:16px;text-align:center}
+</style></head>
+<body><main>
+<h1>Connect your Bullhorn account</h1>
+<p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn — they are not stored by this server.</p>
+${err}
+<form method="POST" action="/api/auth/user/enroll">
+  <input type="hidden" name="id" value="${e(userId)}">
+  <label for="u">Bullhorn username</label>
+  <input id="u" type="text" name="bhUsername" autocomplete="username" required placeholder="e.g. Kyle.Roots.Myticas">
+  <label for="p">Bullhorn password</label>
+  <input id="p" type="password" name="bhPassword" autocomplete="current-password" required>
+  <button type="submit">Connect account</button>
+</form>
+<p class="note">This connects your personal Bullhorn login so the AI connector can write notes, update statuses, and submit candidates as you.</p>
+</main></body></html>`;
+}
+
 /**
  * GET /api/auth/user/enroll?id=<userId>
- * No auth required — the recruiter opens this in their browser. Redirects them
- * to Bullhorn so they can log in with their own credentials. The callback lands
- * at the shared /api/auth/bullhorn/callback which routes user: states to the
- * per-user enrollment completion.
+ * No auth required — shows the recruiter a credentials form. Submitting the
+ * form does the full OAuth flow server-side (headless) so the Bullhorn consent
+ * bounce is avoided entirely.
  */
 router.get("/auth/user/enroll", async (req: Request, res: Response) => {
   const userId = req.query["id"];
   if (typeof userId !== "string" || userId.length === 0) {
-    res
-      .status(400)
-      .send(
-        page(
-          "Missing user ID",
-          "The enrollment link is missing the user ID. Ask your administrator for a valid enrollment link.",
-        ),
-      );
+    res.status(400).send(page("Missing user ID", "The enrollment link is missing the user ID. Ask your administrator for a valid enrollment link."));
     return;
   }
-
   try {
     const rows = await db
       .select({ id: usersTable.id, name: usersTable.name })
@@ -142,28 +171,61 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       .where(eq(usersTable.id, userId))
       .limit(1);
     if (!rows[0]) {
-      res
-        .status(404)
-        .send(
-          page(
-            "User not found",
-            "This enrollment link is invalid. Ask your administrator to create your account.",
-          ),
-        );
+      res.status(404).send(page("User not found", "This enrollment link is invalid. Ask your administrator to create your account."));
+      return;
+    }
+    res.send(enrollForm(userId, rows[0].name));
+  } catch (err) {
+    logger.error({ err, userId }, "Enrollment form failed");
+    res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));
+  }
+});
+
+/**
+ * POST /api/auth/user/enroll
+ * Handles form submission: runs the full headless OAuth flow server-side so
+ * the Bullhorn consent form is approved without browser redirects.
+ */
+router.post("/auth/user/enroll", async (req: Request, res: Response) => {
+  const { id, bhUsername, bhPassword } = req.body as {
+    id?: string;
+    bhUsername?: string;
+    bhPassword?: string;
+  };
+
+  if (!id || !bhUsername || !bhPassword) {
+    res.status(400).send(page("Missing fields", "User ID, username, and password are all required."));
+    return;
+  }
+
+  try {
+    const rows = await db
+      .select({ id: usersTable.id, name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+    if (!rows[0]) {
+      res.status(404).send(page("User not found", "This enrollment link is invalid."));
       return;
     }
 
-    const random = randomBytes(16).toString("hex");
-    const state = `user:${userId}:${random}`;
-    rememberState(state);
-
-    const url = await getUserEnrollUrl(userId, state);
-    res.redirect(url);
+    await enrollUserHeadless(id, bhUsername.trim(), bhPassword);
+    logger.info({ userId: id }, "Bullhorn: per-user headless enrollment complete via form");
+    res.send(page(
+      "Bullhorn account connected",
+      `Your Bullhorn account (${escapeHtml(bhUsername.trim())}) is now linked. You can close this window — the AI connector will use your account for all write operations.`,
+    ));
   } catch (err) {
-    logger.error({ err, userId }, "User enrollment redirect failed");
-    res
-      .status(500)
-      .send(page("Enrollment failed", "Could not start the Bullhorn login. Please try again."));
+    const msg = (err as Error).message ?? "Unknown error";
+    logger.error({ err, userId: id }, "Per-user headless enrollment failed");
+    const rows = await db
+      .select({ id: usersTable.id, name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1)
+      .catch(() => []);
+    const name = rows[0]?.name ?? "Unknown";
+    res.status(400).send(enrollForm(id, name, msg));
   }
 });
 
