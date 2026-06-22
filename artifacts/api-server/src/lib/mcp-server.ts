@@ -230,7 +230,7 @@ export function createMcpServer(): McpServer {
       query: z
         .string()
         .describe(
-          "Lucene query string, e.g. 'status:Open AND title:\"Software Engineer\"' or 'isOpen:true'",
+          "Lucene query string, e.g. 'isOpen:true AND title:\"Software Engineer\"'. NOTE: this instance has NO JobOrder status literally named \"Open\" (real statuses include \"Accepting Candidates\", \"Hold - Client Hold\", \"Filled\"); for open jobs use the boolean flag 'isOpen:true', NOT 'status:Open' (which always returns 0).",
         ),
       count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 job records per call — NOT a total). Do NOT use to count/total/aggregate jobs — use count_entity (set groupBy:correlatedCustomText1 for a per-department breakdown) or the open_jobs report tool, which return exact totals in a tiny payload. Page with 'start' for more records."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
