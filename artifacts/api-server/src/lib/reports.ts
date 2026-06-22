@@ -15,7 +15,7 @@
  *   passed as exact groupValues. Records outside the set roll up to
  *   "otherOrUnmapped" so a new department never silently disappears.
  */
-import { countEntity, listPlacements } from "./bullhorn-client.js";
+import { countEntity, listPlacements, ACTIVE_OPPS_DEFINITION } from "./bullhorn-client.js";
 
 /** Configured Internal Departments (office/branch) for this instance. */
 export const DEPARTMENTS = [
@@ -28,8 +28,10 @@ export const DEPARTMENTS = [
 
 /** Locked, instance-specific definitions (see tool descriptions / memory). */
 const OPEN_JOBS_QUERY = "isOpen:true AND NOT status:Archive AND isDeleted:false";
-const ACTIVE_OPPS_QUERY =
-  'NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false';
+// Single source of truth: the active-opportunity predicate is owned by bullhorn-client
+// (the SAME constant the count_entity guard/annotation use), so this report and the
+// ad-hoc count path can never drift apart — previously this was a second hand-kept copy.
+const ACTIVE_OPPS_QUERY = ACTIVE_OPPS_DEFINITION;
 const CONFIRMED_PLACEMENT_STATUSES = new Set(["Approved", "Completed", "Ended"]);
 
 const DEPT_DEFINITIONS = {

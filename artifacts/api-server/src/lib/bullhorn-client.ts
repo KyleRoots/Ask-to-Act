@@ -1627,7 +1627,7 @@ function sqlStatusValue(v: string): string {
 const ACTIVE_OPPS_STATUS_CLAUSE = OPP_CLOSED_STATUSES.map(
   (s) => `NOT status:${luceneStatusTerm(s)}`,
 ).join(" AND ");
-const ACTIVE_OPPS_DEFINITION = `${ACTIVE_OPPS_STATUS_CLAUSE} AND isDeleted:false`;
+export const ACTIVE_OPPS_DEFINITION = `${ACTIVE_OPPS_STATUS_CLAUSE} AND isDeleted:false`;
 
 // SQL-where equivalents for the /query path (query_entity).
 const OPP_ACTIVE_STATUS_WHERE = OPP_CLOSED_STATUSES.map(

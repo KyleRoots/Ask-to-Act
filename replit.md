@@ -7,6 +7,7 @@ A remote Model Context Protocol (MCP) server that connects ChatGPT Enterprise to
 - `pnpm --filter @workspace/api-server run dev` — run the API/MCP server (port from `$PORT`)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/api-server run golden` — golden-answer harness: calls every report tool + count_entity against live Bullhorn and asserts invariants + cross-tool consistency (same metric identical across tools) + snapshot drift. Read-only. `--bless` re-baselines the snapshot, `--strict` fails on drift. This is the robustness scoreboard / stop-signal.
 
 ## Stack
 
