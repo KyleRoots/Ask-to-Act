@@ -967,8 +967,12 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "WRITE: Submits a candidate to a job order, creating a JobSubmission record in Bullhorn. " +
       "Requires a personal Bullhorn account — the submission is created as YOU and respects your Bullhorn permissions. " +
       "Your Bullhorn user ID is auto-derived from your session — you do NOT need to call find_users first. " +
-      "Call list_field_options(JobSubmission, status) first to confirm valid status values. " +
-      "Common status values in this instance: 'New Lead', 'Internally Submitted', 'Candidate Interested'. " +
+      "Call list_field_options(JobSubmission, status) first to confirm valid status values for this instance. " +
+      "STATUS → BULLHORN PIPELINE BUCKET mapping: " +
+      "'New Lead' / 'Online Applicant' → Response bucket (inbound interest, not yet reviewed); " +
+      "'Internally Submitted' / 'Candidate Interested' → Pipeline bucket (recruiter is actively working this candidate); " +
+      "'Offer Extended' / 'Offer Accepted' → Client Submission bucket. " +
+      "DEFAULT: use 'Internally Submitted' when the recruiter is actively submitting a candidate — this places it in the Pipeline bucket where recruiters expect to see it. " +
       "ALWAYS confirm candidateId, jobOrderId, and status with the user before submitting — this creates a live record in Bullhorn visible to all recruiters. " +
       "Check for existing submissions with list_submissions_for_job first to avoid duplicates.",
     {
