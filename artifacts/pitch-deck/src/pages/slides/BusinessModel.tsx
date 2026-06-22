@@ -14,71 +14,88 @@ export default function BusinessModel() {
       </div>
 
       <div className="absolute top-[16vh] left-[6vw] right-[6vw]">
-        <h1 className="font-display font-bold text-[4.6vw] leading-[1] tracking-tight text-text max-w-[70vw]">
-          Three recurring streams,
-          <span className="text-gold"> one onboarding fee.</span>
+        <h1 className="font-display font-bold text-[4.2vw] leading-[1] tracking-tight text-text max-w-[75vw]">
+          Simple per-seat pricing.
+          <span className="text-gold"> You don't pay for the AI — your customer does.</span>
         </h1>
       </div>
 
       <div className="absolute top-[36vh] left-[6vw] right-[6vw] grid grid-cols-2 gap-[3vw]">
 
-        <div className="flex flex-col gap-[2vh]">
+        <div className="flex flex-col gap-[1.8vh]">
           <div className="border-l-2 border-accent pl-[1.2vw]">
-            <div className="font-display text-[1.2vw] tracking-[0.2em] uppercase text-accent">
-              Platform fee
+            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
+              Platform · $499 / mo
             </div>
-            <div className="mt-[0.5vh] font-body text-[1.6vw] text-muted leading-snug">
-              Base subscription per customer firm.
+            <div className="mt-[0.4vh] font-body text-[1.45vw] text-muted leading-snug">
+              Base access, admin tools, audit logs, 1 ATS connector included.
             </div>
           </div>
           <div className="border-l-2 border-accent pl-[1.2vw]">
-            <div className="font-display text-[1.2vw] tracking-[0.2em] uppercase text-accent">
-              Per-system fee
+            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
+              Per-active-seat · $49 / mo
             </div>
-            <div className="mt-[0.5vh] font-body text-[1.6vw] text-muted leading-snug">
-              Each connected system (Bullhorn, Salesforce, etc.).
+            <div className="mt-[0.4vh] font-body text-[1.45vw] text-muted leading-snug">
+              Only billed when a seat actually uses the bridge that month.
             </div>
           </div>
           <div className="border-l-2 border-accent pl-[1.2vw]">
-            <div className="font-display text-[1.2vw] tracking-[0.2em] uppercase text-accent">
-              Per-active-seat
+            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
+              Additional connectors · $299 / mo
             </div>
-            <div className="mt-[0.5vh] font-body text-[1.6vw] text-muted leading-snug">
-              Only billed when a seat actually uses the bridge.
+            <div className="mt-[0.4vh] font-body text-[1.45vw] text-muted leading-snug">
+              Each system beyond the first (Salesforce, Workday, Greenhouse, etc.).
             </div>
           </div>
           <div className="border-l-2 border-gold pl-[1.2vw]">
-            <div className="font-display text-[1.2vw] tracking-[0.2em] uppercase text-gold">
-              Onboarding · One-time
+            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-gold">
+              Onboarding · $3,500 one-time
             </div>
-            <div className="mt-[0.5vh] font-body text-[1.6vw] text-muted leading-snug">
-              $2,500–$5,000 per firm. Compliance tier as add-on.
+            <div className="mt-[0.4vh] font-body text-[1.45vw] text-muted leading-snug">
+              Setup, training, OAuth registration. Waived on annual plans.
             </div>
           </div>
         </div>
 
         <div className="bg-surface border border-line rounded-[1.2vw] p-[3vh_2vw]">
-          <div className="font-display text-[1.2vw] tracking-[0.2em] uppercase text-muted">
+          <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-muted">
             Worked Examples · Monthly
           </div>
 
-          <div className="mt-[2.5vh] flex items-baseline justify-between border-b border-line pb-[2vh]">
-            <div className="font-display font-semibold text-[2.4vw] text-text">10 seats</div>
-            <div className="font-display font-bold text-[2.4vw] text-accent">$1.5k–2k</div>
+          <div className="mt-[2vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
+            <div>
+              <div className="font-display font-semibold text-[2vw] text-text">10 active seats</div>
+              <div className="font-body text-[1.1vw] text-muted">1 connector</div>
+            </div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$990 / mo</div>
           </div>
 
-          <div className="mt-[2vh] flex items-baseline justify-between border-b border-line pb-[2vh]">
-            <div className="font-display font-semibold text-[2.4vw] text-text">50 seats</div>
-            <div className="font-display font-bold text-[2.4vw] text-accent">$4.5k–6k</div>
+          <div className="mt-[1.5vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
+            <div>
+              <div className="font-display font-semibold text-[2vw] text-text">25 active seats</div>
+              <div className="font-body text-[1.1vw] text-muted">1 connector</div>
+            </div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$1.7k / mo</div>
           </div>
 
-          <div className="mt-[2vh] flex items-baseline justify-between">
-            <div className="font-display font-semibold text-[2.4vw] text-text">100 seats</div>
-            <div className="font-display font-bold text-[2.4vw] text-accent">$8k–12k</div>
+          <div className="mt-[1.5vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
+            <div>
+              <div className="font-display font-semibold text-[2vw] text-text">50 active seats</div>
+              <div className="font-body text-[1.1vw] text-muted">2 connectors</div>
+            </div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$3.2k / mo</div>
           </div>
 
-          <div className="mt-[3vh] font-body text-[1.3vw] text-muted leading-snug">
-            Pricing scales with usage and breadth. Margin stays high: we don't pay for the AI, the customer does.
+          <div className="mt-[1.5vh] flex items-baseline justify-between">
+            <div>
+              <div className="font-display font-semibold text-[2vw] text-text">100 active seats</div>
+              <div className="font-body text-[1.1vw] text-muted">3 connectors</div>
+            </div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$5.8k / mo</div>
+          </div>
+
+          <div className="mt-[2vh] font-body text-[1.2vw] text-muted leading-snug border-t border-line pt-[2vh]">
+            Natural expansion: firms add seats as AI proves its value to the desk. Each expansion is incremental revenue with near-zero incremental cost.
           </div>
         </div>
 

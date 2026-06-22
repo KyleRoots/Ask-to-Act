@@ -11,20 +11,24 @@ export default function Cover() {
         </span>
       </div>
 
-      <div className="absolute top-[6vh] right-[6vw] font-body text-[1.4vw] text-muted">
-        Confidential · 2026
+      <div className="absolute top-[6vh] right-[6vw] flex items-center gap-[2vw]">
+        <div className="flex items-center gap-[0.6vw]">
+          <div className="w-[0.6vw] h-[0.6vw] rounded-full bg-green-400 animate-pulse" />
+          <span className="font-body text-[1.1vw] text-green-400">Live · connect.asktoact.ai</span>
+        </div>
+        <span className="font-body text-[1.4vw] text-muted">Confidential · 2026</span>
       </div>
 
-      <div className="absolute left-[6vw] top-[34vh] max-w-[80vw]">
+      <div className="absolute left-[6vw] top-[30vh] max-w-[80vw]">
         <div className="font-display font-extrabold text-[9vw] leading-[0.92] tracking-tight text-text">
           AskToAct
         </div>
-        <div className="mt-[3vh] font-display font-medium text-[3.4vw] leading-tight tracking-tight text-text max-w-[70vw]">
+        <div className="mt-[2.5vh] font-display font-medium text-[3.2vw] leading-tight tracking-tight text-text max-w-[70vw]">
           We sell the rails,
           <span className="text-accent"> not the chatbot.</span>
         </div>
-        <div className="mt-[4vh] font-body text-[2vw] text-muted max-w-[55vw] leading-relaxed">
-          The AI action layer for the recruiting and staffing stack.
+        <div className="mt-[3.5vh] font-body text-[1.65vw] text-muted max-w-[58vw] leading-relaxed">
+          The recruiter types in ChatGPT. The right thing happens in Bullhorn — with their own permissions enforced, every action audited, no copy-paste in between.
         </div>
       </div>
 
