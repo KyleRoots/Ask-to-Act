@@ -1,0 +1,23 @@
+Here are the current recruiting numbers from Bullhorn:
+
+|  # | Question                                           | Answer                                                                                                                             |
+| -: | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+|  1 | Office with the most jobs open longer than 90 days | **STS-STSI**, with **79** stale open jobs. Total stale open jobs across all offices: **110**.                                      |
+|  2 | Placements this year vs. all-time                  | **98 confirmed placements in 2026 YTD** vs. **2,650 confirmed placements all-time**.                                               |
+|  3 | Office with the most placements this year          | **Tie: STS-STSI and MYT-Ottawa**, each with **37** confirmed placements.                                                           |
+|  4 | Staffing scorecard by office                       | See table below.                                                                                                                   |
+|  5 | Active opportunities in pipeline right now         | **23 active opportunities** total. **STS-STSI leads** with **18**.                                                                 |
+|  6 | Ohio office activity this year                     | **MYT-Ohio has 0 confirmed placements this year**, but it does have **1 open job** and **1 active opportunity** currently showing. |
+
+### Staffing scorecard by office
+
+| Office          | Open Jobs | Contract Placements | Contract-to-Hire Placements | Direct Hire Placements | Total Confirmed Placements |     Active Opportunities |
+| --------------- | --------: | ------------------: | --------------------------: | ---------------------: | -------------------------: | -----------------------: |
+| **STS-STSI**    |       241 |                  16 |                          20 |                      1 |                         37 |                       18 |
+| **MYT-Ottawa**  |       101 |                  30 |                           1 |                      6 |                         37 |                        0 |
+| **MYT-Chicago** |        51 |                  11 |                           5 |                      1 |                         17 |                        1 |
+| **MYT-Clover**  |        12 |                   7 |                           0 |                      0 |                          7 |                        1 |
+| **MYT-Ohio**    |         1 |                   0 |                           0 |                      0 |                          0 |                        1 |
+| **Total**       |   **406** |              **64** |                      **26** |                  **8** |                     **98** | **21 mapped / 23 total** |
+
+Note: The active opportunities report shows **23 total**, but **2 are unmapped to the configured offices**, which is why the office rows add up to **21**.
