@@ -31,6 +31,7 @@ import {
   addNote,
   updateCandidateStatus,
   createJobSubmission,
+  bulkCreateSubmissions,
   BullhornPermissionError,
   listFieldOptions,
   SUPPORTED_ENTITIES,
@@ -959,6 +960,42 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         const session = await resolveWriteSession();
         await updateCandidateStatus(session, candidateId, status);
         return { updated: true, candidateId, status };
+      }),
+  );
+
+  writeTool(
+    "bulk_create_submissions",
+    "WRITE: Submits multiple candidates to one or more job orders in a single call — use this instead of calling create_job_submission repeatedly. " +
+      "Runs all submissions in parallel and returns a per-item result so you can report exactly which succeeded and which failed. " +
+      "Max 20 submissions per call; split larger batches. " +
+      "Your Bullhorn user ID is auto-derived from your session — no find_users call needed. " +
+      "STATUS → BULLHORN PIPELINE BUCKET: 'Internally Submitted' / 'Candidate Interested' → Pipeline (recommended default); 'New Lead' → Response; 'Offer Extended' → Client Submission. " +
+      "WORKFLOW: (1) resolve all candidate names to IDs via search, (2) call list_field_options(JobSubmission, status) to confirm status, " +
+      "(3) show the user the full list of candidateId+jobOrderId pairs and ask for ONE confirmation before calling this tool, " +
+      "(4) call this tool once — do NOT loop create_job_submission for the same batch. " +
+      "ALWAYS check list_submissions_for_job first to avoid duplicate submissions.",
+    {
+      submissions: z
+        .array(
+          z.object({
+            candidateId: z.number().int().positive().describe("Bullhorn candidate ID."),
+            jobOrderId: z.number().int().positive().describe("Bullhorn job order ID."),
+          }),
+        )
+        .min(1)
+        .max(20)
+        .describe("Array of candidate+job pairs to submit. Max 20 per call."),
+      status: z
+        .string()
+        .min(1)
+        .describe(
+          "Submission status applied to ALL items — must be a valid value from list_field_options(JobSubmission, status). Default: 'Internally Submitted'.",
+        ),
+    },
+    async ({ submissions, status }) =>
+      runWriteTool("bulk_create_submissions", { count: submissions.length, status }, async () => {
+        const session = await resolveWriteSession();
+        return bulkCreateSubmissions(session, { submissions, status });
       }),
   );
 

@@ -2602,6 +2602,79 @@ export async function createJobSubmission(
   return { submissionId: data.changedEntityId ?? 0, sendingUserId };
 }
 
+export interface BulkSubmissionInput {
+  candidateId: number;
+  jobOrderId: number;
+}
+
+export interface BulkSubmissionResult {
+  candidateId: number;
+  jobOrderId: number;
+  submissionId?: number;
+  error?: string;
+}
+
+/**
+ * Submits multiple candidates to one or more job orders in a single call.
+ * Runs all writes in parallel (Promise.allSettled) so partial failures don't
+ * block the rest. Returns a per-item result list so the AI can report exactly
+ * which submissions succeeded and which failed.
+ *
+ * sendingUserId is resolved once from the session and reused for every item.
+ * Cap: max 20 submissions per call to stay well within Bullhorn rate limits.
+ */
+export async function bulkCreateSubmissions(
+  session: BullhornWriteSession,
+  args: {
+    submissions: BulkSubmissionInput[];
+    status: string;
+  },
+): Promise<{
+  results: BulkSubmissionResult[];
+  succeeded: number;
+  failed: number;
+  total: number;
+}> {
+  if (args.submissions.length === 0) {
+    throw new Error("submissions array is empty — nothing to submit.");
+  }
+  if (args.submissions.length > 20) {
+    throw new Error(
+      `Too many submissions in one call (${args.submissions.length}). Max is 20. Split into multiple calls.`,
+    );
+  }
+
+  const sendingUserId = await getSessionUserId(session);
+
+  const settled = await Promise.allSettled(
+    args.submissions.map(async (item) => {
+      const body = {
+        candidate: { id: item.candidateId },
+        jobOrder: { id: item.jobOrderId },
+        status: args.status,
+        sendingUser: { id: sendingUserId },
+      };
+      const data = (await writeFetch(session, "PUT", "entity/JobSubmission", body)) as {
+        changedEntityId?: number;
+      };
+      return { ...item, submissionId: data.changedEntityId ?? 0 };
+    }),
+  );
+
+  const results: BulkSubmissionResult[] = settled.map((r, i) => {
+    const item = args.submissions[i];
+    if (r.status === "fulfilled") {
+      return { candidateId: item.candidateId, jobOrderId: item.jobOrderId, submissionId: r.value.submissionId };
+    } else {
+      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      return { candidateId: item.candidateId, jobOrderId: item.jobOrderId, error: msg };
+    }
+  });
+
+  const succeeded = results.filter((r) => r.submissionId !== undefined).length;
+  return { results, succeeded, failed: results.length - succeeded, total: results.length };
+}
+
 /**
  * Finds internal Bullhorn users (recruiters) by name and/or email.
  *
