@@ -1,4 +1,4 @@
-import { db, bullhornTokensTable } from "@workspace/db";
+import { db, bullhornTokensTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 
@@ -565,4 +565,138 @@ export async function isConnected(): Promise<boolean> {
     return true;
   }
   return (await loadRefreshToken()) !== null;
+}
+
+// ── Per-user Bullhorn auth ─────────────────────────────────────────────────
+//
+// Each enrolled recruiter has their own Bullhorn OAuth session so Bullhorn
+// enforces THEIR permission gates on every write operation. Read tools
+// continue to use the shared service-account session.
+
+const userSessions = new Map<string, Session>();
+const userAuthInProgress = new Map<string, Promise<Session>>();
+
+/** Look up a user row by their API key (our side). Returns null if not found. */
+export async function getUserByApiKey(apiKey: string) {
+  const rows = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.apiKey, apiKey))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Persist updated Bullhorn session fields back to the user's row. */
+async function persistUserSession(
+  userId: string,
+  tokens: TokenResponse,
+  loginData: LoginResponse,
+  sessionExpiresAt: number,
+): Promise<Session> {
+  const s = buildSession(tokens, loginData, sessionExpiresAt);
+  await db
+    .update(usersTable)
+    .set({
+      refreshToken: tokens.refresh_token,
+      bhRestToken: loginData.BhRestToken,
+      restUrl: loginData.restUrl,
+      tokenExpiresAt: s.tokenExpiresAt,
+      sessionExpiresAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(usersTable.id, userId));
+  return s;
+}
+
+/**
+ * Returns a live Bullhorn session for the given enrolled user. Refreshes and
+ * persists the rotating refresh token when the session is stale. Throws if the
+ * user has never enrolled or if the refresh token has expired (re-enrollment
+ * required).
+ */
+export async function getUserSession(userId: string): Promise<Session> {
+  const inProgress = userAuthInProgress.get(userId);
+  if (inProgress) return inProgress;
+
+  const cached = userSessions.get(userId);
+  if (cached) {
+    const tokenOk = Date.now() < cached.tokenExpiresAt;
+    const sessionOk = Date.now() < cached.sessionExpiresAt;
+    if (tokenOk && sessionOk) return cached;
+  }
+
+  const rows = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  const user = rows[0];
+  if (!user) throw new Error(`User ${userId} not found.`);
+  if (!user.refreshToken) {
+    throw new Error(
+      `Your Bullhorn account is not enrolled yet. Please visit ` +
+        `/api/auth/user/enroll?id=${userId} to connect your Bullhorn account.`,
+    );
+  }
+
+  const work = (async (): Promise<Session> => {
+    const { oauthUrl, loginUrl } = await discoverEndpoints();
+    try {
+      const tokens = await fetchTokenWithRefresh(oauthUrl, user.refreshToken!);
+      const loginData = await login(tokens.access_token, loginUrl);
+      const sessionExpiresAt = await resolveSessionExpiry(loginData);
+      const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
+      userSessions.set(userId, s);
+      logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: user session established");
+      return s;
+    } catch (err) {
+      userSessions.delete(userId);
+      logger.error({ userId, err }, "Bullhorn: user session refresh failed — re-enrollment may be required");
+      throw new Error(
+        `Your Bullhorn session could not be refreshed. Please re-enroll at ` +
+          `/api/auth/user/enroll?id=${userId} to reconnect your account.`,
+      );
+    }
+  })().finally(() => {
+    userAuthInProgress.delete(userId);
+  });
+
+  userAuthInProgress.set(userId, work);
+  return work;
+}
+
+/** Drop the in-memory session cache for a user (forces re-auth on next call). */
+export function invalidateUserSession(userId: string): void {
+  userSessions.delete(userId);
+  userAuthInProgress.delete(userId);
+}
+
+/**
+ * Builds the Bullhorn authorize URL for a user's browser-based enrollment.
+ * The state encodes `user:{userId}:{random}` so the shared OAuth callback can
+ * route user-enrollment vs. service-account flows correctly.
+ */
+export async function getUserEnrollUrl(userId: string, state: string): Promise<string> {
+  const { oauthUrl } = await discoverEndpoints();
+  const url = new URL(`${oauthUrl}/authorize`);
+  url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
+  url.searchParams.set("state", state);
+  return url.toString();
+}
+
+/**
+ * Completes a user's Bullhorn enrollment: exchanges the authorization code
+ * for tokens, establishes a REST session, and persists the refresh token
+ * against the user row. After this, getUserSession() will succeed for this user.
+ */
+export async function completeUserEnrollment(userId: string, code: string): Promise<void> {
+  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const loginData = await login(tokens.access_token, loginUrl);
+  const sessionExpiresAt = await resolveSessionExpiry(loginData);
+  const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
+  userSessions.set(userId, s);
+  logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: user enrollment complete");
 }

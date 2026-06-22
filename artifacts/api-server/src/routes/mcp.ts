@@ -8,7 +8,7 @@ const router: IRouter = Router();
 
 async function handleMcpRequest(req: Request, res: Response, body?: unknown) {
   try {
-    const server = createMcpServer();
+    const server = createMcpServer(req.caller);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });

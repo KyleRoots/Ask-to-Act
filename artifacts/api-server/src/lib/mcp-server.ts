@@ -28,8 +28,14 @@ import {
   listCandidateAttachments,
   readCandidateAttachment,
   getCandidateResume,
+  addNote,
+  updateCandidateStatus,
+  createJobSubmission,
+  BullhornPermissionError,
   SUPPORTED_ENTITIES,
 } from "./bullhorn-client.js";
+import { getUserSession } from "./bullhorn-auth.js";
+import type { CallerIdentity } from "../middlewares/bearer-auth.js";
 import { logger } from "./logger.js";
 import { responseCache, stableKey } from "./cache.js";
 import {
@@ -159,16 +165,12 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
   return out;
 }
 
-export function createMcpServer(): McpServer {
+export function createMcpServer(caller?: CallerIdentity): McpServer {
   const server = new McpServer({
     name: "bullhorn-mcp",
     version: "1.0.0",
   });
 
-  // This MCP server is STRICTLY READ-ONLY. Advertise that to clients via tool
-  // annotations so hosts (e.g. ChatGPT) do not classify these reads as
-  // write/destructive/open-world actions and gate or block them. The `tool`
-  // helper attaches these hints to every tool registration below.
   const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
     readOnlyHint: true,
     destructiveHint: false,
@@ -181,6 +183,62 @@ export function createMcpServer(): McpServer {
     schema: Args,
     cb: ToolCallback<Args>,
   ) => server["tool"](name, description, schema, READ_ONLY_ANNOTATIONS, cb);
+
+  const WRITE_ANNOTATIONS: ToolAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  };
+  const writeTool = <Args extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    schema: Args,
+    cb: ToolCallback<Args>,
+  ) => server["tool"](name, description, schema, WRITE_ANNOTATIONS, cb);
+
+  /**
+   * Resolves the calling user's Bullhorn session for write operations.
+   * Throws a plain-English error if the caller is not an enrolled user.
+   */
+  async function resolveWriteSession() {
+    if (!caller || caller.kind !== "user") {
+      throw new Error(
+        "Write operations require a personal Bullhorn account. " +
+          "Configure your AI connector with your personal API key (not the shared read-only token) " +
+          "and complete enrollment at /api/auth/user/enroll?id=<your-user-id>. " +
+          "Contact your administrator to set up your account.",
+      );
+    }
+    return getUserSession(caller.userId);
+  }
+
+  /** Runs a write tool: logs, executes, returns result. Writes are never cached. */
+  async function runWriteTool(
+    toolName: string,
+    args: Record<string, unknown>,
+    fn: () => Promise<unknown>,
+  ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+    try {
+      const result = await withLogging(toolName, args, fn);
+      return { content: [{ type: "text", text: formatResult(result) }] };
+    } catch (err) {
+      if (err instanceof BullhornPermissionError) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatResult({
+                error: "permission_denied",
+                message: err.message,
+              }),
+            },
+          ],
+        };
+      }
+      throw err;
+    }
+  }
 
   tool(
     "search_candidates",
@@ -817,6 +875,90 @@ export function createMcpServer(): McpServer {
       runTool("recruiter_leaderboard", { startDate, endDate }, () =>
         recruiterLeaderboard({ startDate, endDate }),
       ),
+  );
+
+  // ── Write tools ────────────────────────────────────────────────────────────
+  //
+  // Write tools run under the CALLING USER's own Bullhorn session so Bullhorn
+  // enforces their individual permission gates. The shared read-only service
+  // token is rejected with a clear plain-English message. To use write tools:
+  //   1. Admin creates a user: POST /api/users
+  //   2. User enrolls their Bullhorn account: GET /api/auth/user/enroll?id=<id>
+  //   3. Configure the AI connector with the user's personal apiKey
+  //
+  // Permission errors from Bullhorn (403) are returned as structured JSON with
+  // error:"permission_denied" so the AI can explain them in plain English.
+
+  writeTool(
+    "add_note",
+    "WRITE: Adds a note to a candidate in Bullhorn, visible to all recruiters on the candidate's record. " +
+      "Requires a personal Bullhorn account (not the shared read-only token) — the note is created as YOU and respects your Bullhorn write permissions. " +
+      "The `action` field is the note type shown in Bullhorn (common values: 'Email', 'Call', 'Meeting', 'Comment', 'LinkedIn Message'). " +
+      "Always confirm with the user what note text and action type to use before calling this tool. " +
+      "At least one of candidateId, jobOrderId, or placementId must be provided.",
+    {
+      comments: z.string().min(1).describe("The note body text — the full content of the note as it should appear in Bullhorn."),
+      action: z.string().min(1).describe("Note type/category displayed in Bullhorn, e.g. 'Email', 'Call', 'Meeting', 'Comment', 'LinkedIn Message'."),
+      candidateId: z.number().int().positive().optional().describe("Bullhorn candidate ID to attach this note to."),
+      jobOrderId: z.number().int().positive().optional().describe("Bullhorn job order ID to also associate this note with (optional)."),
+      placementId: z.number().int().positive().optional().describe("Bullhorn placement ID to also associate this note with (optional)."),
+    },
+    async ({ comments, action, candidateId, jobOrderId, placementId }) => {
+      if (!candidateId && !jobOrderId && !placementId) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: formatResult({ error: "validation_error", message: "At least one of candidateId, jobOrderId, or placementId must be provided." }),
+            },
+          ],
+        };
+      }
+      return runWriteTool("add_note", { comments, action, candidateId, jobOrderId, placementId }, async () => {
+        const session = await resolveWriteSession();
+        return addNote(session, { comments, action, candidateId, jobOrderId, placementId });
+      });
+    },
+  );
+
+  writeTool(
+    "update_candidate_status",
+    "WRITE: Updates a candidate's status field in Bullhorn. " +
+      "Requires a personal Bullhorn account — the update is performed as YOU and respects your Bullhorn edit permissions. " +
+      "Common status values in this instance: 'Active', 'New Lead', 'Online Applicant', 'Placed', 'Archive'. " +
+      "ALWAYS confirm the candidateId and new status with the user before calling this tool — status changes are visible to all recruiters. " +
+      "Use get_candidate first to verify the current status before changing it.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID to update."),
+      status: z.string().min(1).describe("New status value, e.g. 'Active', 'New Lead', 'Archive'. Must match a valid Bullhorn status exactly (case-sensitive)."),
+    },
+    async ({ candidateId, status }) =>
+      runWriteTool("update_candidate_status", { candidateId, status }, async () => {
+        const session = await resolveWriteSession();
+        await updateCandidateStatus(session, candidateId, status);
+        return { updated: true, candidateId, status };
+      }),
+  );
+
+  writeTool(
+    "create_job_submission",
+    "WRITE: Submits a candidate to a job order, creating a JobSubmission record in Bullhorn. " +
+      "Requires a personal Bullhorn account — the submission is created as YOU (sendingUserId) and respects your Bullhorn permissions. " +
+      "Use find_users to look up your Bullhorn internal user ID (sendingUserId) before calling. " +
+      "Common status values: 'New Lead', 'Reviewing', 'Submitted', 'Interviewing'. " +
+      "ALWAYS confirm candidateId, jobOrderId, and status with the user before submitting — this creates a live record in Bullhorn visible to all recruiters. " +
+      "Check for existing submissions with list_submissions_for_job first to avoid duplicates.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID to submit."),
+      jobOrderId: z.number().int().positive().describe("Bullhorn job order ID to submit the candidate to."),
+      status: z.string().min(1).describe("Submission status, e.g. 'New Lead', 'Reviewing', 'Submitted'."),
+      sendingUserId: z.number().int().positive().describe("Your Bullhorn internal user ID (use find_users to look up your own ID before calling this tool)."),
+    },
+    async ({ candidateId, jobOrderId, status, sendingUserId }) =>
+      runWriteTool("create_job_submission", { candidateId, jobOrderId, status, sendingUserId }, async () => {
+        const session = await resolveWriteSession();
+        return createJobSubmission(session, { candidateId, jobOrderId, status, sendingUserId });
+      }),
   );
 
   return server;

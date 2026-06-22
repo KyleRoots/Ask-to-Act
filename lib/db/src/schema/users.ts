@@ -1,0 +1,24 @@
+import { pgTable, text, timestamp, bigint } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod/v4";
+
+export const usersTable = pgTable("users", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email"),
+  apiKey: text("api_key").notNull().unique(),
+  refreshToken: text("refresh_token"),
+  bhRestToken: text("bh_rest_token"),
+  restUrl: text("rest_url"),
+  tokenExpiresAt: bigint("token_expires_at", { mode: "number" }),
+  sessionExpiresAt: bigint("session_expires_at", { mode: "number" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertUserSchema = createInsertSchema(usersTable).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof usersTable.$inferSelect;

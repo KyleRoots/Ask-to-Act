@@ -3,35 +3,15 @@ import { randomBytes } from "node:crypto";
 import {
   getAuthorizeUrl,
   completeAuthorization,
+  completeUserEnrollment,
   connectHeadless,
   isConnected,
 } from "../lib/bullhorn-auth.js";
+import { rememberState, consumeState, userIdFromState } from "../lib/oauth-state.js";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
-
-const pendingStates = new Map<string, number>();
-const STATE_TTL_MS = 10 * 60 * 1000;
-
-function rememberState(state: string): void {
-  const now = Date.now();
-  for (const [key, expires] of pendingStates) {
-    if (expires <= now) {
-      pendingStates.delete(key);
-    }
-  }
-  pendingStates.set(state, now + STATE_TTL_MS);
-}
-
-function consumeState(state: string): boolean {
-  const expires = pendingStates.get(state);
-  if (expires === undefined) {
-    return false;
-  }
-  pendingStates.delete(state);
-  return expires > Date.now();
-}
 
 function escapeHtml(value: string): string {
   return value
@@ -67,6 +47,15 @@ router.get("/auth/bullhorn/login", bearerAuth, async (_req: Request, res: Respon
   }
 });
 
+/**
+ * Shared OAuth callback for both the service-account flow and per-user
+ * enrollment. The `state` parameter encodes the flow:
+ *   - Service account: plain random hex  (rememberState / consumeState)
+ *   - User enrollment: "user:{userId}:{random}"  (same map, userId embedded)
+ *
+ * Both flows share the same BULLHORN_REDIRECT_URI so only one URI needs to be
+ * registered with Bullhorn Support.
+ */
 router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
   const { code, state, error, error_description } = req.query;
 
@@ -85,7 +74,7 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
       .send(
         page(
           "Authorization link expired",
-          "This authorization link is invalid or has expired. Please start again from /api/auth/bullhorn/login.",
+          "This authorization link is invalid or has expired. Please start again.",
         ),
       );
     return;
@@ -95,6 +84,32 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
     res
       .status(400)
       .send(page("Missing authorization code", "Bullhorn did not return an authorization code."));
+    return;
+  }
+
+  const userId = userIdFromState(state);
+
+  if (userId) {
+    try {
+      await completeUserEnrollment(userId, code);
+      logger.info({ userId }, "Bullhorn: user enrollment complete via shared callback");
+      res.send(
+        page(
+          "Bullhorn account connected",
+          "Your personal Bullhorn account is now linked. You can close this window — the AI connector will use your account for all write operations.",
+        ),
+      );
+    } catch (err) {
+      logger.error({ err, userId }, "User enrollment code exchange failed");
+      res
+        .status(500)
+        .send(
+          page(
+            "Could not complete enrollment",
+            "The authorization code could not be exchanged. Please try enrolling again.",
+          ),
+        );
+    }
     return;
   }
 
@@ -129,9 +144,6 @@ router.get("/auth/bullhorn/status", bearerAuth, async (_req: Request, res: Respo
   }
 });
 
-// Headless connect: completes the entire OAuth flow server-side (no browser, no
-// consent screen) using the API user's credentials. This is the correct flow for
-// a Bullhorn "Webservice API User".
 router.post(
   "/auth/bullhorn/connect",
   bearerAuth,

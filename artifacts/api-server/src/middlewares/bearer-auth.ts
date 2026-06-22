@@ -1,5 +1,20 @@
-import { Request, Response, NextFunction } from "express";
+import { type Request, type Response, type NextFunction } from "express";
 import { timingSafeEqual } from "node:crypto";
+import { db, usersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { logger } from "../lib/logger.js";
+
+export type CallerIdentity =
+  | { kind: "service" }
+  | { kind: "user"; userId: string };
+
+declare global {
+  namespace Express {
+    interface Request {
+      caller?: CallerIdentity;
+    }
+  }
+}
 
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -29,10 +44,10 @@ function extractProvidedToken(req: Request): string | null {
   return null;
 }
 
-export function bearerAuth(req: Request, res: Response, next: NextFunction) {
-  const token = process.env["MCP_BEARER_TOKEN"];
+export async function bearerAuth(req: Request, res: Response, next: NextFunction) {
+  const serviceToken = process.env["MCP_BEARER_TOKEN"];
 
-  if (!token) {
+  if (!serviceToken) {
     res.status(503).json({
       error: "Server misconfiguration: MCP_BEARER_TOKEN is not set",
     });
@@ -48,10 +63,26 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction) {
     return;
   }
 
-  if (!safeEqual(provided, token)) {
-    res.status(401).json({ error: "Invalid token" });
+  if (safeEqual(provided, serviceToken)) {
+    req.caller = { kind: "service" };
+    next();
     return;
   }
 
-  next();
+  try {
+    const rows = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.apiKey, provided))
+      .limit(1);
+    if (rows[0]) {
+      req.caller = { kind: "user", userId: rows[0].id };
+      next();
+      return;
+    }
+  } catch (err) {
+    logger.warn({ err }, "bearerAuth: DB lookup failed");
+  }
+
+  res.status(401).json({ error: "Invalid token" });
 }

@@ -2391,6 +2391,132 @@ export async function searchOpportunities(args: {
   );
 }
 
+// ── Write helpers ────────────────────────────────────────────────────────────
+//
+// Write operations take an explicit `session` parameter (the calling user's own
+// Bullhorn session) rather than calling getSession(). This ensures writes always
+// run under the recruiter's own credentials so Bullhorn enforces their permission
+// gates — never the shared service-account session.
+
+export interface BullhornWriteSession {
+  BhRestToken: string;
+  restUrl: string;
+}
+
+export class BullhornPermissionError extends Error {
+  constructor(action: string) {
+    super(
+      `You don't have permission to ${action} in Bullhorn. ` +
+        `Contact your Bullhorn administrator if you believe this is incorrect.`,
+    );
+    this.name = "BullhornPermissionError";
+  }
+}
+
+async function writeFetch(
+  session: BullhornWriteSession,
+  method: "PUT" | "POST" | "DELETE",
+  path: string,
+  body: unknown,
+): Promise<unknown> {
+  const url = new URL(path, session.restUrl);
+  url.searchParams.set("BhRestToken", session.BhRestToken);
+
+  const res = await fetch(url.toString(), {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 403) {
+    const action = `${method} ${path.split("/").slice(0, 2).join("/")}`;
+    throw new BullhornPermissionError(action);
+  }
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw formatBullhornError("write", res.status, text);
+  }
+
+  return res.json();
+}
+
+/**
+ * Adds a Note to a candidate (and optionally a job or placement).
+ * Uses PUT /entity/Note — Bullhorn creates the note as the session user.
+ * The `action` field is the note category displayed in Bullhorn (e.g. "Email",
+ * "Call", "Meeting", "Comment"). A `noteEntity` association links the note to
+ * the target record.
+ */
+export async function addNote(
+  session: BullhornWriteSession,
+  args: {
+    comments: string;
+    action: string;
+    candidateId?: number;
+    jobOrderId?: number;
+    placementId?: number;
+  },
+): Promise<{ noteId: number }> {
+  const noteEntities: Array<Record<string, unknown>> = [];
+  if (args.candidateId) {
+    noteEntities.push({ targetName: "Candidate", person: { id: args.candidateId } });
+  }
+
+  const body: Record<string, unknown> = {
+    action: args.action,
+    comments: args.comments,
+  };
+  if (noteEntities.length > 0) body.noteEntities = noteEntities;
+  if (args.jobOrderId) body.jobOrder = { id: args.jobOrderId };
+  if (args.placementId) body.placement = { id: args.placementId };
+
+  const data = (await writeFetch(session, "PUT", "entity/Note", body)) as {
+    changedEntityId?: number;
+  };
+  return { noteId: data.changedEntityId ?? 0 };
+}
+
+/**
+ * Updates a candidate's status field.
+ * Uses POST /entity/Candidate/{id} — Bullhorn enforces the session user's
+ * edit permissions on the record.
+ */
+export async function updateCandidateStatus(
+  session: BullhornWriteSession,
+  id: number,
+  status: string,
+): Promise<void> {
+  await writeFetch(session, "POST", `entity/Candidate/${id}`, { status });
+}
+
+/**
+ * Submits a candidate to a job order (creates a JobSubmission).
+ * Uses PUT /entity/JobSubmission. The `sendingUserId` should be the Bullhorn
+ * internal user ID of the recruiter submitting — use find_users to look it up.
+ * Common `status` values: "New Lead", "Reviewing", "Submitted", "Interviewing".
+ */
+export async function createJobSubmission(
+  session: BullhornWriteSession,
+  args: {
+    candidateId: number;
+    jobOrderId: number;
+    status: string;
+    sendingUserId: number;
+  },
+): Promise<{ submissionId: number }> {
+  const body = {
+    candidate: { id: args.candidateId },
+    jobOrder: { id: args.jobOrderId },
+    status: args.status,
+    sendingUser: { id: args.sendingUserId },
+  };
+  const data = (await writeFetch(session, "PUT", "entity/JobSubmission", body)) as {
+    changedEntityId?: number;
+  };
+  return { submissionId: data.changedEntityId ?? 0 };
+}
+
 /** Finds internal Bullhorn users (recruiters) by name and/or email. */
 export async function findUsers(args: {
   name?: string;
