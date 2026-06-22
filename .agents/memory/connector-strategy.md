@@ -30,6 +30,26 @@ description: Why AskToAct leans connector-first (BYO AI), what the connector can
 - Realistic ceiling: the top ~20-30 high-value questions can reach near-deterministic via
   finished-answer tools; arbitrary long-tail ad-hoc questions will always carry host-model variance.
 
+# Robustness WITHOUT the guard-wormhole (how to avoid chasing "perfect")
+- Rule: **guard a CLASS, not an INSTANCE.** A guard that kills a whole failure class (e.g. "never
+  draw rankings/conclusions from a truncated list") is healthy. If a fix only handles ONE phrasing,
+  that's the smell — promote it to a finished-answer tool instead of writing guard #5.
+- "Not blocked by anything" (user req #1) CONTRADICTS compliance — compliance MEANS sometimes
+  blocking. Redefine the target: **zero artificial/accidental blocks from OUR side; the only gate is
+  the user's own ATS permissions, which we faithfully enforce.** That gating is the differentiator,
+  not a flaw.
+- The confidence engine = a **golden-answer regression harness run ACROSS models (GPT/Claude/Gemini)**.
+  Turns "do we feel robust?" into "are all N golden checks green across every model?" It also signals
+  when to STOP (suite green across models = done; don't chase the asymptote).
+- Generalizing to ANY ATS = a **canonical adapter layer**: map each ATS's quirks ONCE (Bullhorn's
+  correlatedCustomText1 etc.) into a normalized model; new ATS = one adapter + permission map +
+  golden suite. "Any ATS" really means "any ATS with a built + golden-verified adapter" — bounded and
+  repeatable, not magic/free.
+- Define "done" explicitly: top ~N high-value questions consistent+accurate across all major models at
+  target latency + permission gating verified = robust. The long tail is explicitly best-effort/steered.
+- Speed = split: connector-side latency is OURS (cache/precompute/finished answers → sub-second);
+  host-model reasoning time is theirs (don't chase). Finished answers improve BOTH accuracy and speed.
+
 # Monetization lean (NO final decision as of 2026-06)
 - Connector = flat "unlimited", BYO AI, ~zero COGS (host model pays), high margin, distribution/reach.
 - Owned agent (possible later tier) = usage/seat-priced premium; REQUIRED for safe WRITE/automation;
