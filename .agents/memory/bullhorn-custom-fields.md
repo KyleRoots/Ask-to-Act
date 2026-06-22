@@ -42,6 +42,26 @@ under a different custom field on each entity. Never assume one name everywhere:
 
 `categories` / `publishedCategory` are mostly empty — never group by those.
 
+# Steering trap: AIs group jobs by OWNER, not Internal Department (decoy accounts)
+
+When asked "by office/branch/location/region", models (incl. GPT on medium power)
+will reach for a job's OWNER/houseOwner or a literal `branch`/`address` field
+instead of `correlatedCustomText1`. This corp has owner/user accounts NAMED after
+offices (e.g. "MYT-Ottawa House"), so the wrong path looks plausible and returns a
+believable-but-tiny number (filtering by owner "MYT-Ottawa House" → 1 open job vs
+the true 99 via `correlatedCustomText1:"MYT-Ottawa"`). Models also tend to hand-roll
+office/aging breakdowns from a record list instead of calling the report tools.
+
+**Why:** caught in live testing — a single batch produced 3 wrong/abandoned answers
+(office snapshot, MYT-Ottawa count, stale-jobs-by-office) all from owner-vs-department
+confusion plus the decoy account naming; numbers themselves were fine.
+
+**How to apply:** tool descriptions must explicitly say office = `correlatedCustomText1`
+ONLY, name the decoy ("owner accounts named like offices are NOT the office"), tell the
+model to ignore empty `branch`/`address`/`categories`, and route any by-office / aging
+ask to `count_entity` groupBy `correlatedCustomText1` or the open_jobs_report /
+job_aging_report tools. Description-only steering (no logic) — ships on next deploy.
+
 # `describe_entity` backbone: `configuredCustomFields`
 
 `describe_entity` returns a top-level `configuredCustomFields` array (subset of
