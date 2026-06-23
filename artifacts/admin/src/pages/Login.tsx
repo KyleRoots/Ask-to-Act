@@ -36,57 +36,45 @@ export default function Login() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4"
+      className="min-h-screen min-h-dvh flex items-center justify-center px-4 py-10"
       style={{ background: "hsl(220 50% 4%)" }}
     >
-      {/* Ambient glow */}
-      <div
-        className="pointer-events-none fixed inset-0 overflow-hidden"
-        aria-hidden
-      >
+      {/* Ambient glows — hidden on very small screens for performance */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>
         <div
-          className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-20"
-          style={{
-            background:
-              "radial-gradient(circle, #4F46E5 0%, transparent 70%)",
-          }}
+          className="absolute -top-32 left-1/2 -translate-x-1/2 w-[min(600px,100vw)] h-[min(500px,80vw)] rounded-full opacity-20"
+          style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }}
         />
         <div
-          className="absolute top-1/3 left-1/4 w-[300px] h-[300px] rounded-full opacity-10"
-          style={{
-            background:
-              "radial-gradient(circle, #06B6D4 0%, transparent 70%)",
-          }}
+          className="absolute bottom-0 right-0 w-64 h-64 rounded-full opacity-10"
+          style={{ background: "radial-gradient(circle, #0EA5E9 0%, transparent 70%)" }}
         />
       </div>
 
       <div className="relative w-full max-w-sm">
-        {/* Logo lockup */}
-        <div className="mb-10 text-center">
-          <div className="flex justify-center mb-5">
-            <LogoIcon size={56} />
+        {/* Logo */}
+        <div className="mb-8 text-center">
+          <div className="flex justify-center mb-4">
+            <LogoIcon size={60} />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            Ask<span style={{ color: "#22D3EE" }}>To</span>Act
+          <h1 className="text-2xl font-extrabold tracking-tight text-white" style={{ letterSpacing: "-0.03em" }}>
+            Ask<span style={{ color: "#38BDF8" }}>To</span>Act
           </h1>
-          <p className="mt-1 text-sm" style={{ color: "#8C9AB3" }}>
+          <p className="mt-1.5 text-sm" style={{ color: "#6B7A99" }}>
             Super-admin portal
           </p>
         </div>
 
         {/* Card */}
         <div
-          className="rounded-2xl border p-7 shadow-xl"
-          style={{
-            background: "hsl(222 45% 8%)",
-            borderColor: "hsl(217 35% 18%)",
-          }}
+          className="rounded-2xl border p-6 sm:p-8 shadow-2xl"
+          style={{ background: "hsl(222 45% 8%)", borderColor: "hsl(217 35% 18%)" }}
         >
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label
                 className="block text-xs font-semibold uppercase tracking-wider mb-2"
-                style={{ color: "#8C9AB3" }}
+                style={{ color: "#6B7A99" }}
               >
                 Admin Token
               </label>
@@ -94,20 +82,19 @@ export default function Login() {
                 type="password"
                 value={token}
                 onChange={(e) => setTokenValue(e.target.value)}
-                placeholder="Enter your bearer token"
-                autoComplete="new-password"
-                className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-[#4A5568] outline-none transition-all"
+                placeholder="Paste your bearer token"
+                autoComplete="current-password"
+                className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-[#3A4460] outline-none transition-all"
                 style={{
-                  background: "hsl(217 35% 12%)",
-                  border: "1px solid hsl(217 35% 22%)",
+                  background: "hsl(217 35% 11%)",
+                  border: "1.5px solid hsl(217 35% 20%)",
                 }}
                 onFocus={(e) => {
                   e.currentTarget.style.borderColor = "#4F46E5";
-                  e.currentTarget.style.boxShadow =
-                    "0 0 0 3px rgba(79,70,229,0.18)";
+                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(79,70,229,0.2)";
                 }}
                 onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "hsl(217 35% 22%)";
+                  e.currentTarget.style.borderColor = "hsl(217 35% 20%)";
                   e.currentTarget.style.boxShadow = "none";
                 }}
               />
@@ -115,14 +102,14 @@ export default function Login() {
 
             {error && (
               <div
-                className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm"
+                className="flex items-start gap-2 rounded-xl px-4 py-3 text-sm"
                 style={{
-                  background: "rgba(239,68,68,0.1)",
-                  border: "1px solid rgba(239,68,68,0.25)",
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.2)",
                   color: "#FCA5A5",
                 }}
               >
-                <span>⚠</span>
+                <span className="mt-px shrink-0">⚠</span>
                 <span>{error}</span>
               </div>
             )}
@@ -130,31 +117,19 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
-                background:
-                  "linear-gradient(135deg, #4F46E5 0%, #3B82F6 100%)",
-                boxShadow: "0 4px 14px rgba(79,70,229,0.4)",
-              }}
-              onMouseEnter={(e) => {
-                if (!loading)
-                  e.currentTarget.style.boxShadow =
-                    "0 6px 20px rgba(79,70,229,0.55)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow =
-                  "0 4px 14px rgba(79,70,229,0.4)";
+                background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
+                boxShadow: "0 4px 18px rgba(79,70,229,0.45)",
+                letterSpacing: "-0.01em",
               }}
             >
               {loading ? "Verifying…" : "Sign in →"}
             </button>
           </form>
 
-          <p
-            className="mt-5 text-center text-xs"
-            style={{ color: "#4A5568" }}
-          >
-            Protected by bearer token · AskToAct internal use only
+          <p className="mt-5 text-center text-xs" style={{ color: "#3A4460" }}>
+            Bearer token · AskToAct internal only
           </p>
         </div>
       </div>
