@@ -24,7 +24,7 @@ async function initStripe(): Promise<void> {
     return;
   }
   try {
-    await runMigrations({ databaseUrl, schema: "stripe" } as Parameters<typeof runMigrations>[0]);
+    await runMigrations({ databaseUrl });
     const stripeSync = await getStripeSync();
     const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
     if (domain) {
