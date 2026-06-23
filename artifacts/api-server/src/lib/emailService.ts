@@ -5,14 +5,31 @@ const FROM_NAME = process.env["FROM_NAME"] ?? "AskToAct";
 const PROD_URL = process.env["PROD_URL"] ?? "https://connect.asktoact.ai";
 
 function logoHtml(): string {
+  const logoB64 =
+    "PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9u" +
+    "ZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZGVmcz4KICAgIDxsaW5l" +
+    "YXJHcmFkaWVudCBpZD0iZyIgeDE9IjAiIHkxPSIwIiB4Mj0iNDgiIHkyPSI0OCIgZ3JhZGllbnRV" +
+    "bml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9y" +
+    "PSIjNDMzOENBIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iNTUlIiBzdG9wLWNvbG9yPSIjNEY0NkU1" +
+    "Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzBFQTVFOSIvPgogICAg" +
+    "PC9saW5lYXJHcmFkaWVudD4KICAgIDxyYWRpYWxHcmFkaWVudCBpZD0iZ2xvdyIgY3g9IjQwJSIg" +
+    "Y3k9IjMwJSIgcj0iNjAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0icmdi" +
+    "YSgyNTUsMjU1LDI1NSwwLjE4KSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29s" +
+    "b3I9InJnYmEoMjU1LDI1NSwyNTUsMCkiLz4KICAgIDwvcmFkaWFsR3JhZGllbnQ+CiAgPC9kZWZz" +
+    "PgogIDxyZWN0IHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgcng9IjEzIiBmaWxsPSJ1cmwoI2cpIi8+" +
+    "CiAgPHJlY3Qgd2lkdGg9IjQ4IiBoZWlnaHQ9IjQ4IiByeD0iMTMiIGZpbGw9InVybCgjZ2xvdyki" +
+    "Lz4KICA8cGF0aCBkPSJNMTEgNSBDMTEgMy4zIDEyLjMgMiAxNCAyIEwzNCAyIEMzNS43IDIgMzcg" +
+    "My4zIDM3IDUgTDM3IDI3IEMzNyAyOC43IDM1LjcgMzAgMzQgMzAgTDI3LjUgMzAgTDI0IDM2LjUg" +
+    "TDIwLjUgMzAgTDE0IDMwIEMxMi4zIDMwIDExIDI4LjcgMTEgMjcgWiIgZmlsbD0id2hpdGUiIGZp" +
+    "bGwtb3BhY2l0eT0iMC45NyIvPgogIDxsaW5lIHgxPSIxNS41IiB5MT0iMTYiIHgyPSIyOS41IiB5" +
+    "Mj0iMTYiIHN0cm9rZT0iIzQzMzhDQSIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0i" +
+    "cm91bmQiLz4KICA8cG9seWxpbmUgcG9pbnRzPSIyNSwxMSAzMSwxNiAyNSwyMSIgZmlsbD0ibm9u" +
+    "ZSIgc3Ryb2tlPSIjNDMzOENBIiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lY2FwPSJyb3Vu" +
+    "ZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K";
   return `<table cellpadding="0" cellspacing="0">
   <tr>
     <td style="vertical-align:middle;">
-      <table cellpadding="0" cellspacing="0" style="background-color:#4F46E5;border-radius:8px;width:28px;height:28px;">
-        <tr><td align="center" valign="middle">
-          <div style="width:10px;height:10px;border-radius:5px;background:#ffffff;"></div>
-        </td></tr>
-      </table>
+      <img src="data:image/svg+xml;base64,${logoB64}" width="32" height="32" alt="AskToAct" style="display:block;border:0;" />
     </td>
     <td style="padding-left:10px;font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:-0.01em;vertical-align:middle;">AskToAct</td>
   </tr>
