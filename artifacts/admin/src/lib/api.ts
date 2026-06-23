@@ -77,6 +77,33 @@ export type UsageMonth = {
   totalCalls: number;
 };
 
+export type ToolBreakdown = {
+  toolName: string;
+  callCount: number;
+  errorCount: number;
+  lastCallAt: string | null;
+};
+
+export type UserUsage = {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string;
+  totalCalls: number;
+  totalErrors: number;
+  lastCallAt: string | null;
+  tools: ToolBreakdown[];
+};
+
+export type UsageDetail = {
+  year: number;
+  month: number;
+  totalCalls: number;
+  totalErrors: number;
+  activeUsers: number;
+  users: UserUsage[];
+};
+
 export type InviteResult = {
   sent: number;
   skipped: number;
@@ -133,6 +160,9 @@ export const api = {
 
   getUsage: (firmId: string) =>
     apiFetch<{ data: UsageMonth[] }>(`/firms/${firmId}/usage`).then((r) => r.data),
+
+  getUsageDetail: (firmId: string, year: number, month: number) =>
+    apiFetch<UsageDetail>(`/firms/${firmId}/usage/detail?year=${year}&month=${month}`),
 
   billingPortal: (firmId: string) =>
     apiFetch<{ url: string }>(`/firms/${firmId}/billing-portal`, {

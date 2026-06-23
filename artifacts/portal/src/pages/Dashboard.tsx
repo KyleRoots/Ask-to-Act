@@ -1,5 +1,7 @@
 import { useClerk, useUser } from "@clerk/react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { portalApi } from "@/lib/api";
 
 const BG = "hsl(220 50% 4%)";
 const SURFACE = "hsl(222 45% 8%)";
@@ -25,17 +27,26 @@ function LogoIcon({ size = 28 }: { size?: number }) {
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const quickLinks = [
-  { icon: "👥", label: "Team Members", desc: "Manage who has AI access on your team", soon: true, href: null },
-  { icon: "📊", label: "Usage & Activity", desc: "Track how your team uses AI tools each month", soon: true, href: null },
-  { icon: "🔗", label: "AI Connections", desc: "Connect ChatGPT, Claude, or Gemini", soon: true, href: null },
-  { icon: "🛟", label: "Support & Feedback", desc: "Report a bug, request a feature, or ask a question", soon: false, href: "/support" },
-];
+type QuickLink = { icon: string; label: string; desc: string; soon: boolean; href: string | null };
+
+function buildQuickLinks(isAdmin: boolean): QuickLink[] {
+  return [
+    { icon: "👥", label: "Team Members", desc: "Manage who has AI access on your team", soon: true, href: null },
+    isAdmin
+      ? { icon: "📊", label: "Usage & Activity", desc: "Track how your team uses AI tools each month", soon: false, href: "/team-usage" }
+      : { icon: "📊", label: "Usage & Activity", desc: "Track how your team uses AI tools each month", soon: true, href: null },
+    { icon: "🔗", label: "AI Connections", desc: "Connect ChatGPT, Claude, or Gemini", soon: true, href: null },
+    { icon: "🛟", label: "Support & Feedback", desc: "Report a bug, request a feature, or ask a question", soon: false, href: "/support" },
+  ];
+}
 
 export default function Dashboard() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const [, navigate] = useLocation();
+
+  const { data: me } = useQuery({ queryKey: ["portal-me"], queryFn: portalApi.me });
+  const quickLinks = buildQuickLinks(me?.role === "admin");
 
   const firstName = user?.firstName ?? user?.username ?? "there";
 

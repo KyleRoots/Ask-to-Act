@@ -2,9 +2,12 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import rateLimit from "express-rate-limit";
+import { clerkMiddleware } from "@clerk/express";
+import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
+  getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { logger } from "./lib/logger";
@@ -63,6 +66,18 @@ app.post(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Clerk session auth — populates getAuth(req) for portal endpoints. Resolves
+// the publishable key from the request host so multi-domain/custom-domain
+// flows work; falls back to CLERK_PUBLISHABLE_KEY otherwise.
+app.use(
+  clerkMiddleware((req) => ({
+    publishableKey: publishableKeyFromHost(
+      getClerkProxyHost(req) ?? "",
+      process.env.CLERK_PUBLISHABLE_KEY,
+    ),
+  })),
+);
 
 const maxRequestsPerWindow = Number(process.env["RATE_LIMIT_MAX"] ?? 120);
 const windowMs = Number(process.env["RATE_LIMIT_WINDOW_MS"] ?? 60_000);

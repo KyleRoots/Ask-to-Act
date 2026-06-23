@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import Home from "@/pages/Home";
 import Dashboard from "@/pages/Dashboard";
 import Support from "@/pages/Support";
+import TeamUsage from "@/pages/TeamUsage";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -205,6 +206,12 @@ function ClerkProviderWithRoutes() {
           <Route path="/sign-in/*?" component={SignInPage} />
           <Route path="/sign-up/*?" component={SignUpPage} />
           <Route path="/dashboard" component={DashboardRoute} />
+          <Route path="/team-usage" component={() => (
+            <>
+              <Show when="signed-in"><TeamUsage /></Show>
+              <Show when="signed-out"><Redirect to="/" /></Show>
+            </>
+          )} />
           <Route path="/support" component={() => (
             <>
               <Show when="signed-in"><Support /></Show>

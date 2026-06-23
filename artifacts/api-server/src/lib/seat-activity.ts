@@ -8,7 +8,7 @@
  * All writes are fire-and-forget — they never block a tool response.
  */
 
-import { db, usersTable, seatActivityTable } from "@workspace/db";
+import { db, usersTable, seatActivityTable, toolUsageTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "./logger.js";
 
@@ -52,6 +52,62 @@ export async function trackSeatActivity(userId: string): Promise<void> {
   } catch (err) {
     // Never let tracking errors surface to the caller
     logger.warn({ err, userId }, "seat-activity tracking failed");
+  }
+}
+
+/**
+ * Upserts a per-tool usage row for the given user in the current calendar
+ * month. Increments call_count on every call and error_count when the call
+ * failed. No-ops if the user has no firm_id (legacy / service caller).
+ * Fire-and-forget — never blocks or surfaces errors to the caller.
+ */
+export async function trackToolUsage(
+  userId: string,
+  toolName: string,
+  isError = false,
+): Promise<void> {
+  try {
+    const [user] = await db
+      .select({ firmId: usersTable.firmId })
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .limit(1);
+
+    if (!user?.firmId) return;
+
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth() + 1; // 1-indexed
+
+    await db
+      .insert(toolUsageTable)
+      .values({
+        userId,
+        firmId: user.firmId,
+        toolName,
+        year,
+        month,
+        callCount: 1,
+        errorCount: isError ? 1 : 0,
+        firstCallAt: now,
+        lastCallAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          toolUsageTable.userId,
+          toolUsageTable.toolName,
+          toolUsageTable.year,
+          toolUsageTable.month,
+        ],
+        set: {
+          callCount: sql`${toolUsageTable.callCount} + 1`,
+          errorCount: sql`${toolUsageTable.errorCount} + ${isError ? 1 : 0}`,
+          lastCallAt: now,
+        },
+      });
+  } catch (err) {
+    // Never let tracking errors surface to the caller
+    logger.warn({ err, userId, toolName }, "tool-usage tracking failed");
   }
 }
 

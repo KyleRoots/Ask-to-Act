@@ -39,7 +39,7 @@ import {
 import { getUserSession } from "./bullhorn-auth.js";
 import { sendSupportEmail } from "./emailService.js";
 import type { CallerIdentity } from "../middlewares/bearer-auth.js";
-import { trackSeatActivity } from "./seat-activity.js";
+import { trackSeatActivity, trackToolUsage } from "./seat-activity.js";
 import { logger } from "./logger.js";
 import { responseCache, stableKey } from "./cache.js";
 import {
@@ -225,10 +225,11 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
     try {
       const result = await withLogging(toolName, args, fn);
-      track();
+      track(toolName, false);
       return { content: [{ type: "text", text: formatResult(result) }] };
     } catch (err) {
       if (err instanceof BullhornPermissionError) {
+        track(toolName, true);
         return {
           content: [
             {
@@ -241,14 +242,19 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
           ],
         };
       }
+      track(toolName, true);
       throw err;
     }
   }
 
-  /** Fire-and-forget: increments this month's active-seat count for the caller. */
-  function track() {
+  /**
+   * Fire-and-forget: increments this month's active-seat count for the caller
+   * AND the per-tool usage aggregate (for accountability analytics).
+   */
+  function track(toolName: string, isError: boolean) {
     if (caller?.kind === "user") {
       trackSeatActivity(caller.userId).catch(() => {});
+      trackToolUsage(caller.userId, toolName, isError).catch(() => {});
     }
   }
 
@@ -262,10 +268,16 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     args: Record<string, unknown>,
     fn: () => Promise<unknown>,
   ) {
-    return runTool(toolName, args, fn).then((result) => {
-      track();
-      return result;
-    });
+    return runTool(toolName, args, fn).then(
+      (result) => {
+        track(toolName, false);
+        return result;
+      },
+      (err) => {
+        track(toolName, true);
+        throw err;
+      },
+    );
   }
 
   tool(

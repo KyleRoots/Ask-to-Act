@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, firmsTable, usersTable, seatActivityTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { buildFirmUsageDetail } from "../lib/usage-report.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
@@ -464,6 +465,36 @@ router.get(
     );
 
     res.json({ data });
+  },
+);
+
+/**
+ * GET /api/firms/:id/usage/detail?year=YYYY&month=M
+ * Admin-only. Per-user, per-tool usage breakdown for the firm in a given
+ * month. Defaults to the current UTC month when year/month are omitted.
+ */
+router.get(
+  "/firms/:id/usage/detail",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    const now = new Date();
+    const year = Number(req.query.year) || now.getUTCFullYear();
+    const month = Number(req.query.month) || now.getUTCMonth() + 1;
+
+    const detail = await buildFirmUsageDetail(id, year, month);
+    res.json({ year, month, ...detail });
   },
 );
 
