@@ -137,4 +137,9 @@ export const api = {
     apiFetch<{ url: string }>(`/firms/${firmId}/billing-portal`, {
       method: "POST",
     }),
+
+  generateCheckout: (firmId: string) =>
+    apiFetch<{ checkoutUrl: string; message: string }>(`/firms/${firmId}/checkout`, {
+      method: "POST",
+    }),
 };

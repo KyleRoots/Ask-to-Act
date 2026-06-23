@@ -478,4 +478,78 @@ router.get(
   },
 );
 
+/**
+ * POST /api/firms/:id/checkout
+ * Admin-only. Generates a Stripe checkout URL for an existing firm.
+ * Creates a Stripe customer first if the firm doesn't have one yet.
+ * Use this to convert a pilot firm to a paid subscription.
+ */
+router.post(
+  "/firms/:id/checkout",
+  bearerAuth,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    const [firm] = await db.select().from(firmsTable).where(eq(firmsTable.id, id));
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    try {
+      const { getUncachableStripeClient } = await import("../lib/stripe/stripeClient.js");
+      const stripe = await getUncachableStripeClient();
+
+      let customerId = firm.stripeCustomerId;
+
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          name: firm.name,
+          metadata: { firmId: id },
+        });
+        customerId = customer.id;
+        await db
+          .update(firmsTable)
+          .set({ stripeCustomerId: customerId, updatedAt: new Date() })
+          .where(eq(firmsTable.id, id));
+        logger.info({ firmId: id, customerId }, "Stripe customer created for existing firm");
+      }
+
+      const prices = await stripe.prices.search({
+        query: "product_name:'AskToAct Platform' AND active:'true'",
+      });
+      const priceId = prices.data[0]?.id;
+      if (!priceId) {
+        res.status(400).json({ error: "Platform Plan price not found in Stripe. Run seed:stripe to create products." });
+        return;
+      }
+
+      const baseUrl =
+        process.env.NODE_ENV === "production"
+          ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
+          : `http://localhost:${process.env.PORT}`;
+
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        payment_method_types: ["card"],
+        line_items: [{ price: priceId, quantity: 1 }],
+        mode: "subscription",
+        subscription_data: {
+          metadata: { firmId: id, seatLimit: String(firm.seatLimit ?? 10) },
+        },
+        success_url: `${baseUrl}/api/firms/${id}?subscribed=1`,
+        cancel_url: `${baseUrl}/api/firms/${id}?canceled=1`,
+      });
+
+      res.json({
+        checkoutUrl: session.url,
+        message: "Checkout session created. Share this URL with the firm admin to complete payment.",
+      });
+    } catch (err) {
+      logger.error({ err }, "Failed to create checkout session");
+      res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  },
+);
+
 export default router;

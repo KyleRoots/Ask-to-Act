@@ -9,6 +9,17 @@ const BG = "hsl(220 50% 4%)";
 const SURFACE = "hsl(222 45% 8%)";
 const BORDER = "hsl(217 35% 18%)";
 
+const GHOST_HOVER = {
+  enter: (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.color = "#E2E8F0";
+    e.currentTarget.style.borderColor = "rgba(255,255,255,.15)";
+  },
+  leave: (e: React.MouseEvent<HTMLButtonElement>, color = "#6B7A99") => {
+    e.currentTarget.style.color = color;
+    e.currentTarget.style.borderColor = BORDER;
+  },
+};
+
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, React.CSSProperties> = {
     active: { background: "rgba(16,185,129,.12)", color: "#34D399", border: "1px solid rgba(52,211,153,.25)" },
@@ -57,7 +68,6 @@ function CreateFirmModal({
         className="w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl border border-b-0 sm:border-b p-6 sm:p-7 shadow-2xl"
         style={{ background: SURFACE, borderColor: BORDER }}
       >
-        {/* Drag handle on mobile */}
         <div className="flex justify-center mb-5 sm:hidden">
           <div className="w-10 h-1 rounded-full" style={{ background: BORDER }} />
         </div>
@@ -103,15 +113,17 @@ function CreateFirmModal({
         <div className="flex gap-3 mt-7">
           <button
             onClick={onClose}
-            className="flex-1 rounded-xl py-3 text-sm font-medium"
+            className="flex-1 rounded-xl py-3 text-sm font-medium transition-colors"
             style={{ background: "hsl(217 35% 15%)", color: "#6B7A99", border: `1px solid ${BORDER}` }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
           >
             Cancel
           </button>
           <button
             onClick={() => mutation.mutate()}
             disabled={!name.trim() || mutation.isPending}
-            className="flex-1 rounded-xl py-3 text-sm font-bold text-white transition-all disabled:opacity-50 active:scale-[0.98]"
+            className="flex-1 rounded-xl py-3 text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-50 active:scale-[0.98]"
             style={{
               background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
               boxShadow: "0 4px 14px rgba(79,70,229,0.35)",
@@ -166,6 +178,8 @@ export default function FirmsList() {
             onClick={() => { clearToken(); navigate("/login"); }}
             className="text-sm px-3 py-1.5 rounded-lg transition-colors"
             style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+            onMouseEnter={GHOST_HOVER.enter}
+            onMouseLeave={(e) => GHOST_HOVER.leave(e)}
           >
             Sign out
           </button>
@@ -187,18 +201,26 @@ export default function FirmsList() {
                   href={checkoutResult.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mt-1 text-xs font-medium underline break-all"
+                  className="mt-1 text-xs font-medium underline break-all transition-colors hover:text-[#34D399]"
                   style={{ color: "#34D399" }}
                 >
                   Open Stripe Checkout →
                 </a>
               )}
             </div>
-            <button onClick={() => setCheckoutResult(null)} className="text-xs shrink-0" style={{ color: "#6EE7B7" }}>✕</button>
+            <button
+              onClick={() => setCheckoutResult(null)}
+              className="text-xs shrink-0 transition-colors"
+              style={{ color: "#6EE7B7" }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "#F0FDF4"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "#6EE7B7"; }}
+            >
+              ✕
+            </button>
           </div>
         )}
 
-        {/* Stats — 1-col mobile, 3-col tablet+ */}
+        {/* Stats */}
         <div className="grid grid-cols-1 xs:grid-cols-3 sm:grid-cols-3 gap-3 sm:gap-4 mb-8 sm:mb-10">
           {[
             { label: "Total firms", value: firms?.length ?? "—" },
@@ -238,7 +260,7 @@ export default function FirmsList() {
           </div>
           <button
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.97] shrink-0"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.97] shrink-0"
             style={{
               background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
               boxShadow: "0 4px 14px rgba(79,70,229,0.35)",
@@ -256,17 +278,24 @@ export default function FirmsList() {
           </p>
         )}
 
-        {/* Mobile card list */}
         {firms && (
           <>
-            {/* Mobile: card list (visible below sm) */}
+            {/* Mobile: card list */}
             <div className="sm:hidden space-y-3">
               {firms.map((firm: FirmRow) => (
                 <button
                   key={firm.id}
-                  className="w-full text-left rounded-2xl p-4 transition-colors"
+                  className="w-full text-left rounded-2xl p-4 transition-all"
                   style={{ background: SURFACE, border: `1px solid ${BORDER}` }}
                   onClick={() => navigate(`/firms/${firm.id}`)}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "hsl(222 45% 11%)";
+                    e.currentTarget.style.borderColor = "rgba(79,70,229,.4)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = SURFACE;
+                    e.currentTarget.style.borderColor = BORDER;
+                  }}
                 >
                   <div className="flex items-center gap-3 mb-3">
                     <div
@@ -301,7 +330,7 @@ export default function FirmsList() {
               )}
             </div>
 
-            {/* Desktop: table (visible from sm) */}
+            {/* Desktop: table */}
             <div className="hidden sm:block rounded-2xl overflow-hidden" style={{ border: `1px solid ${BORDER}` }}>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

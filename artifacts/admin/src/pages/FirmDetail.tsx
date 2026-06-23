@@ -147,7 +147,15 @@ function AddUsersModal({ firmId, onClose, onDone }: AddUsersModalProps) {
               &nbsp; (role optional, defaults to recruiter)
             </p>
           </div>
-          <button onClick={onClose} className="text-xl leading-none" style={{ color: "#3A4460" }}>✕</button>
+          <button
+            onClick={onClose}
+            className="text-xl leading-none transition-colors"
+            style={{ color: "#3A4460" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#6B7A99"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#3A4460"; }}
+          >
+            ✕
+          </button>
         </div>
 
         {!isDone ? (
@@ -196,17 +204,16 @@ function AddUsersModal({ firmId, onClose, onDone }: AddUsersModalProps) {
                 onClick={onClose}
                 className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
                 style={{ background: "hsl(217 35% 14%)", color: "#6B7A99", border: `1px solid ${BORDER}` }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmit}
                 disabled={isSubmitting || parsed.length === 0}
-                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity"
-                style={{
-                  background: "linear-gradient(135deg,#4F46E5,#0EA5E9)",
-                  opacity: isSubmitting || parsed.length === 0 ? 0.5 : 1,
-                }}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg,#4F46E5,#0EA5E9)" }}
               >
                 {isSubmitting ? "Adding…" : `Add ${parsed.length || ""} user${parsed.length !== 1 ? "s" : ""}`}
               </button>
@@ -230,8 +237,10 @@ function AddUsersModal({ firmId, onClose, onDone }: AddUsersModalProps) {
             </div>
             <button
               onClick={onClose}
-              className="w-full px-4 py-2.5 rounded-xl text-sm font-medium"
+              className="w-full px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
               style={{ background: "hsl(217 35% 14%)", color: "#6B7A99", border: `1px solid ${BORDER}` }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
             >
               Close
             </button>
@@ -245,6 +254,7 @@ function AddUsersModal({ firmId, onClose, onDone }: AddUsersModalProps) {
 export default function FirmDetail({ firmId }: { firmId: string }) {
   const [tab, setTab] = useState<"overview" | "users" | "usage">("overview");
   const [showAddUsers, setShowAddUsers] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -273,6 +283,16 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
       queryClient.invalidateQueries({ queryKey: ["firm", firmId] });
       queryClient.invalidateQueries({ queryKey: ["firms"] });
       toast({ title: "Firm activated as pilot ✓" });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const checkoutMutation = useMutation({
+    mutationFn: () => api.generateCheckout(firmId),
+    onSuccess: (data) => {
+      setCheckoutUrl(data.checkoutUrl);
+      queryClient.invalidateQueries({ queryKey: ["firm", firmId] });
+      toast({ title: "Checkout link generated ✓" });
     },
     onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
@@ -331,9 +351,13 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     firm.subscriptionStatus !== "active" &&
     firm.subscriptionStatus !== "trialing";
 
+  const isActivePilot =
+    firm &&
+    firm.subscriptionStatus === "active" &&
+    !firm.stripeSubscriptionId;
+
   return (
     <div className="min-h-screen min-h-dvh" style={{ background: BG }}>
-      {/* Hidden logo file input */}
       <input
         ref={logoInputRef}
         type="file"
@@ -346,7 +370,6 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
         }}
       />
 
-      {/* Add Users Modal */}
       {showAddUsers && firm && (
         <AddUsersModal
           firmId={firmId}
@@ -373,6 +396,8 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
             onClick={() => navigate("/firms")}
             className="flex items-center gap-1.5 text-sm transition-colors shrink-0"
             style={{ color: "#6B7A99" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; }}
           >
             ← <span className="hidden sm:inline">Firms</span>
           </button>
@@ -383,6 +408,8 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
           onClick={() => { clearToken(); navigate("/login"); }}
           className="text-sm px-3 py-1.5 rounded-lg transition-colors"
           style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
         >
           Sign out
         </button>
@@ -403,11 +430,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                 className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl overflow-hidden shrink-0 flex items-center justify-center"
                 style={{ background: SURFACE, border: `1px solid ${BORDER}` }}
               >
-                <img
-                  src={firm.logoUrl}
-                  alt={`${firm.name} logo`}
-                  className="w-full h-full object-contain p-1"
-                />
+                <img src={firm.logoUrl} alt={`${firm.name} logo`} className="w-full h-full object-contain p-1" />
               </div>
             ) : (
               <div
@@ -471,6 +494,8 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                     color: tab === t ? "#818CF8" : "#3A4460",
                     marginBottom: "-1px",
                   }}
+                  onMouseEnter={(e) => { if (tab !== t) e.currentTarget.style.color = "#6B7A99"; }}
+                  onMouseLeave={(e) => { if (tab !== t) e.currentTarget.style.color = "#3A4460"; }}
                 >
                   {t}
                 </button>
@@ -481,7 +506,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
           {/* ── OVERVIEW TAB ── */}
           {tab === "overview" && (
             <div className="space-y-5">
-              {/* Pilot activation banner */}
+              {/* No subscription → activate as pilot */}
               {isPilotEligible && (
                 <div
                   className="rounded-2xl p-5 flex items-center justify-between gap-4 flex-wrap"
@@ -496,14 +521,79 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                   <button
                     onClick={() => activateMutation.mutate()}
                     disabled={activateMutation.isPending}
-                    className="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity"
-                    style={{
-                      background: "linear-gradient(135deg,#4F46E5,#0EA5E9)",
-                      opacity: activateMutation.isPending ? 0.6 : 1,
-                    }}
+                    className="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
+                    style={{ background: "linear-gradient(135deg,#4F46E5,#0EA5E9)" }}
                   >
                     {activateMutation.isPending ? "Activating…" : "Activate as Pilot"}
                   </button>
+                </div>
+              )}
+
+              {/* Active pilot → convert to paid */}
+              {isActivePilot && (
+                <div
+                  className="rounded-2xl p-5 flex items-center justify-between gap-4 flex-wrap"
+                  style={{ background: "rgba(16,185,129,.05)", border: "1px solid rgba(52,211,153,.2)" }}
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-white mb-0.5">Currently on free pilot</p>
+                    <p className="text-xs" style={{ color: "#6B7A99" }}>
+                      Generate a Stripe checkout link to convert this firm to a paid subscription.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => checkoutMutation.mutate()}
+                    disabled={checkoutMutation.isPending}
+                    className="shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-60"
+                    style={{ background: "linear-gradient(135deg,#059669,#0EA5E9)" }}
+                  >
+                    {checkoutMutation.isPending ? "Generating…" : "Start paid subscription →"}
+                  </button>
+                </div>
+              )}
+
+              {/* Checkout URL banner */}
+              {checkoutUrl && (
+                <div
+                  className="rounded-2xl p-4 flex items-start gap-3"
+                  style={{ background: "rgba(16,185,129,.07)", border: "1px solid rgba(52,211,153,.2)" }}
+                >
+                  <span style={{ color: "#34D399" }}>✓</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium mb-1" style={{ color: "#6EE7B7" }}>
+                      Checkout link ready — share with the firm admin:
+                    </p>
+                    <a
+                      href={checkoutUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-mono break-all underline transition-colors hover:text-[#34D399]"
+                      style={{ color: "#34D399" }}
+                    >
+                      {checkoutUrl}
+                    </a>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(checkoutUrl);
+                          toast({ title: "Checkout link copied" });
+                        }}
+                        className="text-xs px-3 py-1.5 rounded-lg transition-all hover:opacity-90"
+                        style={{ background: "rgba(52,211,153,.15)", color: "#34D399", border: "1px solid rgba(52,211,153,.3)" }}
+                      >
+                        Copy link
+                      </button>
+                      <button
+                        onClick={() => setCheckoutUrl(null)}
+                        className="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                        style={{ color: "#6B7A99" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; }}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -554,6 +644,8 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                         disabled={logoMutation.isPending}
                         className="px-4 py-2 rounded-xl text-sm font-medium transition-colors"
                         style={{ background: "hsl(217 35% 14%)", color: "#6B7A99", border: `1px solid ${BORDER}` }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
                       >
                         {logoMutation.isPending ? "Uploading…" : firm.logoUrl ? "Replace logo" : "Upload logo"}
                       </button>
@@ -568,8 +660,8 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                       onClick={openBillingPortal}
                       className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
                       style={{ background: "hsl(217 35% 14%)", color: "#6B7A99", border: `1px solid ${BORDER}` }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = "#F8FAFC"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
                     >
                       ↗ Open Stripe Billing Portal
                     </button>
@@ -582,11 +674,10 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
           {/* ── USERS TAB ── */}
           {tab === "users" && (
             <div className="space-y-4">
-              {/* Toolbar */}
               <div className="flex items-center gap-2.5 flex-wrap">
                 <button
                   onClick={() => setShowAddUsers(true)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
                   style={{ background: "linear-gradient(135deg,#4F46E5,#0EA5E9)" }}
                 >
                   + Add users
@@ -595,13 +686,14 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                 <button
                   onClick={() => inviteMutation.mutate(false)}
                   disabled={inviteMutation.isPending}
-                  className="px-4 py-2.5 rounded-xl text-sm font-medium transition-opacity"
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-60"
                   style={{
                     background: "rgba(16,185,129,.1)",
                     color: "#34D399",
                     border: "1px solid rgba(52,211,153,.25)",
-                    opacity: inviteMutation.isPending ? 0.6 : 1,
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.18)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.1)"; }}
                   title="Send invites to users who haven't been invited yet"
                 >
                   {inviteMutation.isPending ? "Sending…" : "✉ Send invites"}
@@ -609,13 +701,14 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                 <button
                   onClick={() => inviteMutation.mutate(true)}
                   disabled={inviteMutation.isPending}
-                  className="px-4 py-2.5 rounded-xl text-sm font-medium transition-opacity"
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-60"
                   style={{
                     background: "rgba(79,70,229,.08)",
                     color: "#818CF8",
                     border: "1px solid rgba(129,140,248,.25)",
-                    opacity: inviteMutation.isPending ? 0.6 : 1,
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(79,70,229,.16)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(79,70,229,.08)"; }}
                   title="Re-send invites to all unenrolled users"
                 >
                   ↺ Resend invites
@@ -667,8 +760,10 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                             {!u.enrolled && (
                               <button
                                 onClick={() => { navigator.clipboard.writeText(u.enrollUrl); }}
-                                className="text-xs underline"
+                                className="text-xs underline transition-colors"
                                 style={{ color: "#38bdf8" }}
+                                onMouseEnter={(e) => { e.currentTarget.style.color = "#7DD3FC"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.color = "#38bdf8"; }}
                               >
                                 Copy link
                               </button>
@@ -742,8 +837,10 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                       navigator.clipboard.writeText(u.enrollUrl);
                                       toast({ title: "Enrollment link copied" });
                                     }}
-                                    className="text-xs px-2.5 py-1 rounded-lg transition-colors"
+                                    className="text-xs px-2.5 py-1 rounded-lg transition-all"
                                     style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.16)"; e.currentTarget.style.color = "#7DD3FC"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.08)"; e.currentTarget.style.color = "#38bdf8"; }}
                                   >
                                     Copy link
                                   </button>
