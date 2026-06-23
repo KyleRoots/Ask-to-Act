@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "golden": "LOG_LEVEL=silent tsx src/golden/harness.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed:stripe": "tsx src/scripts/seed-stripe-products.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.30",

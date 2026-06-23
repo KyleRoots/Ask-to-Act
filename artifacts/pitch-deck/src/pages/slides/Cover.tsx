@@ -1,11 +1,13 @@
+import { LogoIcon } from "@/components/Logo";
+
 export default function Cover() {
   return (
     <div className="w-screen h-screen overflow-hidden relative bg-bg text-text">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(56,189,248,0.18),_transparent_55%)]" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(251,191,36,0.08),_transparent_50%)]" />
 
-      <div className="absolute top-[6vh] left-[6vw] flex items-center gap-[1vw]">
-        <div className="w-[1.2vw] h-[1.2vw] rounded-full bg-accent" />
+      <div className="absolute top-[6vh] left-[6vw] flex items-center gap-[1.2vw]">
+        <LogoIcon vw={3.2} />
         <span className="font-display text-[1.4vw] tracking-[0.3em] uppercase text-muted">
           Internal Stakeholder Briefing
         </span>

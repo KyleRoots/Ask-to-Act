@@ -1,3 +1,5 @@
+import { LogoWordmark } from "@/components/Logo";
+
 export default function Problem() {
   return (
     <div className="w-screen h-screen overflow-hidden relative bg-bg text-text">
@@ -10,7 +12,7 @@ export default function Problem() {
             01 · The Problem
           </span>
         </div>
-        <span className="font-body text-[1.2vw] text-muted">AskToAct</span>
+        <LogoWordmark vw={2.2} />
       </div>
 
       <div className="absolute top-[18vh] left-[6vw] right-[6vw]">
