@@ -37,6 +37,7 @@ import {
   SUPPORTED_ENTITIES,
 } from "./bullhorn-client.js";
 import { getUserSession } from "./bullhorn-auth.js";
+import { sendSupportEmail } from "./emailService.js";
 import type { CallerIdentity } from "../middlewares/bearer-auth.js";
 import { trackSeatActivity } from "./seat-activity.js";
 import { logger } from "./logger.js";
@@ -1046,6 +1047,68 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       runWriteTool("create_job_submission", { candidateId, jobOrderId, status }, async () => {
         const session = await resolveWriteSession();
         return createJobSubmission(session, { candidateId, jobOrderId, status });
+      }),
+  );
+
+  writeTool(
+    "create_support_ticket",
+    "Sends a support request, bug report, or feature suggestion directly to the AskToAct team. " +
+      "Use this when the user mentions a problem with the connector, wants to report a bug, " +
+      "request a new feature, or has a question that requires human follow-up from the AskToAct team. " +
+      "The team will respond via email — include the user's email in reporter_email so they can be reached. " +
+      "Always confirm the subject and description with the user before submitting. " +
+      "Do NOT use this for Bullhorn data operations — this is only for AskToAct product support.",
+    {
+      type: z
+        .enum(["bug", "feature", "question"])
+        .describe("Type of ticket: 'bug' for errors or unexpected behaviour, 'feature' for enhancement requests, 'question' for general queries."),
+      subject: z
+        .string()
+        .min(3)
+        .describe("Short title summarising the issue or request (e.g. 'Candidate search returns wrong results')."),
+      description: z
+        .string()
+        .min(10)
+        .describe(
+          "Full details — what happened, what was expected, steps to reproduce (for bugs), or the full question/feature idea.",
+        ),
+      reporter_name: z
+        .string()
+        .optional()
+        .describe("Name of the person submitting the ticket. Use the user's name from the conversation if known."),
+      reporter_email: z
+        .string()
+        .email()
+        .optional()
+        .describe(
+          "Email address for the AskToAct team to reply to. Use the user's email if known from the conversation.",
+        ),
+    },
+    async ({ type, subject, description, reporter_name, reporter_email }) =>
+      runWriteTool("create_support_ticket", { type, subject }, async () => {
+        const callerLabel =
+          caller?.kind === "user"
+            ? `User ${caller.userId}`
+            : caller?.kind === "firm"
+              ? `Firm ${caller.firmId} (shared token)`
+              : "Unknown connector user";
+
+        await sendSupportEmail({
+          type,
+          subject,
+          message: description,
+          userName: reporter_name ?? callerLabel,
+          userEmail: reporter_email ?? "noreply@asktoact.ai",
+        });
+
+        return {
+          submitted: true,
+          ticket_type: type,
+          subject,
+          message:
+            "Your support ticket has been sent to the AskToAct team." +
+            (reporter_email ? ` They will follow up at ${reporter_email}.` : " Provide your email next time for a direct reply."),
+        };
       }),
   );
 

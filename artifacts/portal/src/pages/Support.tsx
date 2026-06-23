@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useUser, useClerk } from "@clerk/react";
 import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import { Toaster } from "@/components/ui/toaster";
 
 const BG = "hsl(220 50% 4%)";
 const SURFACE = "hsl(222 45% 8%)";
@@ -11,31 +13,10 @@ const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 type TicketType = "bug" | "feature" | "question";
 
-const TYPES: { value: TicketType; label: string; icon: string; desc: string; subjectPrefix: string; bodyPrompt: string }[] = [
-  {
-    value: "bug",
-    label: "Bug Report",
-    icon: "🐛",
-    desc: "Something isn't working as expected",
-    subjectPrefix: "[Bug]",
-    bodyPrompt: "What happened?\n\nWhat did you expect to happen?\n\nSteps to reproduce:\n1. \n2. \n3. ",
-  },
-  {
-    value: "feature",
-    label: "Feature Request",
-    icon: "✨",
-    desc: "Suggest an improvement or new capability",
-    subjectPrefix: "[Feature Request]",
-    bodyPrompt: "What would you like to see?\n\nHow would it help your workflow?\n\nAny additional context:",
-  },
-  {
-    value: "question",
-    label: "Question",
-    icon: "❓",
-    desc: "General question or clarification",
-    subjectPrefix: "[Question]",
-    bodyPrompt: "What would you like to know?\n\n",
-  },
+const TYPES: { value: TicketType; label: string; icon: string; desc: string }[] = [
+  { value: "bug", label: "Bug Report", icon: "🐛", desc: "Something isn't working as expected" },
+  { value: "feature", label: "Feature Request", icon: "✨", desc: "Suggest an improvement or new capability" },
+  { value: "question", label: "Question", icon: "❓", desc: "General question or clarification" },
 ];
 
 function LogoIcon({ size = 26 }: { size?: number }) {
@@ -60,22 +41,44 @@ export default function Support() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+
   const [ticketType, setTicketType] = useState<TicketType>("bug");
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const userEmail = user?.primaryEmailAddress?.emailAddress ?? "";
-  const userName = user?.fullName ?? user?.firstName ?? user?.username ?? "";
+  const userName = user?.fullName ?? user?.firstName ?? user?.username ?? "Portal user";
 
-  const selected = TYPES.find((t) => t.value === ticketType)!;
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!subject.trim() || !message.trim()) return;
 
-  function buildMailto() {
-    const subject = encodeURIComponent(`${selected.subjectPrefix} `);
-    const fromLine = userName
-      ? `From: ${userName}${userEmail ? ` <${userEmail}>` : ""}\n\n`
-      : userEmail
-        ? `From: ${userEmail}\n\n`
-        : "";
-    const body = encodeURIComponent(`${fromLine}${selected.bodyPrompt}`);
-    return `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+    setIsSubmitting(true);
+    try {
+      const resp = await fetch(`${basePath}/api/support`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: ticketType, subject, message, userName, userEmail }),
+      });
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? "Failed to send");
+      }
+
+      setSubmitted(true);
+    } catch (err) {
+      toast({
+        title: "Couldn't send message",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -110,78 +113,173 @@ export default function Support() {
         </button>
       </header>
 
-      <main className="max-w-xl mx-auto px-5 sm:px-8 py-10">
-        <div className="mb-8">
-          <h1
-            className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2"
-            style={{ letterSpacing: "-0.03em" }}
-          >
-            Support & Feedback
-          </h1>
-          <p className="text-sm" style={{ color: "#4A5568" }}>
-            We read everything. Pick a category, then click the button — your email client will open with a pre-filled message ready to send.
-          </p>
-        </div>
+      <main className="max-w-2xl mx-auto px-5 sm:px-8 py-10">
+        {!submitted ? (
+          <>
+            <div className="mb-8">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2"
+                style={{ letterSpacing: "-0.03em" }}>
+                Support & Feedback
+              </h1>
+              <p className="text-sm" style={{ color: "#4A5568" }}>
+                Report a bug, request a feature, or ask a question. We read everything.
+              </p>
+            </div>
 
-        {/* Type selector */}
-        <div className="grid grid-cols-3 gap-3 mb-8">
-          {TYPES.map((t) => (
-            <button
-              key={t.value}
-              type="button"
-              onClick={() => setTicketType(t.value)}
-              className="rounded-2xl p-4 text-left transition-all"
-              style={{
-                background: ticketType === t.value ? "rgba(79,70,229,.12)" : SURFACE,
-                border: ticketType === t.value ? "1.5px solid rgba(79,70,229,.5)" : `1px solid ${BORDER}`,
-              }}
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Type selector */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "#6B7A99" }}>
+                  Type
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {TYPES.map((t) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => setTicketType(t.value)}
+                      className="rounded-2xl p-4 text-left transition-all"
+                      style={{
+                        background: ticketType === t.value ? "rgba(79,70,229,.12)" : SURFACE,
+                        border: ticketType === t.value ? "1.5px solid rgba(79,70,229,.5)" : `1px solid ${BORDER}`,
+                      }}
+                    >
+                      <div className="text-xl mb-2">{t.icon}</div>
+                      <div className="text-xs font-semibold text-white mb-1">{t.label}</div>
+                      <div className="text-xs leading-relaxed hidden sm:block" style={{ color: "#4A5568" }}>{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Subject */}
+              <div>
+                <label htmlFor="subject" className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#6B7A99" }}>
+                  Subject
+                </label>
+                <input
+                  id="subject"
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Brief description of your issue or idea"
+                  required
+                  minLength={3}
+                  className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-[#3A4460] outline-none transition-colors"
+                  style={{ background: SURFACE, border: `1.5px solid ${BORDER}` }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#4F46E5"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = BORDER; }}
+                />
+              </div>
+
+              {/* Message */}
+              <div>
+                <label htmlFor="message" className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#6B7A99" }}>
+                  Details
+                </label>
+                <textarea
+                  id="message"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder={
+                    ticketType === "bug"
+                      ? "What happened? What did you expect? Steps to reproduce..."
+                      : ticketType === "feature"
+                        ? "What would you like to see? How would it help your workflow?"
+                        : "What would you like to know?"
+                  }
+                  required
+                  minLength={10}
+                  rows={6}
+                  className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-[#3A4460] outline-none resize-y transition-colors"
+                  style={{ background: SURFACE, border: `1.5px solid ${BORDER}` }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "#4F46E5"; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = BORDER; }}
+                />
+              </div>
+
+              {/* Submitter info (read-only) */}
+              <div
+                className="rounded-xl px-4 py-3 flex items-center gap-3"
+                style={{ background: "rgba(56,189,248,.04)", border: "1px solid rgba(56,189,248,.12)" }}
+              >
+                {user?.imageUrl ? (
+                  <img src={user.imageUrl} alt={userName} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-xs font-bold text-white"
+                    style={{ background: "linear-gradient(135deg,#4F46E5,#0EA5E9)" }}>
+                    {userName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-white truncate">{userName}</p>
+                  <p className="text-xs truncate" style={{ color: "#6B7A99" }}>{userEmail}</p>
+                </div>
+                <span className="ml-auto text-xs shrink-0" style={{ color: "#3A4460" }}>Sending as you</span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting || !subject.trim() || !message.trim()}
+                className="w-full rounded-xl py-3.5 text-sm font-bold text-white transition-all disabled:opacity-50"
+                style={{
+                  background: "linear-gradient(135deg,#4F46E5,#0EA5E9)",
+                  boxShadow: "0 4px 14px rgba(79,70,229,0.3)",
+                }}
+              >
+                {isSubmitting ? "Sending…" : "Send Message"}
+              </button>
+            </form>
+
+            {/* Direct email fallback */}
+            <div className="mt-8 pt-6 text-center" style={{ borderTop: `1px solid ${BORDER}` }}>
+              <p className="text-xs mb-2" style={{ color: "#3A4460" }}>
+                Prefer to email directly?
+              </p>
+              <a
+                href={`mailto:${SUPPORT_EMAIL}`}
+                className="text-sm font-medium transition-colors hover:underline"
+                style={{ color: "#38BDF8" }}
+              >
+                {SUPPORT_EMAIL}
+              </a>
+            </div>
+          </>
+        ) : (
+          /* Success state */
+          <div className="flex flex-col items-center text-center pt-16">
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl mb-6"
+              style={{ background: "rgba(16,185,129,.12)", border: "1px solid rgba(52,211,153,.25)" }}
             >
-              <div className="text-xl mb-2">{t.icon}</div>
-              <div className="text-xs font-semibold text-white mb-1">{t.label}</div>
-              <div className="text-xs leading-relaxed hidden sm:block" style={{ color: "#4A5568" }}>{t.desc}</div>
-            </button>
-          ))}
-        </div>
-
-        {/* CTA */}
-        <a
-          href={buildMailto()}
-          className="flex items-center justify-center gap-2.5 w-full rounded-xl py-3.5 text-sm font-bold text-white transition-all"
-          style={{
-            background: "linear-gradient(135deg,#4F46E5,#0EA5E9)",
-            boxShadow: "0 4px 14px rgba(79,70,229,0.3)",
-            textDecoration: "none",
-          }}
-        >
-          <span>Open Email Client</span>
-          <span style={{ opacity: 0.8 }}>→</span>
-        </a>
-
-        {/* Manual fallback */}
-        <div className="mt-6 text-center">
-          <p className="text-xs mb-2" style={{ color: "#3A4460" }}>
-            Prefer to copy the address directly?
-          </p>
-          <button
-            onClick={() => navigator.clipboard.writeText(SUPPORT_EMAIL)}
-            className="text-sm font-medium transition-colors"
-            style={{ color: "#38BDF8" }}
-            title="Click to copy"
-          >
-            {SUPPORT_EMAIL}
-          </button>
-        </div>
-
-        {/* Info note */}
-        <div
-          className="mt-8 rounded-xl px-5 py-4"
-          style={{ background: "rgba(56,189,248,.04)", border: "1px solid rgba(56,189,248,.10)" }}
-        >
-          <p className="text-xs leading-relaxed" style={{ color: "#4A5568" }}>
-            When you send, your message goes directly to our support inbox. We'll reply to your email — usually within one business day. For urgent issues, include as much detail as possible in the body.
-          </p>
-        </div>
+              ✓
+            </div>
+            <h2 className="text-2xl font-extrabold text-white mb-3" style={{ letterSpacing: "-0.02em" }}>
+              Message received
+            </h2>
+            <p className="text-sm mb-8 max-w-sm" style={{ color: "#6B7A99", lineHeight: "1.7" }}>
+              Thanks{userName ? `, ${userName.split(" ")[0]}` : ""}. We've got your {ticketType === "bug" ? "bug report" : ticketType === "feature" ? "feature request" : "question"} and will follow up at <strong className="text-white">{userEmail}</strong>.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setSubmitted(false); setSubject(""); setMessage(""); }}
+                className="px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                style={{ background: SURFACE, color: "#6B7A99", border: `1px solid ${BORDER}` }}
+              >
+                Submit another
+              </button>
+              <button
+                onClick={() => navigate("/dashboard")}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
+                style={{ background: "linear-gradient(135deg,#4F46E5,#0EA5E9)" }}
+              >
+                Back to dashboard
+              </button>
+            </div>
+          </div>
+        )}
       </main>
+      <Toaster />
     </div>
   );
 }
