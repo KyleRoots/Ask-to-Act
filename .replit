@@ -87,6 +87,7 @@ externalPort = 9000
 [userenv]
 
 [userenv.shared]
+SUPPORT_EMAIL = "support@asktoact.ai"
 
 [nix]
 channel = "stable-25_05"
