@@ -1101,9 +1101,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         const callerLabel =
           caller?.kind === "user"
             ? `User ${caller.userId}`
-            : caller?.kind === "firm"
-              ? `Firm ${caller.firmId} (shared token)`
-              : "Unknown connector user";
+            : "Unknown connector user";
 
         await sendSupportEmail({
           type,

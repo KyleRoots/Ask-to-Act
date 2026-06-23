@@ -7,8 +7,8 @@ import {
   connectHeadless,
   isConnected,
 } from "../lib/bullhorn-auth.js";
-import { rememberState, consumeState, userIdFromState } from "../lib/oauth-state.js";
-import { bearerAuth } from "../middlewares/bearer-auth.js";
+import { rememberState, consumeState, userIdFromState, peekFirmId } from "../lib/oauth-state.js";
+import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
@@ -28,10 +28,16 @@ function page(title: string, message: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${t}</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}main{max-width:520px;padding:40px;text-align:center}h1{font-size:22px;margin:0 0 12px}p{font-size:15px;line-height:1.6;color:#aab4c5;margin:0}</style></head><body><main><h1>${t}</h1><p>${m}</p></main></body></html>`;
 }
 
-router.get("/auth/bullhorn/login", bearerAuth, async (_req: Request, res: Response) => {
+/**
+ * GET /auth/bullhorn/login
+ * Initiates the interactive Bullhorn OAuth flow. Service token only.
+ * Optional query param ?firmId=<id> binds the resulting token to a specific firm.
+ */
+router.get("/auth/bullhorn/login", bearerAuth, requireService, async (req: Request, res: Response) => {
   try {
+    const firmId = typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined;
     const state = randomBytes(16).toString("hex");
-    rememberState(state);
+    rememberState(state, firmId);
     const url = await getAuthorizeUrl(state);
     res.redirect(url);
   } catch (err) {
@@ -68,7 +74,22 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  if (typeof state !== "string" || !consumeState(state)) {
+  if (typeof state !== "string") {
+    res
+      .status(400)
+      .send(
+        page(
+          "Authorization link expired",
+          "This authorization link is invalid or has expired. Please start again.",
+        ),
+      );
+    return;
+  }
+
+  // Peek at firmId BEFORE consuming the state (consumeState deletes the entry).
+  const firmId = peekFirmId(state) ?? undefined;
+
+  if (!consumeState(state)) {
     res
       .status(400)
       .send(
@@ -114,7 +135,7 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
   }
 
   try {
-    await completeAuthorization(code);
+    await completeAuthorization(code, firmId);
     res.send(
       page(
         "Bullhorn connected",
@@ -144,13 +165,22 @@ router.get("/auth/bullhorn/status", bearerAuth, async (_req: Request, res: Respo
   }
 });
 
+/**
+ * POST /auth/bullhorn/connect
+ * Headless service-account connect using stored env-var credentials. Service token only.
+ * Optional body/query param firmId binds the token to a specific firm.
+ */
 router.post(
   "/auth/bullhorn/connect",
   bearerAuth,
-  async (_req: Request, res: Response) => {
+  requireService,
+  async (req: Request, res: Response) => {
     try {
-      const { restUrl } = await connectHeadless();
-      logger.info({ restUrl }, "Bullhorn: headless connect succeeded");
+      const firmId =
+        (typeof req.body?.firmId === "string" ? req.body.firmId : undefined) ??
+        (typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined);
+      const { restUrl } = await connectHeadless(firmId);
+      logger.info({ restUrl, firmId }, "Bullhorn: headless connect succeeded");
       res.json({ connected: true, restUrl });
     } catch (err) {
       logger.error({ err }, "Bullhorn headless connect failed");

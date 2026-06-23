@@ -85,6 +85,8 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
 
   const id = randomBytes(12).toString("hex");
   const apiKey = randomBytes(32).toString("hex");
+  const enrollToken = randomBytes(32).toString("hex");
+  const enrollTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const assignedRole = role === "admin" ? "admin" : "recruiter";
 
   try {
@@ -95,6 +97,8 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
+      enrollToken,
+      enrollTokenExpiresAt,
     });
     logger.info({ userId: id, name: name.trim(), firmId, role: assignedRole }, "User created");
     res.status(201).json({
@@ -104,10 +108,11 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
-      enrollUrl: `/api/auth/user/enroll?id=${id}`,
+      enrollUrl: `/api/auth/user/enroll?token=${enrollToken}`,
       message:
         "Store this apiKey securely — it will not be shown again. " +
-        "The user must visit enrollUrl in a browser to connect their Bullhorn account before write tools will work.",
+        "The user must visit enrollUrl in a browser to connect their Bullhorn account before write tools will work. " +
+        "The enrollment link expires in 7 days; use POST /api/users/:id/invite to issue a new one.",
     });
   } catch (err) {
     logger.error({ err }, "Failed to create user");
@@ -118,6 +123,8 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
 /**
  * GET /api/users
  * Admin-only: lists all users (no apiKey or tokens exposed).
+ * enrollUrl is only present when the user has a valid (non-expired) enrollment token.
+ * Use POST /api/users/:id/invite to generate a fresh link.
  */
 router.get("/users", bearerAuth, requireService, async (_req: Request, res: Response) => {
   try {
@@ -127,18 +134,24 @@ router.get("/users", bearerAuth, requireService, async (_req: Request, res: Resp
         name: usersTable.name,
         email: usersTable.email,
         enrolled: usersTable.refreshToken,
+        enrollToken: usersTable.enrollToken,
+        enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
         createdAt: usersTable.createdAt,
       })
       .from(usersTable);
+    const now = new Date();
     res.json(
-      rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        email: r.email,
-        enrolled: r.enrolled !== null,
-        enrollUrl: `/api/auth/user/enroll?id=${r.id}`,
-        createdAt: r.createdAt,
-      })),
+      rows.map((r) => {
+        const tokenValid = r.enrollToken && r.enrollTokenExpiresAt && r.enrollTokenExpiresAt > now;
+        return {
+          id: r.id,
+          name: r.name,
+          email: r.email,
+          enrolled: r.enrolled !== null,
+          enrollUrl: tokenValid ? `/api/auth/user/enroll?token=${r.enrollToken}` : null,
+          createdAt: r.createdAt,
+        };
+      }),
     );
   } catch (err) {
     logger.error({ err }, "Failed to list users");
@@ -202,7 +215,7 @@ router.patch("/users/:id", bearerAuth, requireService, async (req: Request, res:
  * Admin-only: removes a user and drops their cached session.
  */
 router.delete("/users/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   try {
     const [user] = await db
       .select({ id: usersTable.id, role: usersTable.role, firmId: usersTable.firmId })
@@ -237,7 +250,65 @@ router.delete("/users/:id", bearerAuth, requireService, async (req: Request, res
   }
 });
 
-function enrollForm(userId: string, userName: string, firmName?: string | null, errorMsg?: string): string {
+/**
+ * POST /api/users/:id/invite
+ * Admin-only: generates a fresh one-time enrollment token for an existing user
+ * and returns the enrollment URL. Use this when the original link has expired
+ * or was consumed. If the user has an email address, also sends a new invite email.
+ */
+router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request, res: Response) => {
+  const id = String(req.params["id"]);
+  try {
+    const [user] = await db
+      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, firmId: usersTable.firmId })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const enrollToken = randomBytes(32).toString("hex");
+    const enrollTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await db
+      .update(usersTable)
+      .set({ enrollToken, enrollTokenExpiresAt, updatedAt: new Date() })
+      .where(eq(usersTable.id, id));
+
+    const enrollUrl = `/api/auth/user/enroll?token=${enrollToken}`;
+    logger.info({ userId: id }, "Enrollment token regenerated");
+
+    if (user.email) {
+      try {
+        const { sendInviteEmail } = await import("../lib/emailService.js");
+        let firmName = "your organization";
+        if (user.firmId) {
+          const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, user.firmId)).limit(1);
+          if (firm) firmName = firm.name;
+        }
+        const baseUrl = getBaseUrl();
+        await sendInviteEmail({
+          toEmail: user.email,
+          userName: user.name,
+          firmName,
+          enrollUrl: `${baseUrl}${enrollUrl}`,
+        });
+      } catch (emailErr) {
+        logger.warn({ emailErr, userId: id }, "Failed to send re-invite email (token still valid)");
+      }
+    }
+
+    res.json({ id, enrollUrl });
+  } catch (err) {
+    logger.error({ err, userId: id }, "Failed to regenerate enrollment token");
+    res.status(500).json({ error: "Failed to regenerate enrollment token" });
+  }
+});
+
+function enrollForm(token: string, userName: string, firmName?: string | null, errorMsg?: string): string {
   const e = escapeHtml;
   const err = errorMsg
     ? `<p style="color:#f87171;margin:0 0 16px;font-size:14px">${e(errorMsg)}</p>`
@@ -276,7 +347,7 @@ ${firmBadge}
 <p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn and are not stored by this server.</p>
 ${err}
 <form method="POST" action="/api/auth/user/enroll">
-  <input type="hidden" name="id" value="${e(userId)}">
+  <input type="hidden" name="token" value="${e(token)}">
   <label for="u">Bullhorn username</label>
   <input id="u" type="text" name="bhUsername" autocomplete="username" required placeholder="Your Bullhorn username">
   <label for="p">Bullhorn password</label>
@@ -288,25 +359,38 @@ ${err}
 }
 
 /**
- * GET /api/auth/user/enroll?id=<userId>
- * No auth required — shows the recruiter a credentials form. Submitting the
- * form does the full OAuth flow server-side (headless) so the Bullhorn consent
- * bounce is avoided entirely.
+ * GET /api/auth/user/enroll?token=<enrollToken>
+ * No auth required — shows the recruiter a credentials form. The token is
+ * one-time-use and expires after 7 days; use POST /api/users/:id/invite to
+ * generate a fresh link. Submitting the form does the full OAuth flow
+ * server-side (headless) so the Bullhorn consent bounce is avoided entirely.
  */
 router.get("/auth/user/enroll", async (req: Request, res: Response) => {
-  const userId = req.query["id"];
-  if (typeof userId !== "string" || userId.length === 0) {
-    res.status(400).send(page("Missing user ID", "The enrollment link is missing the user ID. Ask your administrator for a valid enrollment link."));
+  const token = req.query["token"];
+  if (typeof token !== "string" || token.length === 0) {
+    res.status(400).send(page("Invalid enrollment link", "This enrollment link is missing or invalid. Ask your administrator for a new link."));
     return;
   }
   try {
     const rows = await db
-      .select({ id: usersTable.id, name: usersTable.name, firmId: usersTable.firmId })
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        firmId: usersTable.firmId,
+        enrollToken: usersTable.enrollToken,
+        enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
+      })
       .from(usersTable)
-      .where(eq(usersTable.id, userId))
+      .where(eq(usersTable.enrollToken, token))
       .limit(1);
+
     if (!rows[0]) {
-      res.status(404).send(page("User not found", "This enrollment link is invalid. Ask your administrator to create your account."));
+      res.status(404).send(page("Link not found", "This enrollment link is invalid or has already been used. Ask your administrator for a new link."));
+      return;
+    }
+
+    if (!rows[0].enrollTokenExpiresAt || rows[0].enrollTokenExpiresAt < new Date()) {
+      res.status(410).send(page("Link expired", "This enrollment link has expired. Ask your administrator to send you a new one."));
       return;
     }
 
@@ -331,9 +415,9 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       }
     }
 
-    res.send(enrollForm(userId, rows[0].name, firmName));
+    res.send(enrollForm(token, rows[0].name, firmName));
   } catch (err) {
-    logger.error({ err, userId }, "Enrollment form failed");
+    logger.error({ err }, "Enrollment form failed");
     res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));
   }
 });
@@ -342,32 +426,52 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
  * POST /api/auth/user/enroll
  * Handles form submission: runs the full headless OAuth flow server-side so
  * the Bullhorn consent form is approved without browser redirects.
+ * Requires a valid one-time enrollment token; the token is consumed on success.
  */
 router.post("/auth/user/enroll", async (req: Request, res: Response) => {
-  const { id, bhUsername, bhPassword } = req.body as {
-    id?: string;
+  const { token, bhUsername, bhPassword } = req.body as {
+    token?: string;
     bhUsername?: string;
     bhPassword?: string;
   };
 
-  if (!id || !bhUsername || !bhPassword) {
-    res.status(400).send(page("Missing fields", "User ID, username, and password are all required."));
+  if (!token || !bhUsername || !bhPassword) {
+    res.status(400).send(page("Missing fields", "Enrollment token, username, and password are all required."));
     return;
   }
 
   try {
     const rows = await db
-      .select({ id: usersTable.id, name: usersTable.name })
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        firmId: usersTable.firmId,
+        enrollToken: usersTable.enrollToken,
+        enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
+      })
       .from(usersTable)
-      .where(eq(usersTable.id, id))
+      .where(eq(usersTable.enrollToken, token))
       .limit(1);
+
     if (!rows[0]) {
-      res.status(404).send(page("User not found", "This enrollment link is invalid."));
+      res.status(404).send(page("Link not found", "This enrollment link is invalid or has already been used. Ask your administrator for a new link."));
       return;
     }
 
+    if (!rows[0].enrollTokenExpiresAt || rows[0].enrollTokenExpiresAt < new Date()) {
+      res.status(410).send(page("Link expired", "This enrollment link has expired. Ask your administrator to send you a new one."));
+      return;
+    }
+
+    const id = rows[0].id;
+
     await enrollUserHeadless(id, bhUsername.trim(), bhPassword);
     logger.info({ userId: id }, "Bullhorn: per-user headless enrollment complete via form");
+
+    await db
+      .update(usersTable)
+      .set({ enrollToken: null, enrollTokenExpiresAt: null, updatedAt: new Date() })
+      .where(eq(usersTable.id, id));
 
     const [enrolledUser] = await db
       .select({ apiKey: usersTable.apiKey, name: usersTable.name })
@@ -549,21 +653,21 @@ selectTool('chatgpt');
 </body></html>`);
   } catch (err) {
     const msg = (err as Error).message ?? "Unknown error";
-    logger.error({ err, userId: id }, "Per-user headless enrollment failed");
-    const rows = await db
-      .select({ id: usersTable.id, name: usersTable.name, firmId: usersTable.firmId })
+    logger.error({ err }, "Per-user headless enrollment failed");
+    const userRows = await db
+      .select({ name: usersTable.name, firmId: usersTable.firmId })
       .from(usersTable)
-      .where(eq(usersTable.id, id))
+      .where(eq(usersTable.enrollToken, token))
       .limit(1)
       .catch(() => []);
-    const name = rows[0]?.name ?? "Unknown";
-    const fId = rows[0]?.firmId ?? null;
+    const name = userRows[0]?.name ?? "Unknown";
+    const fId = userRows[0]?.firmId ?? null;
     let firmName: string | null = null;
     if (fId) {
       const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, fId)).limit(1).catch(() => []);
       firmName = firm?.name ?? null;
     }
-    res.status(400).send(enrollForm(id, name, firmName, msg));
+    res.status(400).send(enrollForm(token, name, firmName, msg));
   }
 });
 

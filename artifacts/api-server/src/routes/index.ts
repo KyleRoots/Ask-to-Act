@@ -8,7 +8,7 @@ import supportRouter from "./support";
 import portalRouter from "./portal";
 import v1Router from "./v1";
 import openapiRouter from "./openapi";
-import { bearerAuth } from "../middlewares/bearer-auth.js";
+import { bearerAuth, requireBullhornFirm } from "../middlewares/bearer-auth.js";
 
 const router: IRouter = Router();
 
@@ -20,6 +20,6 @@ router.use(firmsRouter);
 router.use(supportRouter);
 router.use(portalRouter);
 router.use(mcpRouter);
-router.use("/v1", bearerAuth, v1Router);
+router.use("/v1", bearerAuth, requireBullhornFirm, v1Router);
 
 export default router;

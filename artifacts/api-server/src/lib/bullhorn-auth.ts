@@ -145,14 +145,18 @@ async function loadRefreshToken(): Promise<string | null> {
   return stored ? decryptToken(stored) : null;
 }
 
-async function saveRefreshToken(refreshToken: string): Promise<void> {
+async function saveRefreshToken(refreshToken: string, firmId?: string): Promise<void> {
   const toStore = encryptToken(refreshToken);
+  const baseValues = { id: CONNECTION_ID, refreshToken: toStore, updatedAt: new Date() };
+  const values = firmId ? { ...baseValues, firmId } : baseValues;
+  const updateSet: Record<string, unknown> = { refreshToken: toStore, updatedAt: new Date() };
+  if (firmId) updateSet["firmId"] = firmId;
   await db
     .insert(bullhornTokensTable)
-    .values({ id: CONNECTION_ID, refreshToken: toStore, updatedAt: new Date() })
+    .values(values)
     .onConflictDoUpdate({
       target: bullhornTokensTable.id,
-      set: { refreshToken: toStore, updatedAt: new Date() },
+      set: updateSet,
     });
 }
 
@@ -476,14 +480,14 @@ function buildSession(tokens: TokenResponse, loginData: LoginResponse, sessionEx
  * tokens, establishes a Bullhorn REST session, and persists the refresh token
  * so future sessions can be created headlessly. Called by the OAuth callback.
  */
-export async function completeAuthorization(code: string): Promise<void> {
+export async function completeAuthorization(code: string, firmId?: string): Promise<void> {
   const { oauthUrl, loginUrl } = await discoverEndpoints();
   const tokens = await exchangeCodeForToken(oauthUrl, code);
   const loginData = await login(tokens.access_token, loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
   session = buildSession(tokens, loginData, sessionExpiresAt);
-  await saveRefreshToken(tokens.refresh_token);
-  logger.info({ restUrl: session.restUrl }, "Bullhorn: authorization complete, session established");
+  await saveRefreshToken(tokens.refresh_token, firmId);
+  logger.info({ restUrl: session.restUrl, firmId }, "Bullhorn: authorization complete, session established");
 }
 
 /**
@@ -507,7 +511,7 @@ async function sessionFromRefreshToken(refreshToken: string): Promise<Session> {
  * a cooldown so a wrong password cannot be retried fast enough to lock the API
  * user.
  */
-async function directLogin(): Promise<Session> {
+async function directLogin(firmId?: string): Promise<Session> {
   const now = Date.now();
   if (now < directLoginBlockedUntil) {
     const secs = Math.ceil((directLoginBlockedUntil - now) / 1000);
@@ -524,8 +528,8 @@ async function directLogin(): Promise<Session> {
     const loginData = await login(tokens.access_token, loginUrl);
     const sessionExpiresAt = await resolveSessionExpiry(loginData);
     const s = buildSession(tokens, loginData, sessionExpiresAt);
-    await saveRefreshToken(tokens.refresh_token);
-    logger.info({ restUrl: s.restUrl }, "Bullhorn: headless direct login complete");
+    await saveRefreshToken(tokens.refresh_token, firmId);
+    logger.info({ restUrl: s.restUrl, firmId }, "Bullhorn: headless direct login complete");
     return s;
   } catch (err) {
     directLoginBlockedUntil = Date.now() + DIRECT_LOGIN_COOLDOWN_MS;
@@ -542,15 +546,15 @@ async function directLogin(): Promise<Session> {
  * /api/auth/bullhorn/connect endpoint to bootstrap the connection with no
  * browser interaction. Single-flighted so concurrent callers share one attempt.
  */
-export async function connectHeadless(): Promise<{ restUrl: string }> {
+export async function connectHeadless(firmId?: string): Promise<{ restUrl: string }> {
   if (authInProgress) {
     const existing = await authInProgress;
     return { restUrl: existing.restUrl };
   }
-  authInProgress = directLogin()
+  authInProgress = directLogin(firmId)
     .then((s) => {
       session = s;
-      logger.info({ restUrl: s.restUrl }, "Bullhorn: session established (headless)");
+      logger.info({ restUrl: s.restUrl, firmId }, "Bullhorn: session established (headless)");
       return s;
     })
     .finally(() => {
@@ -558,6 +562,19 @@ export async function connectHeadless(): Promise<{ restUrl: string }> {
     });
   const s = await authInProgress;
   return { restUrl: s.restUrl };
+}
+
+/**
+ * Returns the firmId bound to the shared Bullhorn token row, or null if none
+ * has been configured. Used by requireBullhornFirm to enforce tenant isolation.
+ */
+export async function getBullhornFirmId(): Promise<string | null> {
+  const rows = await db
+    .select({ firmId: bullhornTokensTable.firmId })
+    .from(bullhornTokensTable)
+    .where(eq(bullhornTokensTable.id, CONNECTION_ID))
+    .limit(1);
+  return rows[0]?.firmId ?? null;
 }
 
 async function reauthenticate(): Promise<Session> {

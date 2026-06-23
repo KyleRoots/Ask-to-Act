@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
 import { getStripeSync } from "./lib/stripe/stripeClient.js";
+import { ensureColumns } from "./lib/ensure-columns.js";
 
 const rawPort = process.env["PORT"];
 
@@ -45,6 +46,7 @@ async function initStripe(): Promise<void> {
   }
 }
 
+await ensureColumns();
 await initStripe();
 
 app.listen(port, (err) => {

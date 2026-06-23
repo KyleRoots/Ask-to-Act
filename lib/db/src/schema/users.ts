@@ -16,6 +16,8 @@ export const usersTable = pgTable("users", {
   tokenExpiresAt: bigint("token_expires_at", { mode: "number" }),
   sessionExpiresAt: bigint("session_expires_at", { mode: "number" }),
   invitedAt: timestamp("invited_at"),
+  enrollToken: text("enroll_token").unique(),
+  enrollTokenExpiresAt: timestamp("enroll_token_expires_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

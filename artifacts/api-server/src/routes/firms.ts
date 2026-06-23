@@ -187,20 +187,31 @@ router.get(
         enrolled: usersTable.refreshToken,
         invitedAt: usersTable.invitedAt,
         createdAt: usersTable.createdAt,
+        enrollToken: usersTable.enrollToken,
+        enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
       })
       .from(usersTable)
       .where(eq(usersTable.firmId, id));
 
     const baseUrl = getBaseUrl();
+    const now = new Date();
 
-    res.json({
-      data: users.map((u) => ({
-        ...u,
-        enrolled: u.enrolled != null,
-        invitedAt: u.invitedAt ?? null,
-        enrollUrl: `${baseUrl}/api/auth/user/enroll?id=${u.id}`,
-      })),
-    });
+    const usersWithTokens = await Promise.all(
+      users.map(async (u) => {
+        let token = u.enrollToken;
+        if (!token || !u.enrollTokenExpiresAt || u.enrollTokenExpiresAt < now) {
+          token = randomBytes(32).toString("hex");
+          const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+          await db
+            .update(usersTable)
+            .set({ enrollToken: token, enrollTokenExpiresAt: expires, updatedAt: now })
+            .where(eq(usersTable.id, u.id));
+        }
+        return { ...u, enrolled: u.enrolled != null, invitedAt: u.invitedAt ?? null, enrollUrl: u.enrolled != null ? null : `${baseUrl}/api/auth/user/enroll?token=${token}` };
+      }),
+    );
+
+    res.json({ data: usersWithTokens });
   },
 );
 
@@ -236,11 +247,14 @@ router.post(
         apiKey: usersTable.apiKey,
         refreshToken: usersTable.refreshToken,
         invitedAt: usersTable.invitedAt,
+        enrollToken: usersTable.enrollToken,
+        enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
       })
       .from(usersTable)
       .where(eq(usersTable.firmId, id));
 
     const baseUrl = getBaseUrl();
+    const now = new Date();
 
     const candidates = allUsers.filter((u) => {
       if (!u.email) return false;
@@ -262,13 +276,28 @@ router.post(
       return;
     }
 
+    const candidatesWithTokens = await Promise.all(
+      candidates.map(async (u) => {
+        let token = u.enrollToken;
+        if (!token || !u.enrollTokenExpiresAt || u.enrollTokenExpiresAt < now) {
+          token = randomBytes(32).toString("hex");
+          const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+          await db
+            .update(usersTable)
+            .set({ enrollToken: token, enrollTokenExpiresAt: expires, updatedAt: now })
+            .where(eq(usersTable.id, u.id));
+        }
+        return { ...u, enrollUrl: `${baseUrl}/api/auth/user/enroll?token=${token}` };
+      }),
+    );
+
     const { sendBulkInvites } = await import("../lib/emailService.js");
     const result = await sendBulkInvites(
-      candidates.map((u) => ({
+      candidatesWithTokens.map((u) => ({
         toEmail: u.email!,
         userName: u.name,
         firmName: firm.name,
-        enrollUrl: `${baseUrl}/api/auth/user/enroll?id=${u.id}`,
+        enrollUrl: u.enrollUrl,
       })),
     );
 
