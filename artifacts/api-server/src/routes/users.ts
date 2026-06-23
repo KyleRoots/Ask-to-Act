@@ -174,7 +174,7 @@ function enrollForm(userId: string, userName: string, firmName?: string | null, 
        </div>`
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect Bullhorn — ${e(userName)}</title>
+<title>Connect Bullhorn | ${e(userName)}</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
@@ -198,7 +198,7 @@ button:hover{background:#2563eb}
 <div class="logo"><span class="logo-dot"></span><span class="logo-name">AskToAct</span></div>
 ${firmBadge}
 <h1>Connect your Bullhorn account</h1>
-<p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn — they are not stored by this server.</p>
+<p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn and are not stored by this server.</p>
 ${err}
 <form method="POST" action="/api/auth/user/enroll">
   <input type="hidden" name="id" value="${e(userId)}">
@@ -305,7 +305,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     const e = escapeHtml;
 
     res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connected — AskToAct</title>
+<title>Connected | AskToAct</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
@@ -354,7 +354,7 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
     </div>
     <div class="step">
       <span class="step-num">3</span>
-      <p class="step-text">Start a chat and ask it to search candidates, update a note, or submit a job — it will use your Bullhorn account</p>
+      <p class="step-text">Start a chat and ask it to search candidates, update a note, or submit a job. It will use your Bullhorn account.</p>
     </div>
   </div>
 </div>

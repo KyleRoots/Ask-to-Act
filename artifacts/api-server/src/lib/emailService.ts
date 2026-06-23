@@ -2,20 +2,33 @@ import { logger } from "./logger.js";
 
 const FROM_EMAIL = "noreply@asktoact.ai";
 const FROM_NAME = "AskToAct";
+const PROD_URL = "https://connect.asktoact.ai";
+
+function logoHtml(): string {
+  return `<table cellpadding="0" cellspacing="0">
+  <tr>
+    <td style="vertical-align:middle;">
+      <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#4F46E5,#0EA5E9);display:inline-flex;align-items:center;justify-content:center;">
+        <div style="width:10px;height:10px;border-radius:50%;background:#ffffff;"></div>
+      </div>
+    </td>
+    <td style="padding-left:10px;font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:-0.01em;vertical-align:middle;">AskToAct</td>
+  </tr>
+</table>`;
+}
 
 function inviteHtml(opts: {
   userName: string;
   firmName: string;
   enrollUrl: string;
-  baseUrl: string;
 }): string {
-  const { userName, firmName, enrollUrl, baseUrl } = opts;
+  const { userName, firmName, enrollUrl } = opts;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>You're invited to ${firmName}'s AskToAct workspace</title>
+<title>You've been invited to ${firmName}'s AskToAct workspace</title>
 </head>
 <body style="margin:0;padding:0;background:#0b1020;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#0b1020;padding:40px 20px;">
@@ -24,18 +37,13 @@ function inviteHtml(opts: {
 
       <!-- Logo -->
       <tr><td style="padding-bottom:32px;">
-        <table cellpadding="0" cellspacing="0">
-          <tr>
-            <td style="width:10px;height:10px;border-radius:50%;background:#38bdf8;vertical-align:middle;"></td>
-            <td style="padding-left:8px;font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:-0.01em;vertical-align:middle;">AskToAct</td>
-          </tr>
-        </table>
+        ${logoHtml()}
       </td></tr>
 
       <!-- Card -->
       <tr><td style="background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:40px;">
 
-        <p style="margin:0 0 8px;font-size:13px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">
+        <p style="margin:0 0 8px;font-size:12px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">
           Workspace Invitation
         </p>
 
@@ -43,47 +51,82 @@ function inviteHtml(opts: {
           Hi ${userName},
         </h1>
 
-        <p style="margin:0 0 16px;font-size:16px;color:#cbd5e1;line-height:1.6;">
-          <strong style="color:#f8fafc;">${firmName}</strong> has set you up on AskToAct —
-          the AI connector that gives your ChatGPT or Claude direct, permission-aware access
-          to Bullhorn, acting as you.
+        <p style="margin:0 0 24px;font-size:16px;color:#cbd5e1;line-height:1.6;">
+          <strong style="color:#f8fafc;">${firmName}</strong> has set you up on AskToAct, the AI connector
+          that gives your ChatGPT or Claude direct, permission-aware access to Bullhorn as you.
         </p>
 
-        <p style="margin:0 0 28px;font-size:16px;color:#cbd5e1;line-height:1.6;">
-          To get started, connect your Bullhorn account. It takes about 30 seconds.
-        </p>
+        <!-- Steps -->
+        <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:28px;">
+          <tr><td style="background:#0f1622;border:1px solid #1e2a3a;border-radius:12px;padding:20px 24px;">
+            <p style="margin:0 0 14px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.1em;">How it works</p>
+            <table cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="vertical-align:top;padding-bottom:12px;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">1</span>
+                </td>
+                <td style="padding-left:12px;padding-bottom:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  Click <strong style="color:#f8fafc;">Connect Bullhorn Account</strong> below
+                </td>
+              </tr>
+              <tr>
+                <td style="vertical-align:top;padding-bottom:12px;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">2</span>
+                </td>
+                <td style="padding-left:12px;padding-bottom:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  Sign in with your Bullhorn username and password
+                </td>
+              </tr>
+              <tr>
+                <td style="vertical-align:top;padding-bottom:12px;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">3</span>
+                </td>
+                <td style="padding-left:12px;padding-bottom:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  Copy your personal connector URL from the confirmation page
+                </td>
+              </tr>
+              <tr>
+                <td style="vertical-align:top;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">4</span>
+                </td>
+                <td style="padding-left:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  In ChatGPT or Claude, go to <strong style="color:#f8fafc;">Settings, then Connectors</strong> and paste the URL
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
 
-        <!-- CTA -->
-        <table cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+        <!-- CTA Button -->
+        <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:28px;">
           <tr>
-            <td style="background:linear-gradient(135deg,#4F46E5,#0EA5E9);border-radius:10px;">
+            <td align="center" style="background:linear-gradient(135deg,#4F46E5,#0EA5E9);border-radius:12px;">
               <a href="${enrollUrl}"
-                 style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;letter-spacing:-0.01em;">
-                Connect Bullhorn Account →
+                 style="display:block;padding:16px 28px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;text-align:center;letter-spacing:-0.01em;">
+                Connect Bullhorn Account
               </a>
             </td>
           </tr>
         </table>
 
-        <div style="border-top:1px solid #1e2a3a;padding-top:24px;">
-          <p style="margin:0 0 8px;font-size:13px;color:#4a5568;">
-            After connecting, you'll receive your personal connector URL. Paste it into
-            ChatGPT or Claude under <strong style="color:#6b7a99;">Settings → Connectors</strong>
-            and you're live.
-          </p>
-          <p style="margin:0;font-size:12px;color:#2d3748;">
-            Or copy the link manually: <span style="color:#38bdf8;word-break:break-all;">${enrollUrl}</span>
+        <!-- Fallback link -->
+        <div style="border-top:1px solid #1e2a3a;padding-top:20px;">
+          <p style="margin:0;font-size:12px;color:#4a5568;line-height:1.6;">
+            Button not working? Copy and paste this link into your browser:<br />
+            <a href="${enrollUrl}" style="color:#38bdf8;word-break:break-all;text-decoration:none;">${enrollUrl}</a>
           </p>
         </div>
+
       </td></tr>
 
       <!-- Footer -->
-      <tr><td style="padding-top:24px;">
-        <p style="margin:0 0 6px;font-size:12px;color:#2d3748;text-align:center;">
-          AskToAct · <a href="${baseUrl}" style="color:#38bdf8;text-decoration:none;">${baseUrl.replace(/^https?:\/\//, "")}</a>
-          &nbsp;·&nbsp; If you didn't expect this invitation, you can safely ignore it.
+      <tr><td style="padding-top:24px;text-align:center;">
+        <p style="margin:0 0 6px;font-size:12px;color:#2d3748;">
+          AskToAct &nbsp;·&nbsp;
+          <a href="${PROD_URL}" style="color:#38bdf8;text-decoration:none;">connect.asktoact.ai</a>
+          &nbsp;·&nbsp; If you did not expect this invitation, you can safely ignore it.
         </p>
-        <p style="margin:0;font-size:12px;color:#2d3748;text-align:center;">
+        <p style="margin:0;font-size:12px;color:#2d3748;">
           Questions or issues? Email us at <a href="mailto:support@asktoact.ai" style="color:#38bdf8;text-decoration:none;">support@asktoact.ai</a>
         </p>
       </td></tr>
@@ -100,7 +143,6 @@ export interface InvitePayload {
   userName: string;
   firmName: string;
   enrollUrl: string;
-  baseUrl: string;
 }
 
 export async function sendInviteEmail(payload: InvitePayload): Promise<void> {
@@ -121,14 +163,21 @@ export async function sendInviteEmail(payload: InvitePayload): Promise<void> {
     text: [
       `Hi ${payload.userName},`,
       ``,
-      `${payload.firmName} has set you up on AskToAct — the AI connector that gives your ChatGPT or Claude direct access to Bullhorn.`,
+      `${payload.firmName} has set you up on AskToAct, the AI connector that gives your ChatGPT or Claude direct access to Bullhorn.`,
       ``,
-      `Connect your Bullhorn account here (takes ~30 seconds):`,
+      `Here is how to get started:`,
+      ``,
+      `1. Open the link below to connect your Bullhorn account`,
+      `2. Sign in with your Bullhorn username and password`,
+      `3. Copy your personal connector URL from the confirmation page`,
+      `4. In ChatGPT or Claude, go to Settings, then Connectors and paste the URL`,
+      ``,
+      `Connect here (takes about 30 seconds):`,
       payload.enrollUrl,
       ``,
-      `After connecting you'll receive your personal connector URL for ChatGPT / Claude.`,
+      `Questions? Email support@asktoact.ai`,
       ``,
-      `— AskToAct`,
+      `AskToAct Team`,
     ].join("\n"),
   });
 }
@@ -151,11 +200,17 @@ export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
   }
 
   const typeLabel: Record<string, string> = {
-    bug: "🐛 Bug Report",
-    feature: "✨ Feature Request",
-    question: "❓ Question",
+    bug: "Bug Report",
+    feature: "Feature Request",
+    question: "Question",
+  };
+  const typeEmoji: Record<string, string> = {
+    bug: "🐛",
+    feature: "✨",
+    question: "❓",
   };
   const label = typeLabel[payload.type] ?? payload.type;
+  const emoji = typeEmoji[payload.type] ?? "";
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -164,21 +219,50 @@ export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#0b1020;padding:40px 20px;">
   <tr><td align="center">
     <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+      <!-- Logo -->
       <tr><td style="padding-bottom:24px;">
-        <span style="font-size:16px;font-weight:700;color:#f8fafc;">AskToAct</span>
-        <span style="font-size:13px;color:#38bdf8;margin-left:10px;">Support Inbox</span>
+        <table cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="vertical-align:middle;">
+              <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#4F46E5,#0EA5E9);display:inline-flex;align-items:center;justify-content:center;">
+                <div style="width:10px;height:10px;border-radius:50%;background:#ffffff;"></div>
+              </div>
+            </td>
+            <td style="padding-left:10px;font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:-0.01em;vertical-align:middle;">AskToAct</td>
+            <td style="padding-left:12px;font-size:13px;font-weight:500;color:#38bdf8;vertical-align:middle;">Support Inbox</td>
+          </tr>
+        </table>
       </td></tr>
+
+      <!-- Card -->
       <tr><td style="background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:36px;">
-        <p style="margin:0 0 6px;font-size:12px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">${label}</p>
+
+        <p style="margin:0 0 6px;font-size:12px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">
+          ${emoji} ${label}
+        </p>
         <h2 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#f8fafc;">${payload.subject}</h2>
         <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.7;white-space:pre-wrap;">${payload.message}</p>
-        <div style="border-top:1px solid #1e2a3a;padding-top:20px;font-size:13px;color:#4a5568;">
-          <strong style="color:#94a3b8;">From:</strong> ${payload.userName} &lt;${payload.userEmail}&gt;
+
+        <div style="border-top:1px solid #1e2a3a;padding-top:20px;">
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="font-size:13px;color:#64748b;padding-right:6px;">From:</td>
+              <td style="font-size:13px;color:#94a3b8;font-weight:600;">${payload.userName}</td>
+              <td style="font-size:13px;color:#64748b;padding-left:4px;">
+                &lt;<a href="mailto:${payload.userEmail}" style="color:#38bdf8;text-decoration:none;">${payload.userEmail}</a>&gt;
+              </td>
+            </tr>
+          </table>
         </div>
+
       </td></tr>
+
+      <!-- Footer -->
       <tr><td style="padding-top:20px;font-size:11px;color:#2d3748;text-align:center;">
-        Submitted via AskToAct customer portal · Reply directly to this email to respond to ${payload.userName}
+        Submitted via AskToAct customer portal &nbsp;·&nbsp; Reply directly to this email to respond to ${payload.userName}
       </td></tr>
+
     </table>
   </td></tr>
 </table>
@@ -191,9 +275,9 @@ export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
     to: dest,
     from: { name: FROM_NAME, email: FROM_EMAIL },
     replyTo: { name: payload.userName, email: payload.userEmail },
-    subject: `[${label}] ${payload.subject}`,
+    subject: `[${emoji} ${label}] ${payload.subject}`,
     html,
-    text: `${label}: ${payload.subject}\n\nFrom: ${payload.userName} <${payload.userEmail}>\n\n${payload.message}`,
+    text: `${emoji} ${label}: ${payload.subject}\n\nFrom: ${payload.userName} <${payload.userEmail}>\n\n${payload.message}`,
   });
 }
 

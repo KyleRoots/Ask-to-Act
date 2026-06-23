@@ -268,7 +268,6 @@ router.post(
         userName: u.name,
         firmName: firm.name,
         enrollUrl: `${baseUrl}/api/auth/user/enroll?id=${u.id}`,
-        baseUrl,
       })),
     );
 
