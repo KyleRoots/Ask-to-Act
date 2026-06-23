@@ -302,9 +302,6 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
 
     const baseUrl = getBaseUrl();
     const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp?apiKey=${enrolledUser.apiKey}` : null;
-    const apiKey = enrolledUser?.apiKey ?? null;
-    const schemaUrl = `${baseUrl}/api/openapi.json`;
-    const instructionsUrl = `${baseUrl}/api/gpt/instructions`;
     const e = escapeHtml;
 
     const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
@@ -321,20 +318,6 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
           "Open a new chat — your Bullhorn tools will appear automatically",
         ],
       },
-      customgpt: {
-        label: "Custom GPT",
-        tagline: "A shareable, branded reporting GPT for leaders &amp; demos. Read-only analytics (no writes).",
-        steps: [
-          "Go to <strong>chatgpt.com/gpts/editor</strong> (requires ChatGPT Plus, Team, or Enterprise), then open the <strong>Configure</strong> tab",
-          "Set <strong>Name</strong> to <strong>AskToAct</strong> and add a short description, e.g. <em>Live staffing analytics from Bullhorn</em>",
-          `Open <strong>${e(instructionsUrl)}</strong> in a new tab, copy everything, and paste it into the <strong>Instructions</strong> box`,
-          "Scroll to <strong>Actions</strong> and click <strong>Create new action</strong>, then <strong>Import from URL</strong>",
-          `Paste the schema URL <strong>${e(schemaUrl)}</strong> and import it — the reporting operations will load automatically`,
-          `Under <strong>Authentication</strong> choose <strong>API Key</strong>, set <strong>Auth Type</strong> to <strong>Bearer</strong>, and paste your personal key${apiKey ? ` (<strong>${e(apiKey)}</strong>)` : " (the value after <code>apiKey=</code> in your connector URL above)"}`,
-          "Click <strong>Create</strong> (top-right), choose <strong>Only me</strong> or share the link with your team, then ask: <em>“Show me this year's staffing scorecard.”</em>",
-          "<strong>Heads up:</strong> a shared GPT runs every query under the key you entered, so all usage is attributed to that one identity. For per-person audit trails, have each teammate build their own GPT with their own key.",
-        ],
-      },
       claude: {
         label: "Claude",
         tagline: "Full read &amp; write via Claude's custom connectors (Pro, Max, Team, or Enterprise).",
@@ -348,12 +331,13 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       },
       gemini: {
         label: "Gemini",
-        tagline: "Lightweight assistant via a Gem. Live Bullhorn tools in the consumer app aren't supported yet.",
+        tagline: "MCP connector support — steps may vary by plan and Google Workspace version.",
         steps: [
-          "Go to <strong>gemini.google.com</strong>, sign in, and open <strong>Gems</strong> then <strong>New Gem</strong>",
-          `Open <strong>${e(instructionsUrl)}</strong>, copy the instructions, and paste them into the Gem so it understands its AskToAct role`,
-          "Save the Gem and use it for staffing-savvy drafting and Q&amp;A",
-          "For <strong>live</strong> Bullhorn data today, use ChatGPT or Claude above. Developers can call the read-only REST API directly with the key above",
+          "Go to <strong>gemini.google.com</strong> and sign in with your Google account",
+          "Click your profile icon (top-right) then <strong>Settings</strong>, and look for <strong>Extensions</strong>, <strong>Integrations</strong>, or <strong>Connectors</strong>",
+          "Select <strong>Add custom connector</strong> or <strong>Add MCP server</strong>",
+          "Paste your connector URL (above) and authorize the connection",
+          "Start a conversation — your Bullhorn tools will be available",
         ],
       },
       grok: {
@@ -380,7 +364,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       },
     };
 
-    const toolOrder = ["chatgpt", "customgpt", "claude", "gemini", "grok", "other"] as const;
+    const toolOrder = ["chatgpt", "claude", "gemini", "grok", "other"] as const;
 
     const toolTabsHtml = toolOrder.map((key) => `
       <button class="tool-tab" data-tool="${key}" onclick="selectTool('${key}')">${toolSteps[key].label}</button>

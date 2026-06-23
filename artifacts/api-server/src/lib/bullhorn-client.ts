@@ -1,6 +1,8 @@
 import { getSession, invalidateSession } from "./bullhorn-auth.js";
 import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
+// pdf-parse and mammoth are loaded via dynamic import inside the extraction
+// helper — avoids CJS/ESM default-export interop issues at module startup.
 
 const MAX_RETRIES = 1;
 const RATE_LIMIT_RETRIES = 3;
@@ -1127,6 +1129,34 @@ function looksBinaryBuffer(buf: Buffer): boolean {
   return buf.subarray(0, 1000).includes(0); // embedded NUL byte → binary
 }
 
+/**
+ * Identifies binary formats we can extract text from server-side.
+ * Pass `buf` when available (enables magic-byte PDF detection on top of MIME/name).
+ * Returns "pdf" | "docx" | null.
+ */
+function isSupportedBinaryFormat(
+  contentType: string | undefined,
+  name: string | undefined,
+  buf?: Buffer,
+): "pdf" | "docx" | null {
+  const ct = (contentType ?? "").toLowerCase();
+  const n = (name ?? "").toLowerCase();
+  // PDF: MIME type, file extension, or magic bytes (%PDF)
+  if (
+    ct.includes("pdf") ||
+    n.endsWith(".pdf") ||
+    (buf && buf.subarray(0, 4).toString("latin1").startsWith("%PDF"))
+  ) {
+    return "pdf";
+  }
+  // DOCX (Office Open XML): MIME type or .docx extension only.
+  // Legacy .doc (OLE binary) is NOT supported by mammoth; leave it as metadata.
+  if (ct.includes("officedocument.wordprocessingml") || n.endsWith(".docx")) {
+    return "docx";
+  }
+  return null;
+}
+
 /** Crude but dependency-free HTML-to-text: drop tags/entities, collapse space. */
 function stripHtml(s: string): string {
   return s
@@ -1246,15 +1276,55 @@ export async function readCandidateAttachment(args: {
 
   const buf = Buffer.from(base64, "base64");
   if (!isTextualContentType(meta.contentType, meta.name) || looksBinaryBuffer(buf)) {
+    // Attempt server-side extraction for supported binary formats (PDF / DOCX).
+    const fmt = isSupportedBinaryFormat(meta.contentType, meta.name, buf);
+    if (fmt) {
+      try {
+        let raw = "";
+        if (fmt === "pdf") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pdfMod = (await import("pdf-parse/node")) as any;
+          const pdfParseFn = pdfMod.default ?? pdfMod;
+          const parsed = await pdfParseFn(buf);
+          raw = (parsed as { text?: string }).text ?? "";
+        } else {
+          const { extractRawText } = await import("mammoth");
+          const result = await extractRawText({ buffer: buf });
+          raw = result.value ?? "";
+        }
+        const normalized = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+        if (normalized.length > 0) {
+          let text = redactResumeText(normalized);
+          const cap = clampChars(args.maxChars);
+          const truncated = text.length > cap;
+          if (truncated) text = text.slice(0, cap);
+          return {
+            ...meta,
+            sizeBytes: buf.length,
+            textAvailable: true,
+            extractedFrom: fmt,
+            truncated,
+            charsReturned: text.length,
+            text,
+          };
+        }
+      } catch (err) {
+        logger.warn(
+          { err, fileId: args.fileId, candidateId: args.candidateId, fmt },
+          "Binary résumé extraction failed — falling back to metadata",
+        );
+      }
+    }
+    // Fallback: unsupported binary or extraction produced no text.
     return {
       ...meta,
       sizeBytes: buf.length,
       textAvailable: false,
       message:
         `This attachment is a binary file (${meta.contentType ?? "unknown type"}) ` +
-        `with no server-side text extraction available. Open it in Bullhorn to view, ` +
-        `or call get_candidate_resume / get_candidate — the candidate record often ` +
-        `stores the parsed résumé text.`,
+        `with no extractable text${fmt ? " (extraction attempted but returned empty)" : ""}. ` +
+        `Open it in Bullhorn to view, or call get_candidate_resume / get_candidate — ` +
+        `the candidate record often stores the parsed résumé text.`,
     };
   }
 
@@ -1318,16 +1388,17 @@ export async function getCandidateResume(args: {
   });
   const resume = pickResumeAttachment(attachments);
 
-  // Only download/decode the chosen attachment when its format is textual.
-  // Binary résumés (PDF/Word) yield no extractable text, so fetching them just
-  // wastes bandwidth/memory — we still surface their metadata below and fall
-  // back to the parsed text on candidate.description.
+  // Download and extract the chosen attachment when its format is textual OR
+  // when it is a PDF/DOCX that we can now extract server-side.
+  // Pure binary formats (images, old .doc, etc.) are still skipped to avoid
+  // wasting bandwidth — their metadata is surfaced below.
   let resumeAttachmentText:
     | Awaited<ReturnType<typeof readCandidateAttachment>>
     | null = null;
   if (
     resume?.id !== undefined &&
-    isTextualContentType(resume.contentType, resume.name)
+    (isTextualContentType(resume.contentType, resume.name) ||
+      isSupportedBinaryFormat(resume.contentType, resume.name) !== null)
   ) {
     resumeAttachmentText = await readCandidateAttachment({
       candidateId: args.candidateId,
