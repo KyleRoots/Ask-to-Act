@@ -161,10 +161,16 @@ router.delete("/users/:id", bearerAuth, async (req: Request, res: Response) => {
   }
 });
 
-function enrollForm(userId: string, userName: string, errorMsg?: string): string {
+function enrollForm(userId: string, userName: string, firmName?: string | null, errorMsg?: string): string {
   const e = escapeHtml;
   const err = errorMsg
     ? `<p style="color:#f87171;margin:0 0 16px;font-size:14px">${e(errorMsg)}</p>`
+    : "";
+  const firmBadge = firmName
+    ? `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);border-radius:20px;padding:4px 12px;margin-bottom:20px">
+        <span style="width:6px;height:6px;border-radius:50%;background:#38bdf8;display:inline-block"></span>
+        <span style="font-size:12px;color:#38bdf8;letter-spacing:0.05em">${e(firmName)}</span>
+       </div>`
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect Bullhorn — ${e(userName)}</title>
@@ -173,8 +179,11 @@ function enrollForm(userId: string, userName: string, errorMsg?: string): string
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
   display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 main{max-width:420px;width:100%;padding:40px 32px;background:#141927;border-radius:12px;border:1px solid #1e2a3a}
+.logo{display:flex;align-items:center;gap:8px;margin-bottom:24px}
+.logo-dot{width:8px;height:8px;border-radius:50%;background:#38bdf8}
+.logo-name{font-weight:700;font-size:15px;letter-spacing:-0.01em}
 h1{font-size:20px;margin:0 0 6px}
-.sub{font-size:14px;color:#7a8ba0;margin:0 0 28px}
+.sub{font-size:14px;color:#7a8ba0;margin:0 0 24px}
 label{display:block;font-size:13px;color:#aab4c5;margin-bottom:6px}
 input{width:100%;padding:10px 14px;background:#0b1020;border:1px solid #1e2a3a;border-radius:8px;
   color:#e8ecf3;font-size:15px;margin-bottom:16px;outline:none}
@@ -185,6 +194,8 @@ button:hover{background:#2563eb}
 .note{font-size:12px;color:#4a5568;margin-top:16px;text-align:center}
 </style></head>
 <body><main>
+<div class="logo"><span class="logo-dot"></span><span class="logo-name">AskToAct</span></div>
+${firmBadge}
 <h1>Connect your Bullhorn account</h1>
 <p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn — they are not stored by this server.</p>
 ${err}
@@ -225,7 +236,15 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
 
     // Subscription gate: if this user belongs to a firm, verify the firm has an active subscription
     const { firmId } = rows[0];
+    let firmName: string | null = null;
     if (firmId) {
+      const [firm] = await db
+        .select({ name: firmsTable.name })
+        .from(firmsTable)
+        .where(eq(firmsTable.id, firmId))
+        .limit(1);
+      firmName = firm?.name ?? null;
+
       const status = await stripeStorage.resolveFirmStatus(firmId);
       if (status !== "active" && status !== "trialing") {
         res.status(402).send(page(
@@ -236,7 +255,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       }
     }
 
-    res.send(enrollForm(userId, rows[0].name));
+    res.send(enrollForm(userId, rows[0].name, firmName));
   } catch (err) {
     logger.error({ err, userId }, "Enrollment form failed");
     res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));
@@ -281,13 +300,19 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     const msg = (err as Error).message ?? "Unknown error";
     logger.error({ err, userId: id }, "Per-user headless enrollment failed");
     const rows = await db
-      .select({ id: usersTable.id, name: usersTable.name })
+      .select({ id: usersTable.id, name: usersTable.name, firmId: usersTable.firmId })
       .from(usersTable)
       .where(eq(usersTable.id, id))
       .limit(1)
       .catch(() => []);
     const name = rows[0]?.name ?? "Unknown";
-    res.status(400).send(enrollForm(id, name, msg));
+    const fId = rows[0]?.firmId ?? null;
+    let firmName: string | null = null;
+    if (fId) {
+      const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, fId)).limit(1).catch(() => []);
+      firmName = firm?.name ?? null;
+    }
+    res.status(400).send(enrollForm(id, name, firmName, msg));
   }
 });
 

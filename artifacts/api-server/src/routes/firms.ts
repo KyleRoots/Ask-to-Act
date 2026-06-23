@@ -245,6 +245,57 @@ router.post(
 );
 
 /**
+ * POST /api/firms/:id/activate
+ * Admin-only. Manually activates a firm as a pilot/complimentary account —
+ * sets subscription_status = 'active' without requiring a Stripe checkout.
+ * Use this to onboard a free pilot customer before billing is live.
+ * Body: { seatLimit?: number, note?: string }
+ */
+router.post(
+  "/firms/:id/activate",
+  bearerAuth,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { seatLimit, note } = req.body as {
+      seatLimit?: number;
+      note?: string;
+    };
+
+    const [firm] = await db
+      .select()
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    const update: Partial<typeof firmsTable.$inferInsert> = {
+      subscriptionStatus: "active",
+      updatedAt: new Date(),
+    };
+    if (seatLimit != null) update.seatLimit = seatLimit;
+
+    await db.update(firmsTable).set(update).where(eq(firmsTable.id, id));
+
+    logger.info(
+      { firmId: id, seatLimit: seatLimit ?? firm.seatLimit, note: note ?? "pilot" },
+      "Firm manually activated as pilot",
+    );
+
+    res.json({
+      id,
+      name: firm.name,
+      subscriptionStatus: "active",
+      seatLimit: seatLimit ?? firm.seatLimit,
+      pilotNote: note ?? "Manually activated — no Stripe subscription",
+      message: `Firm '${firm.name}' is now active. You can add users via POST /api/users with firmId=${id}.`,
+    });
+  },
+);
+
+/**
  * GET /api/firms/:id/usage
  * Admin-only. Monthly active-seat counts for the firm (last 24 months).
  */
