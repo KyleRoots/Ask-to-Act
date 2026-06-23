@@ -308,11 +308,13 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       chatgpt: {
         label: "ChatGPT",
         steps: [
-          "Go to <strong>chatgpt.com</strong> and sign in",
-          "Click your profile icon (top-right) then <strong>Settings</strong>",
-          "Select <strong>Connectors</strong> from the left menu",
-          "Click <strong>Add new connector</strong>, paste your URL above, and click Connect",
-          "Start a chat — your Bullhorn tools will appear automatically",
+          "Go to <strong>chatgpt.com</strong>, click your profile icon (top-right), then <strong>Settings</strong>",
+          "Select <strong>Connectors</strong> from the left menu, then click <strong>Add</strong>",
+          "In the <strong>Name</strong> field enter <strong>AskToAct</strong>. Description is optional; you can add <em>AI connector for my Bullhorn account</em>",
+          "Under <strong>Connection</strong>, confirm <strong>Server URL</strong> is selected, then paste your connector URL into the URL field",
+          "Set <strong>Authentication</strong> to <strong>No authentication</strong>, as your personal key is already embedded in the URL",
+          "Check <strong>I understand and want to continue</strong>, then click <strong>Create</strong>",
+          "Open a new chat — your Bullhorn tools will appear automatically",
         ],
       },
       claude: {
