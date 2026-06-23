@@ -91,7 +91,7 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
     await db.insert(usersTable).values({
       id,
       name: name.trim(),
-      email: email?.trim() ?? null,
+      email: email?.trim().toLowerCase() ?? null,
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
@@ -100,7 +100,7 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
     res.status(201).json({
       id,
       name: name.trim(),
-      email: email?.trim() ?? null,
+      email: email?.trim().toLowerCase() ?? null,
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
@@ -143,6 +143,45 @@ router.get("/users", bearerAuth, requireService, async (_req: Request, res: Resp
   } catch (err) {
     logger.error({ err }, "Failed to list users");
     res.status(500).json({ error: "Failed to list users" });
+  }
+});
+
+/**
+ * PATCH /api/users/:id
+ * Admin-only: updates a user's role. Accepts { role: "admin" | "recruiter" }.
+ * Only the role field is settable here — name/email changes require user management UI.
+ */
+router.patch("/users/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
+  const { id } = req.params as { id: string };
+  const { role } = req.body as { role?: string };
+
+  if (role !== "admin" && role !== "recruiter") {
+    res.status(400).json({ error: "role must be 'admin' or 'recruiter'" });
+    return;
+  }
+
+  try {
+    const rows = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+
+    if (!rows[0]) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    await db
+      .update(usersTable)
+      .set({ role, updatedAt: new Date() })
+      .where(eq(usersTable.id, id));
+
+    logger.info({ userId: id, role }, "User role updated");
+    res.json({ id, role });
+  } catch (err) {
+    logger.error({ err, userId: id }, "Failed to update user role");
+    res.status(500).json({ error: "Failed to update user role" });
   }
 });
 

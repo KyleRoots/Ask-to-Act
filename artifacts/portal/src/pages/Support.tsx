@@ -58,7 +58,7 @@ export default function Support() {
 
     setIsSubmitting(true);
     try {
-      const resp = await fetch(`${basePath}/api/support`, {
+      const resp = await fetch(`/api/support`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: ticketType, subject, message, userName, userEmail }),

@@ -1,7 +1,5 @@
-const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
-
 async function portalFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${basePath}/api${path}`, {
+  const res = await fetch(`/api${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
   });

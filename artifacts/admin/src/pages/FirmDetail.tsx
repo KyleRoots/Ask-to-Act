@@ -465,6 +465,26 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     onError: (err: Error) => toast({ title: "Logo upload failed", description: err.message, variant: "destructive" }),
   });
 
+  const updateRoleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: "admin" | "recruiter" }) =>
+      api.updateUserRole(userId, role),
+    onSuccess: (_data, { role }) => {
+      queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+      toast({ title: `Role updated to ${role}` });
+    },
+    onError: (err: Error) => toast({ title: "Failed to update role", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (userId: string) => api.deleteUser(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+      queryClient.invalidateQueries({ queryKey: ["firm", firmId] });
+      toast({ title: "User removed and access revoked" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to remove user", description: err.message, variant: "destructive" }),
+  });
+
   function handleLogoFile(file: File) {
     if (!file.type.startsWith("image/")) {
       toast({ title: "Please select an image file", variant: "destructive" });
@@ -915,6 +935,28 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                               </button>
                             )}
                           </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              onClick={() => updateRoleMutation.mutate({ userId: u.id, role: u.role === "admin" ? "recruiter" : "admin" })}
+                              disabled={updateRoleMutation.isPending}
+                              className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
+                              style={{ background: "rgba(139,92,246,.1)", color: "#C4B5FD", border: "1px solid rgba(196,181,253,.2)" }}
+                            >
+                              {u.role === "admin" ? "Make recruiter" : "Make admin"}
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Remove ${u.name ?? u.email} and revoke all access? This cannot be undone.`)) {
+                                  deleteUserMutation.mutate(u.id);
+                                }
+                              }}
+                              disabled={deleteUserMutation.isPending}
+                              className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
+                              style={{ background: "rgba(239,68,68,.08)", color: "#FCA5A5", border: "1px solid rgba(252,165,165,.2)" }}
+                            >
+                              Revoke & remove
+                            </button>
+                          </div>
                         </div>
                       ))}
                       {users.length === 0 && (
@@ -929,7 +971,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                       <table className="w-full text-sm">
                         <thead>
                           <tr style={{ borderBottom: `1px solid ${BORDER}`, background: "rgba(255,255,255,.015)" }}>
-                            {["Name", "Email", "Role", "Status", "Invited", "Enroll link"].map((h) => (
+                            {["Name", "Email", "Role", "Status", "Invited", "Enroll link", "Actions"].map((h) => (
                               <th
                                 key={h}
                                 className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider"
@@ -992,11 +1034,39 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                   </button>
                                 )}
                               </td>
+                              <td className="px-5 py-4">
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => updateRoleMutation.mutate({ userId: u.id, role: u.role === "admin" ? "recruiter" : "admin" })}
+                                    disabled={updateRoleMutation.isPending}
+                                    className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60 whitespace-nowrap"
+                                    style={{ background: "rgba(139,92,246,.1)", color: "#C4B5FD", border: "1px solid rgba(196,181,253,.2)" }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(139,92,246,.2)"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(139,92,246,.1)"; }}
+                                  >
+                                    {u.role === "admin" ? "Make recruiter" : "Make admin"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (window.confirm(`Remove ${u.name ?? u.email} and revoke all access? This cannot be undone.`)) {
+                                        deleteUserMutation.mutate(u.id);
+                                      }
+                                    }}
+                                    disabled={deleteUserMutation.isPending}
+                                    className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60 whitespace-nowrap"
+                                    style={{ background: "rgba(239,68,68,.08)", color: "#FCA5A5", border: "1px solid rgba(252,165,165,.2)" }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,.15)"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,.08)"; }}
+                                  >
+                                    Revoke & remove
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                           {users.length === 0 && (
                             <tr>
-                              <td colSpan={6} className="px-5 py-14 text-center text-sm" style={{ color: "#3A4460", background: SURFACE }}>
+                              <td colSpan={7} className="px-5 py-14 text-center text-sm" style={{ color: "#3A4460", background: SURFACE }}>
                                 No users yet. Click "+ Add users" to get started.
                               </td>
                             </tr>

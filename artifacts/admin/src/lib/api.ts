@@ -146,6 +146,15 @@ export const api = {
       message: string;
     }>("/users", { method: "POST", body: JSON.stringify(body) }),
 
+  updateUserRole: (userId: string, role: "admin" | "recruiter") =>
+    apiFetch<{ id: string; role: string }>(`/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+
+  deleteUser: (userId: string) =>
+    apiFetch<{ deleted: boolean; id: string }>(`/users/${userId}`, { method: "DELETE" }),
+
   sendInvites: (firmId: string, resend = false) =>
     apiFetch<InviteResult>(`/firms/${firmId}/invite`, {
       method: "POST",

@@ -80,17 +80,18 @@ export default function TeamUsage() {
   const nowDate = new Date();
   const [period, setPeriod] = useState({ year: nowDate.getFullYear(), month: nowDate.getMonth() + 1 });
 
-  const { data: me } = useQuery({ queryKey: ["portal-me"], queryFn: portalApi.me });
+  const { data: me, isLoading: meLoading } = useQuery({ queryKey: ["portal-me"], queryFn: portalApi.me });
+
+  const isAdmin = me?.role === "admin";
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["portal-team-usage", period.year, period.month],
     queryFn: () => portalApi.teamUsage(period.year, period.month),
-    enabled: !!me && me.role === "admin",
+    enabled: isAdmin,
   });
 
   const opts = monthOptions();
   const sorted = data ? [...data.users].sort((a, b) => b.totalCalls - a.totalCalls) : [];
-  const notAdmin = me && me.role !== "admin";
 
   return (
     <div className="min-h-[100dvh]" style={{ background: BG }}>
@@ -113,13 +114,27 @@ export default function TeamUsage() {
           </p>
         </div>
 
-        {notAdmin && (
+        {meLoading && (
           <div className="rounded-2xl p-6 text-center" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
-            <p className="text-sm" style={{ color: "#6B7A99" }}>This area is available to team administrators only.</p>
+            <p className="text-sm" style={{ color: "#3A4460" }}>Loading…</p>
           </div>
         )}
 
-        {!notAdmin && (
+        {!meLoading && !isAdmin && (
+          <div className="rounded-2xl p-8 text-center" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
+            <p className="text-base font-semibold text-white mb-2">Access denied</p>
+            <p className="text-sm" style={{ color: "#6B7A99" }}>You need company admin access to view team usage.</p>
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="mt-5 text-xs px-4 py-2 rounded-lg"
+              style={{ background: "rgba(99,102,241,.15)", color: "#A5B4FC", border: "1px solid rgba(165,180,252,.2)" }}
+            >
+              Back to dashboard
+            </button>
+          </div>
+        )}
+
+        {!meLoading && isAdmin && (
           <div className="rounded-2xl p-5 sm:p-7" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
             <div className="flex items-start justify-between gap-4 mb-5 flex-wrap">
               <div>
