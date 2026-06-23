@@ -79,9 +79,12 @@ function inviteHtml(opts: {
 
       <!-- Footer -->
       <tr><td style="padding-top:24px;">
-        <p style="margin:0;font-size:12px;color:#2d3748;text-align:center;">
+        <p style="margin:0 0 6px;font-size:12px;color:#2d3748;text-align:center;">
           AskToAct · <a href="${baseUrl}" style="color:#38bdf8;text-decoration:none;">${baseUrl.replace(/^https?:\/\//, "")}</a>
           &nbsp;·&nbsp; If you didn't expect this invitation, you can safely ignore it.
+        </p>
+        <p style="margin:0;font-size:12px;color:#2d3748;text-align:center;">
+          Questions or issues? Email us at <a href="mailto:support@asktoact.ai" style="color:#38bdf8;text-decoration:none;">support@asktoact.ai</a>
         </p>
       </td></tr>
 
