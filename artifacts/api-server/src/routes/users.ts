@@ -346,7 +346,7 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   <div class="steps">
     <div class="step">
       <span class="step-num">1</span>
-      <p class="step-text">In <strong>ChatGPT or Claude</strong>, go to <strong>Settings → Connectors</strong> (or Integrations)</p>
+      <p class="step-text">In your preferred AI tool (ChatGPT, Claude, Gemini, etc.), go to <strong>Settings, then Connectors</strong> and paste your URL</p>
     </div>
     <div class="step">
       <span class="step-num">2</span>

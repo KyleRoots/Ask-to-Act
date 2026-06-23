@@ -8,9 +8,11 @@ function logoHtml(): string {
   return `<table cellpadding="0" cellspacing="0">
   <tr>
     <td style="vertical-align:middle;">
-      <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#4F46E5,#0EA5E9);display:inline-flex;align-items:center;justify-content:center;">
-        <div style="width:10px;height:10px;border-radius:50%;background:#ffffff;"></div>
-      </div>
+      <table cellpadding="0" cellspacing="0" style="background-color:#4F46E5;border-radius:8px;width:28px;height:28px;">
+        <tr><td align="center" valign="middle">
+          <div style="width:10px;height:10px;border-radius:5px;background:#ffffff;"></div>
+        </td></tr>
+      </table>
     </td>
     <td style="padding-left:10px;font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:-0.01em;vertical-align:middle;">AskToAct</td>
   </tr>
@@ -53,7 +55,8 @@ function inviteHtml(opts: {
 
         <p style="margin:0 0 24px;font-size:16px;color:#cbd5e1;line-height:1.6;">
           <strong style="color:#f8fafc;">${firmName}</strong> has set you up on AskToAct, the AI connector
-          that gives your ChatGPT or Claude direct, permission-aware access to Bullhorn as you.
+          that lets you bring any AI tool you prefer (e.g., ChatGPT, Claude, Gemini, etc.) and connect
+          it directly within Bullhorn so you can use your own AI universally.
         </p>
 
         <!-- Steps -->
@@ -90,7 +93,7 @@ function inviteHtml(opts: {
                   <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">4</span>
                 </td>
                 <td style="padding-left:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
-                  In ChatGPT or Claude, go to <strong style="color:#f8fafc;">Settings, then Connectors</strong> and paste the URL
+                  In your preferred AI tool (ChatGPT, Claude, Gemini, etc.), go to <strong style="color:#f8fafc;">Settings, then Connectors</strong> and paste the URL
                 </td>
               </tr>
             </table>
@@ -100,9 +103,9 @@ function inviteHtml(opts: {
         <!-- CTA Button -->
         <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:28px;">
           <tr>
-            <td align="center" style="background:linear-gradient(135deg,#4F46E5,#0EA5E9);border-radius:12px;">
+            <td align="center" bgcolor="#4F46E5" style="background-color:#4F46E5;border-radius:12px;">
               <a href="${enrollUrl}"
-                 style="display:block;padding:16px 28px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;text-align:center;letter-spacing:-0.01em;">
+                 style="display:block;padding:16px 28px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;text-align:center;letter-spacing:-0.01em;border-radius:12px;">
                 Connect Bullhorn Account
               </a>
             </td>
