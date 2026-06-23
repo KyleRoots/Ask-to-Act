@@ -43,6 +43,7 @@ export type FirmRow = {
   subscriptionStatus: string;
   enrolledSeats: number;
   seatLimit: number | null;
+  logoUrl: string | null;
 };
 
 export type FirmDetail = {

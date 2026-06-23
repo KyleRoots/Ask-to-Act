@@ -9,6 +9,28 @@ const BG = "hsl(220 50% 4%)";
 const SURFACE = "hsl(222 45% 8%)";
 const BORDER = "hsl(217 35% 18%)";
 
+function FirmAvatar({ name, logoUrl, size = "md" }: { name: string; logoUrl: string | null; size?: "sm" | "md" }) {
+  const dim = size === "sm" ? "w-8 h-8 rounded-lg text-xs" : "w-9 h-9 rounded-xl text-sm";
+  if (logoUrl) {
+    return (
+      <div
+        className={`${dim} flex items-center justify-center overflow-hidden shrink-0`}
+        style={{ background: "hsl(217 35% 12%)", border: "1px solid hsl(217 35% 18%)" }}
+      >
+        <img src={logoUrl} alt={`${name} logo`} className="w-full h-full object-contain p-0.5" />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`${dim} flex items-center justify-center font-bold text-white shrink-0`}
+      style={{ background: "linear-gradient(135deg, #4F46E5, #0EA5E9)" }}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
 const GHOST_HOVER = {
   enter: (e: React.MouseEvent<HTMLButtonElement>) => {
     e.currentTarget.style.color = "#E2E8F0";
@@ -298,12 +320,7 @@ export default function FirmsList() {
                   }}
                 >
                   <div className="flex items-center gap-3 mb-3">
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0"
-                      style={{ background: "linear-gradient(135deg, #4F46E5, #0EA5E9)" }}
-                    >
-                      {firm.name.charAt(0).toUpperCase()}
-                    </div>
+                    <FirmAvatar name={firm.name} logoUrl={firm.logoUrl} size="md" />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-white truncate">{firm.name}</p>
                       <StatusBadge status={firm.subscriptionStatus} />
@@ -363,12 +380,7 @@ export default function FirmsList() {
                       >
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
-                            <div
-                              className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
-                              style={{ background: "linear-gradient(135deg, #4F46E5, #0EA5E9)" }}
-                            >
-                              {firm.name.charAt(0).toUpperCase()}
-                            </div>
+                            <FirmAvatar name={firm.name} logoUrl={firm.logoUrl} size="sm" />
                             <span className="font-medium text-white">{firm.name}</span>
                           </div>
                         </td>

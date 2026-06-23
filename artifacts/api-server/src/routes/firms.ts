@@ -153,6 +153,7 @@ router.get("/firms", bearerAuth, async (_req: Request, res: Response) => {
       subscriptionStatus: f.subscriptionStatus ?? "none",
       enrolledSeats: await stripeStorage.countFirmUsers(f.id),
       seatLimit: f.seatLimit,
+      logoUrl: f.logoUrl ?? null,
     })),
   );
   res.json({ data: rows });
