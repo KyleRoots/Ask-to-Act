@@ -1,8 +1,8 @@
 import { logger } from "./logger.js";
 
-const FROM_EMAIL = "noreply@asktoact.ai";
-const FROM_NAME = "AskToAct";
-const PROD_URL = "https://connect.asktoact.ai";
+const FROM_EMAIL = process.env["FROM_EMAIL"] ?? "noreply@asktoact.ai";
+const FROM_NAME = process.env["FROM_NAME"] ?? "AskToAct";
+const PROD_URL = process.env["PROD_URL"] ?? "https://connect.asktoact.ai";
 
 function logoHtml(): string {
   return `<table cellpadding="0" cellspacing="0">

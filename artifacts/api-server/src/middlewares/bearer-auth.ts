@@ -86,3 +86,20 @@ export async function bearerAuth(req: Request, res: Response, next: NextFunction
 
   res.status(401).json({ error: "Invalid token" });
 }
+
+/**
+ * Gate that restricts a route to the service token only (firm/user
+ * administration). Must run AFTER bearerAuth, which populates req.caller.
+ * A valid user API key is rejected with 403 so a recruiter's key can never
+ * reach firm-management endpoints.
+ */
+export function requireService(req: Request, res: Response, next: NextFunction) {
+  if (req.caller?.kind !== "service") {
+    res.status(403).json({
+      error:
+        "Forbidden: this endpoint requires the service (admin) token. User API keys are not permitted here.",
+    });
+    return;
+  }
+  next();
+}

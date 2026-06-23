@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, firmsTable, usersTable, seatActivityTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { bearerAuth } from "../middlewares/bearer-auth.js";
+import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
@@ -15,7 +15,7 @@ const router: IRouter = Router();
  * and checkout session for the Platform Plan.
  * Body: { name: string, seatLimit?: number }
  */
-router.post("/firms", bearerAuth, async (req: Request, res: Response) => {
+router.post("/firms", bearerAuth, requireService, async (req: Request, res: Response) => {
   const { name, seatLimit } = req.body as {
     name?: string;
     seatLimit?: number;
@@ -107,7 +107,7 @@ router.post("/firms", bearerAuth, async (req: Request, res: Response) => {
  * GET /api/firms/:id
  * Admin-only. Returns firm details, live subscription status, and seat usage.
  */
-router.get("/firms/:id", bearerAuth, async (req: Request, res: Response) => {
+router.get("/firms/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
   const { id } = req.params;
 
   const [firm] = await db
@@ -142,7 +142,7 @@ router.get("/firms/:id", bearerAuth, async (req: Request, res: Response) => {
  * GET /api/firms
  * Admin-only. List all firms.
  */
-router.get("/firms", bearerAuth, async (_req: Request, res: Response) => {
+router.get("/firms", bearerAuth, requireService, async (_req: Request, res: Response) => {
   const firms = await db.select().from(firmsTable);
   const rows = await Promise.all(
     firms.map(async (f) => ({
@@ -163,7 +163,7 @@ router.get("/firms", bearerAuth, async (_req: Request, res: Response) => {
  */
 router.get(
   "/firms/:id/users",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
 
@@ -212,7 +212,7 @@ router.get(
  */
 router.post(
   "/firms/:id/invite",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
     const { resend = false } = req.body as { resend?: boolean };
@@ -299,7 +299,7 @@ router.post(
  */
 router.post(
   "/firms/:id/logo",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
     const { logoData } = req.body as { logoData?: string };
@@ -327,7 +327,7 @@ router.post(
  */
 router.post(
   "/firms/:id/billing-portal",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
 
@@ -373,7 +373,7 @@ router.post(
  */
 router.post(
   "/firms/:id/activate",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
     const { seatLimit, note } = req.body as {
@@ -421,7 +421,7 @@ router.post(
  */
 router.get(
   "/firms/:id/usage",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
 
@@ -475,7 +475,7 @@ router.get(
  */
 router.post(
   "/firms/:id/checkout",
-  bearerAuth,
+  bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params;
 

@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, usersTable, firmsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { bearerAuth } from "../middlewares/bearer-auth.js";
+import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import {
   invalidateUserSession,
   enrollUserHeadless,
@@ -34,7 +34,7 @@ function page(title: string, message: string): string {
  * Body: { name: string, email?: string }
  * After creation, the user enrolls their Bullhorn account at the returned enrollUrl.
  */
-router.post("/users", bearerAuth, async (req: Request, res: Response) => {
+router.post("/users", bearerAuth, requireService, async (req: Request, res: Response) => {
   const { name, email, firmId, role } = req.body as {
     name?: string;
     email?: string;
@@ -119,7 +119,7 @@ router.post("/users", bearerAuth, async (req: Request, res: Response) => {
  * GET /api/users
  * Admin-only: lists all users (no apiKey or tokens exposed).
  */
-router.get("/users", bearerAuth, async (_req: Request, res: Response) => {
+router.get("/users", bearerAuth, requireService, async (_req: Request, res: Response) => {
   try {
     const rows = await db
       .select({
@@ -150,7 +150,7 @@ router.get("/users", bearerAuth, async (_req: Request, res: Response) => {
  * DELETE /api/users/:id
  * Admin-only: removes a user and drops their cached session.
  */
-router.delete("/users/:id", bearerAuth, async (req: Request, res: Response) => {
+router.delete("/users/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     invalidateUserSession(id);
@@ -302,64 +302,85 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
 
     const baseUrl = getBaseUrl();
     const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp?apiKey=${enrolledUser.apiKey}` : null;
+    const apiKey = enrolledUser?.apiKey ?? null;
+    const schemaUrl = `${baseUrl}/api/openapi.json`;
+    const instructionsUrl = `${baseUrl}/api/gpt/instructions`;
     const e = escapeHtml;
 
-    const toolSteps: Record<string, { label: string; steps: string[] }> = {
+    const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
       chatgpt: {
         label: "ChatGPT",
+        tagline: "Recommended — full read &amp; write (notes, status updates, submittals) with your own Bullhorn identity.",
         steps: [
           "Go to <strong>chatgpt.com</strong>, click your profile icon (top-right), then <strong>Settings</strong>",
           "Select <strong>Connectors</strong> from the left menu, then click <strong>Add</strong>",
           "In the <strong>Name</strong> field enter <strong>AskToAct</strong>. Description is optional; you can add <em>AI connector for my Bullhorn account</em>",
-          "Under <strong>Connection</strong>, confirm <strong>Server URL</strong> is selected, then paste your connector URL into the URL field",
-          "Set <strong>Authentication</strong> to <strong>No authentication</strong>, as your personal key is already embedded in the URL",
+          "Under <strong>Connection</strong>, confirm <strong>Server URL</strong> is selected, then paste your connector URL (above) into the URL field",
+          "Set <strong>Authentication</strong> to <strong>No authentication</strong> — your personal key is already embedded in the URL",
           "Check <strong>I understand and want to continue</strong>, then click <strong>Create</strong>",
           "Open a new chat — your Bullhorn tools will appear automatically",
         ],
       },
+      customgpt: {
+        label: "Custom GPT",
+        tagline: "A shareable, branded reporting GPT for leaders &amp; demos. Read-only analytics (no writes).",
+        steps: [
+          "Go to <strong>chatgpt.com/gpts/editor</strong> (requires ChatGPT Plus, Team, or Enterprise), then open the <strong>Configure</strong> tab",
+          "Set <strong>Name</strong> to <strong>AskToAct</strong> and add a short description, e.g. <em>Live staffing analytics from Bullhorn</em>",
+          `Open <strong>${e(instructionsUrl)}</strong> in a new tab, copy everything, and paste it into the <strong>Instructions</strong> box`,
+          "Scroll to <strong>Actions</strong> and click <strong>Create new action</strong>, then <strong>Import from URL</strong>",
+          `Paste the schema URL <strong>${e(schemaUrl)}</strong> and import it — the reporting operations will load automatically`,
+          `Under <strong>Authentication</strong> choose <strong>API Key</strong>, set <strong>Auth Type</strong> to <strong>Bearer</strong>, and paste your personal key${apiKey ? ` (<strong>${e(apiKey)}</strong>)` : " (the value after <code>apiKey=</code> in your connector URL above)"}`,
+          "Click <strong>Create</strong> (top-right), choose <strong>Only me</strong> or share the link with your team, then ask: <em>“Show me this year's staffing scorecard.”</em>",
+          "<strong>Heads up:</strong> a shared GPT runs every query under the key you entered, so all usage is attributed to that one identity. For per-person audit trails, have each teammate build their own GPT with their own key.",
+        ],
+      },
       claude: {
         label: "Claude",
+        tagline: "Full read &amp; write via Claude's custom connectors (Pro, Max, Team, or Enterprise).",
         steps: [
-          "Go to <strong>claude.ai</strong> and sign in",
-          "Click the <strong>Integrations</strong> icon in the left sidebar",
-          "Click <strong>Add more</strong>, then choose <strong>Add custom integration</strong>",
-          "Paste your URL above and click Save",
-          "Start a new conversation — your Bullhorn tools will be available",
+          "Go to <strong>claude.ai</strong> and sign in, then open <strong>Settings</strong> and select <strong>Connectors</strong>",
+          "Click <strong>Add custom connector</strong>",
+          "Enter <strong>AskToAct</strong> as the name and paste your connector URL (above) as the remote MCP server URL",
+          "Click <strong>Add</strong>, then enable the connector in a new chat (or attach it to a Project)",
+          "Start a conversation — your Bullhorn tools will be available",
         ],
       },
       gemini: {
         label: "Gemini",
+        tagline: "Lightweight assistant via a Gem. Live Bullhorn tools in the consumer app aren't supported yet.",
         steps: [
-          "Go to <strong>gemini.google.com</strong> and sign in with your Google account",
-          "Click the <strong>Extensions</strong> icon or go to <strong>Settings, then Extensions</strong>",
-          "Look for <strong>Custom connectors</strong> or <strong>Add MCP server</strong>",
-          "Paste your URL above and authorize the connection",
-          "Start a conversation and ask Gemini to search your candidates in Bullhorn",
+          "Go to <strong>gemini.google.com</strong>, sign in, and open <strong>Gems</strong> then <strong>New Gem</strong>",
+          `Open <strong>${e(instructionsUrl)}</strong>, copy the instructions, and paste them into the Gem so it understands its AskToAct role`,
+          "Save the Gem and use it for staffing-savvy drafting and Q&amp;A",
+          "For <strong>live</strong> Bullhorn data today, use ChatGPT or Claude above. Developers can call the read-only REST API directly with the key above",
         ],
       },
       grok: {
         label: "Grok",
+        tagline: "Full read &amp; write via Grok's custom connectors.",
         steps: [
           "Go to <strong>grok.com</strong> (or open Grok within X) and sign in",
           "Click <strong>Settings</strong> then look for <strong>Connectors</strong> or <strong>Integrations</strong>",
-          "Select <strong>Add custom connector</strong> and paste your URL above",
+          "Select <strong>Add custom connector</strong> and paste your connector URL (above)",
           "Authorize the connection when prompted",
           "Start a new chat — your Bullhorn tools will be available",
         ],
       },
       other: {
         label: "Other tool",
+        tagline: "Any tool that supports a remote MCP server.",
         steps: [
           "Open your AI tool and sign in",
           "Find <strong>Settings</strong> then look for <strong>Connectors</strong>, <strong>Integrations</strong>, or <strong>MCP servers</strong>",
-          "Add a new custom connector and paste your URL above",
+          "Add a new custom connector and paste your connector URL (above)",
           "Authorize or save the connection",
           "Start a conversation and confirm your Bullhorn tools appear",
         ],
       },
     };
 
-    const toolOrder = ["chatgpt", "claude", "gemini", "grok", "other"] as const;
+    const toolOrder = ["chatgpt", "customgpt", "claude", "gemini", "grok", "other"] as const;
 
     const toolTabsHtml = toolOrder.map((key) => `
       <button class="tool-tab" data-tool="${key}" onclick="selectTool('${key}')">${toolSteps[key].label}</button>
@@ -371,7 +392,8 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
           <span class="step-num">${i + 1}</span>
           <p class="step-text">${s}</p>
         </div>`).join("");
-      return `<div class="tool-panel" id="panel-${key}" style="display:none">${stepsHtml}</div>`;
+      const tagline = toolSteps[key].tagline ? `<p class="tool-tagline">${toolSteps[key].tagline}</p>` : "";
+      return `<div class="tool-panel" id="panel-${key}" style="display:none">${tagline}${stepsHtml}</div>`;
     }).join("");
 
     res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -404,6 +426,8 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   color:#64748b;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
 .tool-tab:hover{border-color:#38bdf8;color:#94a3b8}
 .tool-tab.active{border-color:#4F46E5;background:rgba(79,70,229,.15);color:#818cf8;font-weight:600}
+.tool-tagline{font-size:12px;color:#94a3b8;line-height:1.5;margin:0 0 16px;padding:10px 12px;
+  background:rgba(79,70,229,.08);border:1px solid rgba(79,70,229,.2);border-radius:8px}
 .step{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
 .step-num{width:22px;height:22px;border-radius:50%;background:rgba(79,70,229,.2);border:1px solid rgba(79,70,229,.4);
   color:#818cf8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
