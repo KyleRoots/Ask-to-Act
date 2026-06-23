@@ -292,10 +292,87 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
 
     await enrollUserHeadless(id, bhUsername.trim(), bhPassword);
     logger.info({ userId: id }, "Bullhorn: per-user headless enrollment complete via form");
-    res.send(page(
-      "Bullhorn account connected",
-      `Your Bullhorn account (${escapeHtml(bhUsername.trim())}) is now linked. You can close this window — the AI connector will use your account for all write operations.`,
-    ));
+
+    const [enrolledUser] = await db
+      .select({ apiKey: usersTable.apiKey, name: usersTable.name })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+
+    const baseUrl =
+      process.env.NODE_ENV === "production"
+        ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
+        : `http://localhost:${process.env.PORT}`;
+    const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp?apiKey=${enrolledUser.apiKey}` : null;
+    const e = escapeHtml;
+
+    res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connected — AskToAct</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
+  display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
+main{max-width:480px;width:100%}
+.logo{display:flex;align-items:center;gap:8px;margin-bottom:28px}
+.logo-dot{width:8px;height:8px;border-radius:50%;background:#38bdf8}
+.logo-name{font-weight:700;font-size:15px}
+.card{background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:32px}
+.check{width:44px;height:44px;border-radius:50%;background:rgba(16,185,129,.15);border:1px solid rgba(52,211,153,.3);
+  display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:16px}
+h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
+.sub{font-size:14px;color:#7a8ba0;margin:0 0 24px;line-height:1.6}
+.mcp-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#38bdf8;text-transform:uppercase;margin-bottom:8px}
+.mcp-box{background:#0b1020;border:1px solid #1e2a3a;border-radius:10px;padding:14px 16px;
+  font-family:monospace;font-size:12px;color:#cbd5e1;word-break:break-all;line-height:1.6;margin-bottom:8px}
+.copy-btn{width:100%;padding:10px;background:#4F46E5;color:#fff;border:none;border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer;margin-bottom:20px}
+.copy-btn:hover{background:#4338ca}
+.steps{border-top:1px solid #1e2a3a;padding-top:20px;margin-top:4px}
+.step{display:flex;gap:12px;margin-bottom:14px}
+.step-num{width:22px;height:22px;border-radius:50%;background:rgba(79,70,229,.2);border:1px solid rgba(79,70,229,.4);
+  color:#818cf8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;shrink:0;flex-shrink:0}
+.step-text{font-size:13px;color:#6b7a99;line-height:1.5}
+.step-text strong{color:#cbd5e1}
+</style></head>
+<body><main>
+<div class="logo"><span class="logo-dot"></span><span class="logo-name">AskToAct</span></div>
+<div class="card">
+  <div class="check">✓</div>
+  <h1>Bullhorn account connected!</h1>
+  <p class="sub">Linked as <strong style="color:#e8ecf3">${e(bhUsername.trim())}</strong>. Your AI connector is ready.</p>
+  ${mcpUrl ? `
+  <p class="mcp-label">Your personal connector URL</p>
+  <div class="mcp-box" id="mcp">${e(mcpUrl)}</div>
+  <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000})">Copy connector URL</button>
+  ` : ""}
+  <div class="steps">
+    <div class="step">
+      <span class="step-num">1</span>
+      <p class="step-text">In <strong>ChatGPT or Claude</strong>, go to <strong>Settings → Connectors</strong> (or Integrations)</p>
+    </div>
+    <div class="step">
+      <span class="step-num">2</span>
+      <p class="step-text">Add a new connector and paste your URL above when prompted</p>
+    </div>
+    <div class="step">
+      <span class="step-num">3</span>
+      <p class="step-text">Start a chat and ask it to search candidates, update a note, or submit a job — it will use your Bullhorn account</p>
+    </div>
+  </div>
+</div>
+</main>
+<script>
+// Pre-select MCP URL on click for easy copy
+const box = document.getElementById('mcp');
+if (box) box.addEventListener('click', () => {
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(box);
+  sel.removeAllRanges();
+  sel.addRange(range);
+});
+</script>
+</body></html>`);
   } catch (err) {
     const msg = (err as Error).message ?? "Unknown error";
     logger.error({ err, userId: id }, "Per-user headless enrollment failed");

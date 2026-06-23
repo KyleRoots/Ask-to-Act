@@ -132,6 +132,7 @@ router.get("/firms/:id", bearerAuth, async (req: Request, res: Response) => {
     stripeSubscriptionId: firm.stripeSubscriptionId,
     subscriptionStatus,
     seatLimit: firm.seatLimit,
+    logoUrl: firm.logoUrl ?? null,
     enrolledSeats: userCount,
     seatsRemaining:
       firm.seatLimit != null ? firm.seatLimit - userCount : "unlimited",
@@ -184,17 +185,147 @@ router.get(
         email: usersTable.email,
         role: usersTable.role,
         enrolled: usersTable.refreshToken,
+        invitedAt: usersTable.invitedAt,
         createdAt: usersTable.createdAt,
       })
       .from(usersTable)
       .where(eq(usersTable.firmId, id));
 
+    const baseUrl =
+      process.env.NODE_ENV === "production"
+        ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
+        : `http://localhost:${process.env.PORT}`;
+
     res.json({
       data: users.map((u) => ({
         ...u,
         enrolled: u.enrolled != null,
+        invitedAt: u.invitedAt ?? null,
+        enrollUrl: `${baseUrl}/api/auth/user/enroll?id=${u.id}`,
       })),
     });
+  },
+);
+
+/**
+ * POST /api/firms/:id/invite
+ * Admin-only. Bulk-sends invite emails via SendGrid.
+ * Body: { resend?: boolean }
+ *   resend=false (default): only users who have never been invited AND are not enrolled
+ *   resend=true: all unenrolled users with an email (re-invite everyone pending)
+ */
+router.post(
+  "/firms/:id/invite",
+  bearerAuth,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { resend = false } = req.body as { resend?: boolean };
+
+    const [firm] = await db
+      .select({ id: firmsTable.id, name: firmsTable.name })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    const allUsers = await db
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        apiKey: usersTable.apiKey,
+        refreshToken: usersTable.refreshToken,
+        invitedAt: usersTable.invitedAt,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.firmId, id));
+
+    const baseUrl =
+      process.env.NODE_ENV === "production"
+        ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
+        : `http://localhost:${process.env.PORT}`;
+
+    const candidates = allUsers.filter((u) => {
+      if (!u.email) return false;
+      const isEnrolled = u.refreshToken != null;
+      if (isEnrolled) return false;
+      if (resend) return true;
+      return u.invitedAt == null;
+    });
+
+    if (candidates.length === 0) {
+      res.json({
+        sent: 0,
+        skipped: 0,
+        errors: [],
+        message: resend
+          ? "No unenrolled users with email addresses found."
+          : "No uninvited users found. Use resend=true to re-invite existing users.",
+      });
+      return;
+    }
+
+    const { sendBulkInvites } = await import("../lib/emailService.js");
+    const result = await sendBulkInvites(
+      candidates.map((u) => ({
+        toEmail: u.email!,
+        userName: u.name,
+        firmName: firm.name,
+        enrollUrl: `${baseUrl}/api/auth/user/enroll?id=${u.id}`,
+        baseUrl,
+      })),
+    );
+
+    if (result.sent > 0) {
+      await Promise.all(
+        candidates
+          .filter((_, i) => !result.errors.some((e) => e.email === candidates[i].email))
+          .map((u) =>
+            db
+              .update(usersTable)
+              .set({ invitedAt: new Date(), updatedAt: new Date() })
+              .where(eq(usersTable.id, u.id)),
+          ),
+      );
+    }
+
+    logger.info({ firmId: id, ...result }, "Bulk invite completed");
+    res.json({
+      ...result,
+      message: `${result.sent} invite${result.sent !== 1 ? "s" : ""} sent.${result.skipped > 0 ? ` ${result.skipped} failed — check errors.` : ""}`,
+    });
+  },
+);
+
+/**
+ * POST /api/firms/:id/logo
+ * Admin-only. Saves a logo (base64 data URL or HTTPS URL) for the firm.
+ * Body: { logoData: string }
+ */
+router.post(
+  "/firms/:id/logo",
+  bearerAuth,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { logoData } = req.body as { logoData?: string };
+
+    if (!logoData || typeof logoData !== "string") {
+      res.status(400).json({ error: "logoData is required" });
+      return;
+    }
+
+    const [firm] = await db.select({ id: firmsTable.id, name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, id));
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    await db.update(firmsTable).set({ logoUrl: logoData, updatedAt: new Date() }).where(eq(firmsTable.id, id));
+    logger.info({ firmId: id }, "Firm logo updated");
+    res.json({ ok: true, message: "Logo saved." });
   },
 );
 

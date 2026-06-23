@@ -15,6 +15,7 @@ export const usersTable = pgTable("users", {
   restUrl: text("rest_url"),
   tokenExpiresAt: bigint("token_expires_at", { mode: "number" }),
   sessionExpiresAt: bigint("session_expires_at", { mode: "number" }),
+  invitedAt: timestamp("invited_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -54,6 +54,7 @@ export type FirmDetail = {
   seatLimit: number | null;
   enrolledSeats: number;
   seatsRemaining: number | "unlimited";
+  logoUrl: string | null;
   createdAt: string;
 };
 
@@ -63,6 +64,8 @@ export type UserRow = {
   email: string | null;
   role: string;
   enrolled: boolean;
+  invitedAt: string | null;
+  enrollUrl: string;
   createdAt: string;
 };
 
@@ -71,6 +74,13 @@ export type UsageMonth = {
   month: number;
   activeSeats: number;
   totalCalls: number;
+};
+
+export type InviteResult = {
+  sent: number;
+  skipped: number;
+  errors: { email: string; error: string }[];
+  message: string;
 };
 
 export const api = {
@@ -87,15 +97,41 @@ export const api = {
 
   getFirm: (id: string) => apiFetch<FirmDetail>(`/firms/${id}`),
 
-  listUsers: (firmId: string) =>
-    apiFetch<{ data: UserRow[] }>(`/firms/${firmId}/users`).then(
-      (r) => r.data,
+  activateFirm: (id: string) =>
+    apiFetch<{ id: string; name: string; subscriptionStatus: string; message: string }>(
+      `/firms/${id}/activate`,
+      { method: "POST" },
     ),
 
+  listUsers: (firmId: string) =>
+    apiFetch<{ data: UserRow[] }>(`/firms/${firmId}/users`).then((r) => r.data),
+
+  createUser: (body: { name: string; email?: string; firmId: string; role?: string }) =>
+    apiFetch<{
+      id: string;
+      name: string;
+      email: string | null;
+      apiKey: string;
+      firmId: string | null;
+      role: string;
+      enrollUrl: string;
+      message: string;
+    }>("/users", { method: "POST", body: JSON.stringify(body) }),
+
+  sendInvites: (firmId: string, resend = false) =>
+    apiFetch<InviteResult>(`/firms/${firmId}/invite`, {
+      method: "POST",
+      body: JSON.stringify({ resend }),
+    }),
+
+  uploadLogo: (firmId: string, logoData: string) =>
+    apiFetch<{ ok: boolean; message: string }>(`/firms/${firmId}/logo`, {
+      method: "POST",
+      body: JSON.stringify({ logoData }),
+    }),
+
   getUsage: (firmId: string) =>
-    apiFetch<{ data: UsageMonth[] }>(`/firms/${firmId}/usage`).then(
-      (r) => r.data,
-    ),
+    apiFetch<{ data: UsageMonth[] }>(`/firms/${firmId}/usage`).then((r) => r.data),
 
   billingPortal: (firmId: string) =>
     apiFetch<{ url: string }>(`/firms/${firmId}/billing-portal`, {
