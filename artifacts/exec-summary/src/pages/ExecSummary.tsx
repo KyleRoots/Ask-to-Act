@@ -132,7 +132,7 @@ export default function ExecSummary() {
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Pricing Structure</div>
               <RevenueRow label="Platform · $499 / mo" desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
-              <RevenueRow label="Per-active-seat · $49 / mo" desc="Only billed when a seat makes at least one AI call that month" />
+              <RevenueRow label="Per-active-seat · $29 / mo" desc="Only billed when a seat makes at least one AI call that month" />
               <RevenueRow label="Additional connectors · $299 / mo" desc="Each system beyond the first (Salesforce, Workday, Greenhouse…)" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
                 <RevenueRow label="Onboarding · $3,500 one-time" desc="Setup, training, OAuth registration. Waived on annual plans." gold />
@@ -141,10 +141,10 @@ export default function ExecSummary() {
 
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Worked Examples · Monthly Recurring</div>
-              <PricingRow seats="10 active seats · 1 connector" range="~$990 / mo" />
-              <PricingRow seats="25 active seats · 1 connector" range="~$1,700 / mo" />
-              <PricingRow seats="50 active seats · 2 connectors" range="~$3,200 / mo" />
-              <PricingRow seats="100 active seats · 3 connectors" range="~$5,800 / mo" />
+              <PricingRow seats="10 active seats · 1 connector" range="~$789 / mo" />
+              <PricingRow seats="25 active seats · 1 connector" range="~$1,200 / mo" />
+              <PricingRow seats="50 active seats · 2 connectors" range="~$2,200 / mo" />
+              <PricingRow seats="100 active seats · 3 connectors" range="~$4,000 / mo" />
               <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.5 }}>
                 Natural expansion motion: firms add seats as AI proves its value to the desk,
                 then add connectors as the second system demands it. Each step is incremental revenue at near-zero incremental cost.

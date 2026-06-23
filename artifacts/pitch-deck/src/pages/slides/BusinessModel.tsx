@@ -33,7 +33,7 @@ export default function BusinessModel() {
           </div>
           <div className="border-l-2 border-accent pl-[1.2vw]">
             <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
-              Per-active-seat · $49 / mo
+              Per-active-seat · $29 / mo
             </div>
             <div className="mt-[0.4vh] font-body text-[1.45vw] text-muted leading-snug">
               Only billed when a seat actually uses the bridge that month.
@@ -67,7 +67,7 @@ export default function BusinessModel() {
               <div className="font-display font-semibold text-[2vw] text-text">10 active seats</div>
               <div className="font-body text-[1.1vw] text-muted">1 connector</div>
             </div>
-            <div className="font-display font-bold text-[2.2vw] text-accent">~$990 / mo</div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$789 / mo</div>
           </div>
 
           <div className="mt-[1.5vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
@@ -75,7 +75,7 @@ export default function BusinessModel() {
               <div className="font-display font-semibold text-[2vw] text-text">25 active seats</div>
               <div className="font-body text-[1.1vw] text-muted">1 connector</div>
             </div>
-            <div className="font-display font-bold text-[2.2vw] text-accent">~$1.7k / mo</div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$1.2k / mo</div>
           </div>
 
           <div className="mt-[1.5vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
@@ -83,7 +83,7 @@ export default function BusinessModel() {
               <div className="font-display font-semibold text-[2vw] text-text">50 active seats</div>
               <div className="font-body text-[1.1vw] text-muted">2 connectors</div>
             </div>
-            <div className="font-display font-bold text-[2.2vw] text-accent">~$3.2k / mo</div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$2.2k / mo</div>
           </div>
 
           <div className="mt-[1.5vh] flex items-baseline justify-between">
@@ -91,7 +91,7 @@ export default function BusinessModel() {
               <div className="font-display font-semibold text-[2vw] text-text">100 active seats</div>
               <div className="font-body text-[1.1vw] text-muted">3 connectors</div>
             </div>
-            <div className="font-display font-bold text-[2.2vw] text-accent">~$5.8k / mo</div>
+            <div className="font-display font-bold text-[2.2vw] text-accent">~$4k / mo</div>
           </div>
 
           <div className="mt-[2vh] font-body text-[1.2vw] text-muted leading-snug border-t border-line pt-[2vh]">
