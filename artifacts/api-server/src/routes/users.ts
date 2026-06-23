@@ -304,15 +304,84 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp?apiKey=${enrolledUser.apiKey}` : null;
     const e = escapeHtml;
 
+    const toolSteps: Record<string, { label: string; steps: string[] }> = {
+      chatgpt: {
+        label: "ChatGPT",
+        steps: [
+          "Go to <strong>chatgpt.com</strong> and sign in",
+          "Click your profile icon (top-right) then <strong>Settings</strong>",
+          "Select <strong>Connectors</strong> from the left menu",
+          "Click <strong>Add new connector</strong>, paste your URL above, and click Connect",
+          "Start a chat — your Bullhorn tools will appear automatically",
+        ],
+      },
+      claude: {
+        label: "Claude",
+        steps: [
+          "Go to <strong>claude.ai</strong> and sign in",
+          "Click the <strong>Integrations</strong> icon in the left sidebar",
+          "Click <strong>Add more</strong>, then choose <strong>Add custom integration</strong>",
+          "Paste your URL above and click Save",
+          "Start a new conversation — your Bullhorn tools will be available",
+        ],
+      },
+      gemini: {
+        label: "Gemini",
+        steps: [
+          "Go to <strong>gemini.google.com</strong> and sign in with your Google account",
+          "Click the <strong>Extensions</strong> icon or go to <strong>Settings, then Extensions</strong>",
+          "Look for <strong>Custom connectors</strong> or <strong>Add MCP server</strong>",
+          "Paste your URL above and authorize the connection",
+          "Start a conversation and ask Gemini to search your candidates in Bullhorn",
+        ],
+      },
+      grok: {
+        label: "Grok",
+        steps: [
+          "Go to <strong>grok.com</strong> (or open Grok within X) and sign in",
+          "Click <strong>Settings</strong> then look for <strong>Connectors</strong> or <strong>Integrations</strong>",
+          "Select <strong>Add custom connector</strong> and paste your URL above",
+          "Authorize the connection when prompted",
+          "Start a new chat — your Bullhorn tools will be available",
+        ],
+      },
+      other: {
+        label: "Other tool",
+        steps: [
+          "Open your AI tool and sign in",
+          "Find <strong>Settings</strong> then look for <strong>Connectors</strong>, <strong>Integrations</strong>, or <strong>MCP servers</strong>",
+          "Add a new custom connector and paste your URL above",
+          "Authorize or save the connection",
+          "Start a conversation and confirm your Bullhorn tools appear",
+        ],
+      },
+    };
+
+    const toolOrder = ["chatgpt", "claude", "gemini", "grok", "other"] as const;
+
+    const toolTabsHtml = toolOrder.map((key) => `
+      <button class="tool-tab" data-tool="${key}" onclick="selectTool('${key}')">${toolSteps[key].label}</button>
+    `).join("");
+
+    const toolPanelsHtml = toolOrder.map((key) => {
+      const stepsHtml = toolSteps[key].steps.map((s, i) => `
+        <div class="step">
+          <span class="step-num">${i + 1}</span>
+          <p class="step-text">${s}</p>
+        </div>`).join("");
+      return `<div class="tool-panel" id="panel-${key}" style="display:none">${stepsHtml}</div>`;
+    }).join("");
+
     res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connected | AskToAct</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
   display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
-main{max-width:480px;width:100%}
+main{max-width:500px;width:100%}
 .logo{display:flex;align-items:center;gap:8px;margin-bottom:28px}
-.logo-dot{width:8px;height:8px;border-radius:50%;background:#38bdf8}
+.logo-badge{width:28px;height:28px;border-radius:8px;background:#4F46E5;display:flex;align-items:center;justify-content:center}
+.logo-dot{width:10px;height:10px;border-radius:50%;background:#fff}
 .logo-name{font-weight:700;font-size:15px}
 .card{background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:32px}
 .check{width:44px;height:44px;border-radius:50%;background:rgba(16,185,129,.15);border:1px solid rgba(52,211,153,.3);
@@ -321,54 +390,67 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
 .sub{font-size:14px;color:#7a8ba0;margin:0 0 24px;line-height:1.6}
 .mcp-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#38bdf8;text-transform:uppercase;margin-bottom:8px}
 .mcp-box{background:#0b1020;border:1px solid #1e2a3a;border-radius:10px;padding:14px 16px;
-  font-family:monospace;font-size:12px;color:#cbd5e1;word-break:break-all;line-height:1.6;margin-bottom:8px}
+  font-family:monospace;font-size:12px;color:#cbd5e1;word-break:break-all;line-height:1.6;margin-bottom:8px;cursor:pointer}
+.mcp-box:hover{border-color:#38bdf8}
 .copy-btn{width:100%;padding:10px;background:#4F46E5;color:#fff;border:none;border-radius:8px;
-  font-size:13px;font-weight:600;cursor:pointer;margin-bottom:20px}
+  font-size:13px;font-weight:600;cursor:pointer;margin-bottom:24px}
 .copy-btn:hover{background:#4338ca}
-.steps{border-top:1px solid #1e2a3a;padding-top:20px;margin-top:4px}
-.step{display:flex;gap:12px;margin-bottom:14px}
+.tool-section{border-top:1px solid #1e2a3a;padding-top:20px}
+.tool-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#64748b;text-transform:uppercase;margin-bottom:12px}
+.tool-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.tool-tab{padding:6px 14px;border-radius:20px;border:1px solid #1e2a3a;background:#0f1622;
+  color:#64748b;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
+.tool-tab:hover{border-color:#38bdf8;color:#94a3b8}
+.tool-tab.active{border-color:#4F46E5;background:rgba(79,70,229,.15);color:#818cf8;font-weight:600}
+.step{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
 .step-num{width:22px;height:22px;border-radius:50%;background:rgba(79,70,229,.2);border:1px solid rgba(79,70,229,.4);
-  color:#818cf8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;shrink:0;flex-shrink:0}
-.step-text{font-size:13px;color:#6b7a99;line-height:1.5}
+  color:#818cf8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-text{font-size:13px;color:#6b7a99;line-height:1.6;margin:0}
 .step-text strong{color:#cbd5e1}
+.note{margin-top:16px;font-size:11px;color:#2d3748;line-height:1.5}
 </style></head>
 <body><main>
-<div class="logo"><span class="logo-dot"></span><span class="logo-name">AskToAct</span></div>
+<div class="logo">
+  <div class="logo-badge"><span class="logo-dot"></span></div>
+  <span class="logo-name">AskToAct</span>
+</div>
 <div class="card">
   <div class="check">✓</div>
   <h1>Bullhorn account connected!</h1>
   <p class="sub">Linked as <strong style="color:#e8ecf3">${e(bhUsername.trim())}</strong>. Your AI connector is ready.</p>
   ${mcpUrl ? `
   <p class="mcp-label">Your personal connector URL</p>
-  <div class="mcp-box" id="mcp">${e(mcpUrl)}</div>
-  <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000)})">Copy connector URL</button>
+  <div class="mcp-box" id="mcp" title="Click to select all">${e(mcpUrl)}</div>
+  <button class="copy-btn" id="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000)})">Copy connector URL</button>
   ` : ""}
-  <div class="steps">
-    <div class="step">
-      <span class="step-num">1</span>
-      <p class="step-text">In your preferred AI tool (ChatGPT, Claude, Gemini, etc.), go to <strong>Settings, then Connectors</strong> and paste your URL</p>
-    </div>
-    <div class="step">
-      <span class="step-num">2</span>
-      <p class="step-text">Add a new connector and paste your URL above when prompted</p>
-    </div>
-    <div class="step">
-      <span class="step-num">3</span>
-      <p class="step-text">Start a chat and ask it to search candidates, update a note, or submit a job. It will use your Bullhorn account.</p>
-    </div>
+  <div class="tool-section">
+    <p class="tool-label">Which AI tool are you using?</p>
+    <div class="tool-tabs">${toolTabsHtml}</div>
+    ${toolPanelsHtml}
+    <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
   </div>
 </div>
 </main>
 <script>
-// Pre-select MCP URL on click for easy copy
+function selectTool(key) {
+  document.querySelectorAll('.tool-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tool === key);
+  });
+  document.querySelectorAll('.tool-panel').forEach(function(p) {
+    p.style.display = p.id === 'panel-' + key ? 'block' : 'none';
+  });
+}
+// Pre-select MCP URL on click
 const box = document.getElementById('mcp');
-if (box) box.addEventListener('click', () => {
+if (box) box.addEventListener('click', function() {
   const sel = window.getSelection();
   const range = document.createRange();
   range.selectNodeContents(box);
   sel.removeAllRanges();
   sel.addRange(range);
 });
+// Default to ChatGPT
+selectTool('chatgpt');
 </script>
 </body></html>`);
   } catch (err) {
