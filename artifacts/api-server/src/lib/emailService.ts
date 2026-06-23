@@ -4,6 +4,15 @@ const FROM_EMAIL = process.env["FROM_EMAIL"] ?? "noreply@asktoact.ai";
 const FROM_NAME = process.env["FROM_NAME"] ?? "AskToAct";
 const PROD_URL = process.env["PROD_URL"] ?? "https://connect.asktoact.ai";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 function logoHtml(): string {
   const logoB64 =
     "PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9u" +
@@ -261,16 +270,16 @@ export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
         <p style="margin:0 0 6px;font-size:12px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">
           ${emoji} ${label}
         </p>
-        <h2 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#f8fafc;">${payload.subject}</h2>
-        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.7;white-space:pre-wrap;">${payload.message}</p>
+        <h2 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#f8fafc;">${escapeHtml(payload.subject)}</h2>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.7;white-space:pre-wrap;">${escapeHtml(payload.message)}</p>
 
         <div style="border-top:1px solid #1e2a3a;padding-top:20px;">
           <table cellpadding="0" cellspacing="0">
             <tr>
               <td style="font-size:13px;color:#64748b;padding-right:6px;">From:</td>
-              <td style="font-size:13px;color:#94a3b8;font-weight:600;">${payload.userName}</td>
+              <td style="font-size:13px;color:#94a3b8;font-weight:600;">${escapeHtml(payload.userName)}</td>
               <td style="font-size:13px;color:#64748b;padding-left:4px;">
-                &lt;<a href="mailto:${payload.userEmail}" style="color:#38bdf8;text-decoration:none;">${payload.userEmail}</a>&gt;
+                &lt;<a href="mailto:${escapeHtml(payload.userEmail)}" style="color:#38bdf8;text-decoration:none;">${escapeHtml(payload.userEmail)}</a>&gt;
               </td>
             </tr>
           </table>
@@ -280,7 +289,7 @@ export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
 
       <!-- Footer -->
       <tr><td style="padding-top:20px;font-size:11px;color:#2d3748;text-align:center;">
-        Submitted via AskToAct customer portal &nbsp;·&nbsp; Reply directly to this email to respond to ${payload.userName}
+        Submitted via AskToAct customer portal &nbsp;·&nbsp; Reply directly to this email to respond to ${escapeHtml(payload.userName)}
       </td></tr>
 
     </table>
