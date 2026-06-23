@@ -50,10 +50,11 @@ const stripeSync = new StripeSync({ ... });
 
 ## Stripe product seed script
 
-Located at `scripts/src/seed-products.ts`. Run with:
+Located at `artifacts/api-server/src/scripts/seed-stripe-products.ts` (canonical; wired to the `seed:stripe` npm script). Run with:
 ```
-pnpm --filter @workspace/scripts exec tsx src/seed-products.ts
+pnpm --filter @workspace/api-server run seed:stripe
 ```
+(A redundant duplicate previously lived at `scripts/src/seed-products.ts` + `scripts/src/stripeClient.ts` — both removed.)
 Idempotent — uses `stripe.products.search` before creating. Creates:
 - AskToAct Platform: $499/mo + $4,990/yr
 - AskToAct Active Seat: $29/mo

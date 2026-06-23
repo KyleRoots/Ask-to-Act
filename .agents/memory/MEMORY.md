@@ -20,4 +20,4 @@
 - [tool_usage firm attribution](tool-usage-firm-attribution.md) — tool_usage unique key has no firmId; user reassignment would misattribute usage to old firm. Deferred — no reassignment feature exists yet.
 - [React role guard pattern](react-role-guard.md) — `notAdmin = me && me.role !== "admin"` is falsy when me is undefined (loading/failed) → exposes content. Always gate on `isAdmin = me?.role === "admin"` with explicit loading / denied / content branches.
 - [Write phase: per-user OAuth + write tools](bullhorn-write-phase.md) — users table + personal apiKey → per-user Bullhorn session; 3 write tools (add_note, update_candidate_status, create_job_submission); shared OAuth callback routes service vs user: states; write tools never cached.
-- [Stripe connector integration](stripe-connector-integration.md) — header="X-Replit-Token", key=settings.secret (not secret_key); runMigrations before StripeSync; seed script at scripts/src/seed-products.ts.
+- [Stripe connector integration](stripe-connector-integration.md) — header="X-Replit-Token", key=settings.secret (not secret_key); runMigrations before StripeSync; canonical seed = api-server `seed:stripe`.

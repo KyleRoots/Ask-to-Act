@@ -38,7 +38,9 @@ async function getStripeClient(): Promise<Stripe> {
     throw new Error(`Failed to fetch Stripe credentials: ${resp.status} ${resp.statusText}`);
   }
 
-  const data = await resp.json();
+  const data = (await resp.json()) as {
+    items?: Array<{ settings?: { secret?: string } }>;
+  };
   const settings = data.items?.[0]?.settings;
 
   if (!settings?.secret) {
@@ -102,8 +104,12 @@ async function main() {
   console.log("\n🔑  Connecting to Stripe…");
   const stripe = await getStripeClient();
 
-  const acct = await stripe.accounts.retrieve();
-  const isTest = (acct as { testmode?: boolean }).testmode !== false;
+  const acct = await (
+    stripe.accounts as unknown as {
+      retrieve(): Promise<{ testmode?: boolean }>;
+    }
+  ).retrieve();
+  const isTest = acct.testmode !== false;
   console.log(`\n✅  Connected to Stripe (${isTest ? "TEST" : "LIVE"} mode)\n`);
 
   console.log("📦  Platform Plan — AskToAct Platform");

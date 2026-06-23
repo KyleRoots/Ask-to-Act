@@ -109,7 +109,7 @@ router.post("/firms", bearerAuth, requireService, async (req: Request, res: Resp
  * Admin-only. Returns firm details, live subscription status, and seat usage.
  */
 router.get("/firms/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = req.params as { id: string };
 
   const [firm] = await db
     .select()
@@ -166,7 +166,7 @@ router.get(
   "/firms/:id/users",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
 
     const [firm] = await db
       .select({ id: firmsTable.id })
@@ -226,7 +226,7 @@ router.post(
   "/firms/:id/invite",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     const { resend = false } = req.body as { resend?: boolean };
 
     const [firm] = await db
@@ -331,7 +331,7 @@ router.post(
   "/firms/:id/logo",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     const { logoData } = req.body as { logoData?: string };
 
     if (!logoData || typeof logoData !== "string") {
@@ -359,7 +359,7 @@ router.post(
   "/firms/:id/billing-portal",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
 
     const [firm] = await db
       .select()
@@ -405,7 +405,7 @@ router.post(
   "/firms/:id/activate",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     const { seatLimit, note } = req.body as {
       seatLimit?: number;
       note?: string;
@@ -453,7 +453,7 @@ router.get(
   "/firms/:id/usage",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
 
     const [firm] = await db
       .select({ id: firmsTable.id })
@@ -506,7 +506,7 @@ router.get(
   "/firms/:id/usage/detail",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
 
     const [firm] = await db
       .select({ id: firmsTable.id })
@@ -537,7 +537,7 @@ router.post(
   "/firms/:id/checkout",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
 
     const [firm] = await db.select().from(firmsTable).where(eq(firmsTable.id, id));
     if (!firm) {

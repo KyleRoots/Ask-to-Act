@@ -53,7 +53,7 @@ export class StripeStorage {
     // Fall back to live Stripe lookup if we have a subscription ID
     if (firm.stripeSubscriptionId) {
       const sub = await this.getSubscription(firm.stripeSubscriptionId);
-      if (sub?.status) return sub.status as ReturnType<typeof this.resolveFirmStatus> extends Promise<infer T> ? T : never;
+      if (sub?.status) return sub.status as "active" | "trialing" | "past_due" | "canceled" | "none";
     }
 
     return "none";
