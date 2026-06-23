@@ -343,7 +343,7 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   ${mcpUrl ? `
   <p class="mcp-label">Your personal connector URL</p>
   <div class="mcp-box" id="mcp">${e(mcpUrl)}</div>
-  <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000})">Copy connector URL</button>
+  <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000)})">Copy connector URL</button>
   ` : ""}
   <div class="steps">
     <div class="step">
