@@ -61,7 +61,7 @@ export default function Support() {
       const resp = await fetch(`/api/support`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: ticketType, subject, message, userName, userEmail }),
+        body: JSON.stringify({ type: ticketType, subject, message }),
       });
 
       if (!resp.ok) {

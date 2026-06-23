@@ -1,25 +1,33 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { logger } from "../lib/logger.js";
+import { requireClerkUser } from "../middlewares/clerk-user.js";
 
 const router: IRouter = Router();
 
 /**
  * POST /api/support
- * Open to authenticated portal users (no bearer token required — user identity
- * comes from the request body, pre-filled by Clerk on the client).
- * Body: { type, subject, message, userName, userEmail }
+ * Requires a valid Clerk session (portal users only). Identity is derived
+ * server-side from the Clerk session — body-supplied name/email are ignored
+ * to prevent spoofing.
+ * Body: { type, subject, message }
  */
-router.post("/support", async (req: Request, res: Response) => {
-  const { type, subject, message, userName, userEmail } = req.body as {
+router.post("/support", requireClerkUser, async (req: Request, res: Response) => {
+  const { type, subject, message } = req.body as {
     type?: string;
     subject?: string;
     message?: string;
-    userName?: string;
-    userEmail?: string;
   };
 
-  if (!type || !subject || !message || !userEmail) {
-    res.status(400).json({ error: "type, subject, message, and userEmail are required" });
+  const userName = req.portalUser!.name ?? "Portal user";
+  const userEmail = req.portalUser!.email ?? "";
+
+  if (!type || !subject || !message) {
+    res.status(400).json({ error: "type, subject, and message are required" });
+    return;
+  }
+
+  if (!userEmail) {
+    res.status(400).json({ error: "No email address on your account — contact support@asktoact.com directly." });
     return;
   }
 

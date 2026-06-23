@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, usersTable, firmsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import {
   invalidateUserSession,
@@ -161,15 +161,27 @@ router.patch("/users/:id", bearerAuth, requireService, async (req: Request, res:
   }
 
   try {
-    const rows = await db
-      .select({ id: usersTable.id })
+    const [user] = await db
+      .select({ id: usersTable.id, role: usersTable.role, firmId: usersTable.firmId })
       .from(usersTable)
       .where(eq(usersTable.id, id))
       .limit(1);
 
-    if (!rows[0]) {
+    if (!user) {
       res.status(404).json({ error: "User not found" });
       return;
+    }
+
+    // Guard: cannot demote the last admin of a firm
+    if (role === "recruiter" && user.role === "admin" && user.firmId) {
+      const [{ adminCount }] = await db
+        .select({ adminCount: count() })
+        .from(usersTable)
+        .where(and(eq(usersTable.firmId, user.firmId), eq(usersTable.role, "admin")));
+      if (Number(adminCount) <= 1) {
+        res.status(409).json({ error: "Cannot demote the last admin of a firm — promote another user to admin first." });
+        return;
+      }
     }
 
     await db
@@ -192,8 +204,32 @@ router.patch("/users/:id", bearerAuth, requireService, async (req: Request, res:
 router.delete("/users/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    const [user] = await db
+      .select({ id: usersTable.id, role: usersTable.role, firmId: usersTable.firmId })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    // Guard: cannot delete the last admin of a firm
+    if (user.role === "admin" && user.firmId) {
+      const [{ adminCount }] = await db
+        .select({ adminCount: count() })
+        .from(usersTable)
+        .where(and(eq(usersTable.firmId, user.firmId), eq(usersTable.role, "admin")));
+      if (Number(adminCount) <= 1) {
+        res.status(409).json({ error: "Cannot remove the last admin of a firm — promote another user to admin first." });
+        return;
+      }
+    }
+
     invalidateUserSession(id);
     await db.delete(usersTable).where(eq(usersTable.id, id));
+    logger.info({ userId: id }, "User deleted");
     res.json({ deleted: true, id });
   } catch (err) {
     logger.error({ err, userId: id }, "Failed to delete user");
