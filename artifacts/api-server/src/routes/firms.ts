@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
+import { getBaseUrl } from "../lib/getBaseUrl.js";
 
 const router: IRouter = Router();
 
@@ -63,10 +64,7 @@ router.post("/firms", bearerAuth, async (req: Request, res: Response) => {
       const priceId = prices.data[0]?.id;
 
       if (priceId) {
-        const baseUrl =
-          process.env.NODE_ENV === "production"
-            ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
-            : `http://localhost:${process.env.PORT}`;
+        const baseUrl = getBaseUrl();
 
         const session = await stripe.checkout.sessions.create({
           customer: customer.id,
@@ -192,10 +190,7 @@ router.get(
       .from(usersTable)
       .where(eq(usersTable.firmId, id));
 
-    const baseUrl =
-      process.env.NODE_ENV === "production"
-        ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
-        : `http://localhost:${process.env.PORT}`;
+    const baseUrl = getBaseUrl();
 
     res.json({
       data: users.map((u) => ({
@@ -244,10 +239,7 @@ router.post(
       .from(usersTable)
       .where(eq(usersTable.firmId, id));
 
-    const baseUrl =
-      process.env.NODE_ENV === "production"
-        ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
-        : `http://localhost:${process.env.PORT}`;
+    const baseUrl = getBaseUrl();
 
     const candidates = allUsers.filter((u) => {
       if (!u.email) return false;
@@ -358,10 +350,7 @@ router.post(
       );
       const stripe = await getUncachableStripeClient();
 
-      const baseUrl =
-        process.env.NODE_ENV === "production"
-          ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
-          : `http://localhost:${process.env.PORT}`;
+      const baseUrl = getBaseUrl();
 
       const session = await stripe.billingPortal.sessions.create({
         customer: firm.stripeCustomerId,
@@ -525,10 +514,7 @@ router.post(
         return;
       }
 
-      const baseUrl =
-        process.env.NODE_ENV === "production"
-          ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
-          : `http://localhost:${process.env.PORT}`;
+      const baseUrl = getBaseUrl();
 
       const session = await stripe.checkout.sessions.create({
         customer: customerId,

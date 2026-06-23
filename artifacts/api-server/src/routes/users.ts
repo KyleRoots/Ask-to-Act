@@ -9,6 +9,7 @@ import {
 } from "../lib/bullhorn-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
+import { getBaseUrl } from "../lib/getBaseUrl.js";
 
 const router: IRouter = Router();
 
@@ -299,10 +300,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       .where(eq(usersTable.id, id))
       .limit(1);
 
-    const baseUrl =
-      process.env.NODE_ENV === "production"
-        ? `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`
-        : `http://localhost:${process.env.PORT}`;
+    const baseUrl = getBaseUrl();
     const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp?apiKey=${enrolledUser.apiKey}` : null;
     const e = escapeHtml;
 
