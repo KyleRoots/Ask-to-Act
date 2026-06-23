@@ -161,6 +161,11 @@ export const api = {
       body: JSON.stringify({ resend }),
     }),
 
+  sendInviteToUser: (firmId: string, userId: string) =>
+    apiFetch<InviteResult>(`/firms/${firmId}/invite/${userId}`, {
+      method: "POST",
+    }),
+
   uploadLogo: (firmId: string, logoData: string) =>
     apiFetch<{ ok: boolean; message: string }>(`/firms/${firmId}/logo`, {
       method: "POST",

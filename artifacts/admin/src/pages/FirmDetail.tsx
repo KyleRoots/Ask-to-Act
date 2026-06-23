@@ -456,6 +456,15 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     onError: (err: Error) => toast({ title: "Invite failed", description: err.message, variant: "destructive" }),
   });
 
+  const sendOneInviteMutation = useMutation({
+    mutationFn: (userId: string) => api.sendInviteToUser(firmId, userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+      toast({ title: "Invite sent ✓" });
+    },
+    onError: (err: Error) => toast({ title: "Invite failed", description: err.message, variant: "destructive" }),
+  });
+
   const logoMutation = useMutation({
     mutationFn: (logoData: string) => api.uploadLogo(firmId, logoData),
     onSuccess: () => {
@@ -936,6 +945,16 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                             )}
                           </div>
                           <div className="flex items-center gap-2 mt-2">
+                            {!u.enrolled && (
+                              <button
+                                onClick={() => sendOneInviteMutation.mutate(u.id)}
+                                disabled={sendOneInviteMutation.isPending}
+                                className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
+                                style={{ background: "rgba(16,185,129,.1)", color: "#34D399", border: "1px solid rgba(52,211,153,.25)" }}
+                              >
+                                {u.invitedAt ? "↺ Resend" : "✉ Invite"}
+                              </button>
+                            )}
                             <button
                               onClick={() => updateRoleMutation.mutate({ userId: u.id, role: u.role === "admin" ? "recruiter" : "admin" })}
                               disabled={updateRoleMutation.isPending}
@@ -1036,6 +1055,19 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                               </td>
                               <td className="px-5 py-4">
                                 <div className="flex items-center gap-2">
+                                  {!u.enrolled && (
+                                    <button
+                                      onClick={() => sendOneInviteMutation.mutate(u.id)}
+                                      disabled={sendOneInviteMutation.isPending}
+                                      className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60 whitespace-nowrap"
+                                      style={{ background: "rgba(16,185,129,.1)", color: "#34D399", border: "1px solid rgba(52,211,153,.25)" }}
+                                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.18)"; }}
+                                      onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.1)"; }}
+                                      title={u.invitedAt ? "Re-send invite email to this user" : "Send invite email to this user"}
+                                    >
+                                      {u.invitedAt ? "↺ Resend" : "✉ Invite"}
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => updateRoleMutation.mutate({ userId: u.id, role: u.role === "admin" ? "recruiter" : "admin" })}
                                     disabled={updateRoleMutation.isPending}

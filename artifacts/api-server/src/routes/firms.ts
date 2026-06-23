@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, firmsTable, usersTable, seatActivityTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { buildFirmUsageDetail } from "../lib/usage-report.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
@@ -319,6 +319,89 @@ router.post(
       ...result,
       message: `${result.sent} invite${result.sent !== 1 ? "s" : ""} sent.${result.skipped > 0 ? ` ${result.skipped} failed — check errors.` : ""}`,
     });
+  },
+);
+
+/**
+ * POST /api/firms/:id/invite/:userId
+ * Admin-only. Sends an invite email to a single user.
+ */
+router.post(
+  "/firms/:id/invite/:userId",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id, userId } = req.params as { id: string; userId: string };
+
+    const [firm] = await db
+      .select({ id: firmsTable.id, name: firmsTable.name })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    const [user] = await db
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        refreshToken: usersTable.refreshToken,
+        enrollToken: usersTable.enrollToken,
+        enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
+      })
+      .from(usersTable)
+      .where(and(eq(usersTable.id, userId), eq(usersTable.firmId, id)));
+
+    if (!user) {
+      res.status(404).json({ error: "User not found in this firm" });
+      return;
+    }
+
+    if (!user.email) {
+      res.json({ sent: 0, skipped: 1, errors: [{ email: "", error: "User has no email address" }], message: "User has no email address." });
+      return;
+    }
+
+    if (user.refreshToken != null) {
+      res.json({ sent: 0, skipped: 1, errors: [], message: "User is already enrolled — invite skipped." });
+      return;
+    }
+
+    const baseUrl = getBaseUrl();
+    const now = new Date();
+    let token = user.enrollToken;
+    if (!token || !user.enrollTokenExpiresAt || user.enrollTokenExpiresAt < now) {
+      token = randomBytes(32).toString("hex");
+      const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      await db
+        .update(usersTable)
+        .set({ enrollToken: token, enrollTokenExpiresAt: expires, updatedAt: now })
+        .where(eq(usersTable.id, user.id));
+    }
+
+    const enrollUrl = `${baseUrl}/api/auth/user/enroll?token=${token}`;
+
+    const { sendInviteEmail } = await import("../lib/emailService.js");
+    try {
+      await sendInviteEmail({
+        toEmail: user.email,
+        userName: user.name,
+        firmName: firm.name,
+        enrollUrl,
+      });
+      await db
+        .update(usersTable)
+        .set({ invitedAt: new Date(), updatedAt: new Date() })
+        .where(eq(usersTable.id, user.id));
+      logger.info({ firmId: id, userId: user.id }, "Single invite sent");
+      res.json({ sent: 1, skipped: 0, errors: [], message: "Invite sent." });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ firmId: id, userId: user.id, err }, "Failed to send single invite");
+      res.status(500).json({ sent: 0, skipped: 1, errors: [{ email: user.email, error: msg }], message: `Failed to send invite: ${msg}` });
+    }
   },
 );
 
