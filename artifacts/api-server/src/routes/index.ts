@@ -4,6 +4,7 @@ import mcpRouter from "./mcp";
 import authRouter from "./auth";
 import usersRouter from "./users";
 import firmsRouter from "./firms";
+import supportRouter from "./support";
 import v1Router from "./v1";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
 
@@ -13,6 +14,7 @@ router.use(healthRouter);
 router.use(authRouter);
 router.use(usersRouter);
 router.use(firmsRouter);
+router.use(supportRouter);
 router.use(mcpRouter);
 router.use("/v1", bearerAuth, v1Router);
 

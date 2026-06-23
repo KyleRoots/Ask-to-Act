@@ -1,4 +1,5 @@
 import { useClerk, useUser } from "@clerk/react";
+import { useLocation } from "wouter";
 
 const BG = "hsl(220 50% 4%)";
 const SURFACE = "hsl(222 45% 8%)";
@@ -25,15 +26,16 @@ function LogoIcon({ size = 28 }: { size?: number }) {
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const quickLinks = [
-  { icon: "👥", label: "Team Members", desc: "Manage who has AI access on your team", soon: false },
-  { icon: "📊", label: "Usage & Activity", desc: "Track how your team uses AI tools each month", soon: false },
-  { icon: "🔗", label: "AI Connections", desc: "Connect ChatGPT, Claude, or Gemini", soon: true },
-  { icon: "⚙️", label: "Settings", desc: "Billing, seat limits, and preferences", soon: true },
+  { icon: "👥", label: "Team Members", desc: "Manage who has AI access on your team", soon: true, href: null },
+  { icon: "📊", label: "Usage & Activity", desc: "Track how your team uses AI tools each month", soon: true, href: null },
+  { icon: "🔗", label: "AI Connections", desc: "Connect ChatGPT, Claude, or Gemini", soon: true, href: null },
+  { icon: "🛟", label: "Support & Feedback", desc: "Report a bug, request a feature, or ask a question", soon: false, href: "/support" },
 ];
 
 export default function Dashboard() {
   const { user } = useUser();
   const { signOut } = useClerk();
+  const [, navigate] = useLocation();
 
   const firstName = user?.firstName ?? user?.username ?? "there";
 
@@ -110,13 +112,16 @@ export default function Dashboard() {
           {quickLinks.map((item) => (
             <div
               key={item.label}
-              className="rounded-2xl p-5 transition-colors relative"
+              onClick={() => item.href && navigate(item.href)}
+              className="rounded-2xl p-5 transition-all relative"
               style={{
                 background: SURFACE,
                 border: `1px solid ${BORDER}`,
-                opacity: item.soon ? 0.6 : 1,
+                opacity: item.soon ? 0.5 : 1,
                 cursor: item.soon ? "default" : "pointer",
               }}
+              onMouseEnter={(e) => { if (!item.soon) (e.currentTarget as HTMLElement).style.borderColor = "rgba(79,70,229,.5)"; }}
+              onMouseLeave={(e) => { if (!item.soon) (e.currentTarget as HTMLElement).style.borderColor = BORDER; }}
             >
               {item.soon && (
                 <span
@@ -125,6 +130,9 @@ export default function Dashboard() {
                 >
                   Coming soon
                 </span>
+              )}
+              {!item.soon && (
+                <span className="absolute top-4 right-4 text-xs" style={{ color: "#3A4460" }}>→</span>
               )}
               <div className="text-2xl mb-3">{item.icon}</div>
               <h3 className="text-sm font-semibold text-white mb-1">{item.label}</h3>

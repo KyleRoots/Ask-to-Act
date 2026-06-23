@@ -130,6 +130,70 @@ export async function sendInviteEmail(payload: InvitePayload): Promise<void> {
   });
 }
 
+export interface SupportPayload {
+  userEmail: string;
+  userName: string;
+  type: "bug" | "feature" | "question";
+  subject: string;
+  message: string;
+}
+
+export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const dest = process.env.SUPPORT_EMAIL ?? "support@asktoact.ai";
+
+  if (!apiKey) {
+    logger.warn({ userEmail: payload.userEmail }, "SENDGRID_API_KEY not set — support email skipped");
+    return;
+  }
+
+  const typeLabel: Record<string, string> = {
+    bug: "🐛 Bug Report",
+    feature: "✨ Feature Request",
+    question: "❓ Question",
+  };
+  const label = typeLabel[payload.type] ?? payload.type;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /></head>
+<body style="margin:0;padding:0;background:#0b1020;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0b1020;padding:40px 20px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+      <tr><td style="padding-bottom:24px;">
+        <span style="font-size:16px;font-weight:700;color:#f8fafc;">AskToAct</span>
+        <span style="font-size:13px;color:#38bdf8;margin-left:10px;">Support Inbox</span>
+      </td></tr>
+      <tr><td style="background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:36px;">
+        <p style="margin:0 0 6px;font-size:12px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">${label}</p>
+        <h2 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#f8fafc;">${payload.subject}</h2>
+        <p style="margin:0 0 20px;font-size:15px;color:#cbd5e1;line-height:1.7;white-space:pre-wrap;">${payload.message}</p>
+        <div style="border-top:1px solid #1e2a3a;padding-top:20px;font-size:13px;color:#4a5568;">
+          <strong style="color:#94a3b8;">From:</strong> ${payload.userName} &lt;${payload.userEmail}&gt;
+        </div>
+      </td></tr>
+      <tr><td style="padding-top:20px;font-size:11px;color:#2d3748;text-align:center;">
+        Submitted via AskToAct customer portal · Reply directly to this email to respond to ${payload.userName}
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+
+  const sgMail = await import("@sendgrid/mail");
+  sgMail.default.setApiKey(apiKey);
+
+  await sgMail.default.send({
+    to: dest,
+    from: { name: FROM_NAME, email: FROM_EMAIL },
+    replyTo: { name: payload.userName, email: payload.userEmail },
+    subject: `[${label}] ${payload.subject}`,
+    html,
+    text: `${label}: ${payload.subject}\n\nFrom: ${payload.userName} <${payload.userEmail}>\n\n${payload.message}`,
+  });
+}
+
 export async function sendBulkInvites(payloads: InvitePayload[]): Promise<{
   sent: number;
   skipped: number;

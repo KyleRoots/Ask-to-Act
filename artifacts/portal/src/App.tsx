@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { Toaster } from "@/components/ui/toaster";
 import Home from "@/pages/Home";
 import Dashboard from "@/pages/Dashboard";
+import Support from "@/pages/Support";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -204,6 +205,12 @@ function ClerkProviderWithRoutes() {
           <Route path="/sign-in/*?" component={SignInPage} />
           <Route path="/sign-up/*?" component={SignUpPage} />
           <Route path="/dashboard" component={DashboardRoute} />
+          <Route path="/support" component={() => (
+            <>
+              <Show when="signed-in"><Support /></Show>
+              <Show when="signed-out"><Redirect to="/" /></Show>
+            </>
+          )} />
           <Route component={NotFound} />
         </Switch>
         <Toaster />
