@@ -215,17 +215,18 @@ export default function ExecSummary() {
         {/* Section: What We Need */}
         <Section title="Next Steps" index="07">
           <p style={bodyStyle}>
-            The implementation is live. The next milestone is converting the proof of concept to paid revenue
-            and expanding the platform. Three decisions move this forward:
+            The implementation is live and the platform is production-ready. The billing layer, customer portal,
+            and self-serve onboarding flow are all deployed. The next milestone is converting the proof of concept
+            to paid revenue and expanding the platform. Three decisions move this forward:
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', margin: '1.75rem 0' }}>
-            <AskCard number="1" title="First paying customer" body="Convert the Myticas deployment to a paid pilot or sign a comparable staffing firm. Validates pricing and produces the first case study." />
-            <AskCard number="2" title="Subscription gate + billing" body="Activate the access-control and Stripe billing layer so additional firms can self-serve onboard without manual provisioning." />
+            <AskCard number="1" title="First paying customer" body="Convert the Myticas deployment to a paid pilot or sign a comparable staffing firm. Validates pricing, surfaces field-mapping requirements for customer two, and produces the first case study." />
+            <AskCard number="2" title="Production go-live" body="Deploy to connect.asktoact.ai, activate live-mode Stripe billing, and complete Clerk authentication setup for the production domain. The platform is ready — this is a configuration step, not a build step." />
             <AskCard number="3" title="Second connector decision" body="Prioritize the next ATS or CRM connector (Salesforce, Greenhouse, Lever) based on the first three commercial customer conversations." />
           </div>
           <p style={bodyStyle}>
-            AskToAct does not need more product to start selling. It needs one paying customer and a billing
-            layer. Both are within reach in the current quarter.
+            AskToAct does not need more product to start selling. The connector is live, the billing layer is built,
+            and the customer portal is running. The next action is a sales call, not a sprint.
           </p>
         </Section>
 
