@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
-import { db, firmsTable, usersTable } from "@workspace/db";
+import { db, firmsTable, usersTable, seatActivityTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { bearerAuth } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
@@ -241,6 +241,58 @@ router.post(
       logger.error({ err }, "Failed to create billing portal session");
       res.status(500).json({ error: "Stripe not available" });
     }
+  },
+);
+
+/**
+ * GET /api/firms/:id/usage
+ * Admin-only. Monthly active-seat counts for the firm (last 24 months).
+ */
+router.get(
+  "/firms/:id/usage",
+  bearerAuth,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    const rows = await db
+      .select({
+        year: seatActivityTable.year,
+        month: seatActivityTable.month,
+        userId: seatActivityTable.userId,
+        callCount: seatActivityTable.callCount,
+      })
+      .from(seatActivityTable)
+      .where(eq(seatActivityTable.firmId, id));
+
+    // Group by year+month → count distinct active users + total calls
+    const byMonth: Record<
+      string,
+      { year: number; month: number; activeSeats: number; totalCalls: number }
+    > = {};
+    for (const row of rows) {
+      const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+      if (!byMonth[key]) {
+        byMonth[key] = { year: row.year, month: row.month, activeSeats: 0, totalCalls: 0 };
+      }
+      byMonth[key].activeSeats++;
+      byMonth[key].totalCalls += row.callCount;
+    }
+
+    const data = Object.values(byMonth).sort((a, b) =>
+      a.year !== b.year ? a.year - b.year : a.month - b.month,
+    );
+
+    res.json({ data });
   },
 );
 

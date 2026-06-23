@@ -38,6 +38,7 @@ import {
 } from "./bullhorn-client.js";
 import { getUserSession } from "./bullhorn-auth.js";
 import type { CallerIdentity } from "../middlewares/bearer-auth.js";
+import { trackSeatActivity } from "./seat-activity.js";
 import { logger } from "./logger.js";
 import { responseCache, stableKey } from "./cache.js";
 import {
@@ -223,6 +224,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
     try {
       const result = await withLogging(toolName, args, fn);
+      track();
       return { content: [{ type: "text", text: formatResult(result) }] };
     } catch (err) {
       if (err instanceof BullhornPermissionError) {
@@ -240,6 +242,29 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       }
       throw err;
     }
+  }
+
+  /** Fire-and-forget: increments this month's active-seat count for the caller. */
+  function track() {
+    if (caller?.kind === "user") {
+      trackSeatActivity(caller.userId).catch(() => {});
+    }
+  }
+
+  /**
+   * Read-tool runner with caller-aware usage tracking.
+   * Replaces the module-level `runTool` for all calls inside createMcpServer
+   * so the caller identity (captured in closure) is available for billing.
+   */
+  function rt(
+    toolName: string,
+    args: Record<string, unknown>,
+    fn: () => Promise<unknown>,
+  ) {
+    return runTool(toolName, args, fn).then((result) => {
+      track();
+      return result;
+    });
   }
 
   tool(
@@ -279,7 +304,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         ),
     },
     async ({ query, keywords, count, start, fields }) =>
-      runTool("search_candidates", { query, keywords, count, start, fields }, () =>
+      rt("search_candidates", { query, keywords, count, start, fields }, () =>
         searchCandidates({ query, keywords, count, start, fields }),
       ),
   );
@@ -298,7 +323,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ query, count, start, fields }) =>
-      runTool("search_jobs", { query, count, start, fields }, () =>
+      rt("search_jobs", { query, count, start, fields }, () =>
         searchJobs({ query, count, start, fields }),
       ),
   );
@@ -315,7 +340,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ query, count, start, fields }) =>
-      runTool("search_companies", { query, count, start, fields }, () =>
+      rt("search_companies", { query, count, start, fields }, () =>
         searchCompanies({ query, count, start, fields }),
       ),
   );
@@ -334,7 +359,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ query, count, start, fields }) =>
-      runTool("search_contacts", { query, count, start, fields }, () =>
+      rt("search_contacts", { query, count, start, fields }, () =>
         searchContacts({ query, count, start, fields }),
       ),
   );
@@ -347,7 +372,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ id, fields }) =>
-      runTool("get_candidate", { id, fields }, () =>
+      rt("get_candidate", { id, fields }, () =>
         getCandidate({ id, fields }),
       ),
   );
@@ -360,7 +385,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ id, fields }) =>
-      runTool("get_job", { id, fields }, () =>
+      rt("get_job", { id, fields }, () =>
         getJob({ id, fields }),
       ),
   );
@@ -373,7 +398,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ id, fields }) =>
-      runTool("get_company", { id, fields }, () =>
+      rt("get_company", { id, fields }, () =>
         getCompany({ id, fields }),
       ),
   );
@@ -386,7 +411,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ id, fields }) =>
-      runTool("get_contact", { id, fields }, () =>
+      rt("get_contact", { id, fields }, () =>
         getContact({ id, fields }),
       ),
   );
@@ -413,7 +438,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
-      runTool(
+      rt(
         "list_submissions_for_job",
         { jobId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
@@ -444,7 +469,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
-      runTool(
+      rt(
         "list_placements",
         { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
@@ -475,7 +500,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
-      runTool(
+      rt(
         "get_notes",
         { candidateId, jobId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
@@ -503,7 +528,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
     async ({ entityType, query, count, start, fields }) =>
-      runTool(
+      rt(
         "search_entity",
         { entityType, query, count, start, fields },
         () => searchAnyEntity({ entityType, query, count, start, fields }),
@@ -529,7 +554,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
     async ({ entityType, where, orderBy, count, start, fields }) =>
-      runTool(
+      rt(
         "query_entity",
         { entityType, where, orderBy, count, start, fields },
         () => queryAnyEntity({ entityType, where, orderBy, count, start, fields }),
@@ -561,7 +586,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         ),
     },
     async ({ entityType, query, groupBy, groupValues }) =>
-      runTool(
+      rt(
         "count_entity",
         { entityType, query, groupBy, groupValues },
         () => countEntity({ entityType, query, groupBy, groupValues }),
@@ -577,7 +602,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return (sensible defaults if omitted)"),
     },
     async ({ entityType, id, fields }) =>
-      runTool("get_entity", { entityType, id, fields }, () =>
+      rt("get_entity", { entityType, id, fields }, () =>
         getAnyEntity({ entityType, id, fields }),
       ),
   );
@@ -589,7 +614,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       entityType: z.string().describe(entityTypeDescribe),
     },
     async ({ entityType }) =>
-      runTool("describe_entity", { entityType }, () =>
+      rt("describe_entity", { entityType }, () =>
         describeEntity({ entityType }),
       ),
   );
@@ -610,7 +635,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       ),
     },
     async ({ entityType, fieldName }) =>
-      runTool("list_field_options", { entityType, fieldName }, () =>
+      rt("list_field_options", { entityType, fieldName }, () =>
         listFieldOptions({ entityType, fieldName }),
       ),
   );
@@ -641,7 +666,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ candidateId, dateAddedStart, dateAddedEnd, count, start, fields }) =>
-      runTool(
+      rt(
         "list_submissions_for_candidate",
         { candidateId, dateAddedStart, dateAddedEnd, count, start, fields },
         () =>
@@ -678,7 +703,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ ownerId, startAfter, startBefore, count, start, fields }) =>
-      runTool(
+      rt(
         "list_appointments",
         { ownerId, startAfter, startBefore, count, start, fields },
         () => listAppointments({ ownerId, startAfter, startBefore, count, start, fields }),
@@ -708,7 +733,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }) =>
-      runTool(
+      rt(
         "list_tasks",
         { ownerId, dueStart, dueEnd, isCompleted, count, start, fields },
         () => listTasks({ ownerId, dueStart, dueEnd, isCompleted, count, start, fields }),
@@ -725,7 +750,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ query, count, start, fields }) =>
-      runTool("search_leads", { query, count, start, fields }, () =>
+      rt("search_leads", { query, count, start, fields }, () =>
         searchLeads({ query, count, start, fields }),
       ),
   );
@@ -740,7 +765,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ query, count, start, fields }) =>
-      runTool("search_opportunities", { query, count, start, fields }, () =>
+      rt("search_opportunities", { query, count, start, fields }, () =>
         searchOpportunities({ query, count, start, fields }),
       ),
   );
@@ -756,7 +781,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
     async ({ name, email, count, start, fields }) =>
-      runTool("find_users", { name, email, count, start, fields }, () =>
+      rt("find_users", { name, email, count, start, fields }, () =>
         findUsers({ name, email, count, start, fields }),
       ),
   );
@@ -772,7 +797,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
     },
     async ({ candidateId }) =>
-      runTool("list_candidate_attachments", { candidateId }, () =>
+      rt("list_candidate_attachments", { candidateId }, () =>
         listCandidateAttachments({ candidateId }),
       ),
   );
@@ -792,7 +817,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .describe("Maximum characters of text to return (default: 20000, max: 100000)"),
     },
     async ({ candidateId, fileId, maxChars }) =>
-      runTool("read_candidate_attachment", { candidateId, fileId, maxChars }, () =>
+      rt("read_candidate_attachment", { candidateId, fileId, maxChars }, () =>
         readCandidateAttachment({ candidateId, fileId, maxChars }),
       ),
   );
@@ -817,7 +842,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .describe("FULL mode only: maximum characters of text to return per source (default: 20000, max: 100000)"),
     },
     async ({ candidateId, maxChars, highlight }) =>
-      runTool("get_candidate_resume", { candidateId, maxChars, highlight }, () =>
+      rt("get_candidate_resume", { candidateId, maxChars, highlight }, () =>
         getCandidateResume({ candidateId, maxChars, highlight }),
       ),
   );
@@ -833,7 +858,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "list_reports",
     "List the pre-built REPORTS available in this connector (the report 'library'): their names, what each shows, and parameters. Call this when the user asks 'what reports can you run?' / 'what can you show me?' or to pick a canned analytics report. Each report is a single fast call that returns a finished table. For anything not in the library, use the ad-hoc tools (count_entity, search_*).",
     {},
-    async () => runTool("list_reports", {}, async () => listReports()),
+    async () => rt("list_reports", {}, async () => listReports()),
   );
 
   tool(
@@ -846,7 +871,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .optional()
         .describe("Calendar year for placements (default: current year, year-to-date)."),
     },
-    async ({ year }) => runTool("staffing_scorecard", { year }, () => staffingScorecard({ year })),
+    async ({ year }) => rt("staffing_scorecard", { year }, () => staffingScorecard({ year })),
   );
 
   tool(
@@ -861,7 +886,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .describe("'confirmed' (default; Approved/Completed/Ended) or 'all' statuses."),
     },
     async ({ startDate, endDate, status }) =>
-      runTool("placements_report", { startDate, endDate, status }, () =>
+      rt("placements_report", { startDate, endDate, status }, () =>
         placementsReport({ startDate, endDate, status }),
       ),
   );
@@ -870,21 +895,21 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "open_jobs_report",
     "PRE-BUILT REPORT (one fast call). Current demand: open job requisitions by department and by employment type, with the grand total. USE THIS for ANY \"open jobs by office/branch/department/region\" question instead of fetching job records and grouping them yourself — grouping jobs by OWNER is WRONG (the office lives in correlatedCustomText1, NOT the owner; e.g. owner accounts named \"MYT-Ottawa House\" are not the office). Open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (this instance's locked definition).",
     {},
-    async () => runTool("open_jobs_report", {}, () => openJobsReport()),
+    async () => rt("open_jobs_report", {}, () => openJobsReport()),
   );
 
   tool(
     "sales_pipeline_report",
     "PRE-BUILT REPORT (one fast call). Active sales pipeline: open opportunities by department and by stage (status), with the total. Active = NOT Closed-Won / Closed-Lost / Converted AND not soft-deleted (isDeleted:false).",
     {},
-    async () => runTool("sales_pipeline_report", {}, () => salesPipelineReport()),
+    async () => rt("sales_pipeline_report", {}, () => salesPipelineReport()),
   );
 
   tool(
     "job_aging_report",
     "PRE-BUILT REPORT (one fast call). How long open jobs have been open: counts bucketed by age (0-30 / 31-90 / 91-180 / 180+ days) plus stale (>90 days) open jobs by department. Spotlights aging requisitions. USE THIS for ANY \"stale / aging open jobs\" or \"aging by office\" question — do NOT assemble it from a job-record list or group by owner (office = correlatedCustomText1; the owner is a person/house account, not the office). Open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false.",
     {},
-    async () => runTool("job_aging_report", {}, () => jobAgingReport()),
+    async () => rt("job_aging_report", {}, () => jobAgingReport()),
   );
 
   tool(
@@ -895,7 +920,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),
     },
     async ({ startDate, endDate }) =>
-      runTool("recruiter_leaderboard", { startDate, endDate }, () =>
+      rt("recruiter_leaderboard", { startDate, endDate }, () =>
         recruiterLeaderboard({ startDate, endDate }),
       ),
   );
