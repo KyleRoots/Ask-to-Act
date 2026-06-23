@@ -1,6 +1,68 @@
 import { db, bullhornTokensTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { logger } from "./logger.js";
+
+// ── At-rest token encryption (AES-256-GCM) ────────────────────────────────
+// TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key (openssl rand -base64 32).
+// Encrypted tokens are stored as "enc:v1:<iv_hex>:<tag_hex>:<ct_hex>".
+// Plaintext values (legacy / missing key) pass through unchanged so existing
+// tokens continue to work; they are re-encrypted on the next write.
+
+const ENC_PREFIX = "enc:v1:";
+
+function getTokenEncryptionKey(): Buffer | null {
+  const raw = process.env["TOKEN_ENCRYPTION_KEY"];
+  if (!raw) {
+    logger.warn("TOKEN_ENCRYPTION_KEY not set — refresh tokens stored in plaintext");
+    return null;
+  }
+  const key = Buffer.from(raw, "base64");
+  if (key.length !== 32) {
+    logger.warn(
+      { keyByteLength: key.length },
+      "TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes — token encryption disabled",
+    );
+    return null;
+  }
+  return key;
+}
+
+function encryptToken(plaintext: string): string {
+  const key = getTokenEncryptionKey();
+  if (!key) return plaintext;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${ENC_PREFIX}${iv.toString("hex")}:${tag.toString("hex")}:${ct.toString("hex")}`;
+}
+
+function decryptToken(stored: string): string {
+  if (!stored.startsWith(ENC_PREFIX)) {
+    // Legacy plaintext token — return as-is; re-encrypted on next write.
+    return stored;
+  }
+  const key = getTokenEncryptionKey();
+  if (!key) {
+    throw new Error(
+      "TOKEN_ENCRYPTION_KEY is required to decrypt stored tokens but is not set.",
+    );
+  }
+  const parts = stored.slice(ENC_PREFIX.length).split(":");
+  if (parts.length !== 3) throw new Error("Malformed encrypted token.");
+  const [ivHex, tagHex, ctHex] = parts;
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(ivHex, "hex"),
+  );
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return (
+    decipher.update(Buffer.from(ctHex, "hex")).toString("utf8") +
+    decipher.final("utf8")
+  );
+}
 
 const BULLHORN_LOGIN_INFO_URL =
   "https://rest.bullhornstaffing.com/rest-services/loginInfo";
@@ -79,16 +141,18 @@ async function loadRefreshToken(): Promise<string | null> {
     .from(bullhornTokensTable)
     .where(eq(bullhornTokensTable.id, CONNECTION_ID))
     .limit(1);
-  return rows[0]?.refreshToken ?? null;
+  const stored = rows[0]?.refreshToken ?? null;
+  return stored ? decryptToken(stored) : null;
 }
 
 async function saveRefreshToken(refreshToken: string): Promise<void> {
+  const toStore = encryptToken(refreshToken);
   await db
     .insert(bullhornTokensTable)
-    .values({ id: CONNECTION_ID, refreshToken, updatedAt: new Date() })
+    .values({ id: CONNECTION_ID, refreshToken: toStore, updatedAt: new Date() })
     .onConflictDoUpdate({
       target: bullhornTokensTable.id,
-      set: { refreshToken, updatedAt: new Date() },
+      set: { refreshToken: toStore, updatedAt: new Date() },
     });
 }
 
@@ -597,7 +661,7 @@ async function persistUserSession(
   await db
     .update(usersTable)
     .set({
-      refreshToken: tokens.refresh_token,
+      refreshToken: encryptToken(tokens.refresh_token),
       bhRestToken: loginData.BhRestToken,
       restUrl: loginData.restUrl,
       tokenExpiresAt: s.tokenExpiresAt,
@@ -642,7 +706,7 @@ export async function getUserSession(userId: string): Promise<Session> {
   const work = (async (): Promise<Session> => {
     const { oauthUrl, loginUrl } = await discoverEndpoints();
     try {
-      const tokens = await fetchTokenWithRefresh(oauthUrl, user.refreshToken!);
+      const tokens = await fetchTokenWithRefresh(oauthUrl, decryptToken(user.refreshToken!));
       const loginData = await login(tokens.access_token, loginUrl);
       const sessionExpiresAt = await resolveSessionExpiry(loginData);
       const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
