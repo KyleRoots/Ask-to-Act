@@ -108,7 +108,7 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
-      enrollUrl: `/api/auth/user/enroll?token=${enrollToken}`,
+      enrollUrl: `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}`,
       message:
         "Store this apiKey securely — it will not be shown again. " +
         "The user must visit enrollUrl in a browser to connect their Bullhorn account before write tools will work. " +
