@@ -1,7 +1,10 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./lib/stripe/stripeClient.js";
+import {
+  getStripeSync,
+  getUncachableStripeClient,
+} from "./lib/stripe/stripeClient.js";
 import { ensureColumns } from "./lib/ensure-columns.js";
 
 const rawPort = process.env["PORT"];
@@ -24,8 +27,30 @@ async function initStripe(): Promise<void> {
     logger.warn("DATABASE_URL not set — skipping Stripe initialization");
     return;
   }
+
   try {
     await runMigrations({ databaseUrl });
+  } catch (err: unknown) {
+    logger.warn({ err }, "Stripe migrations failed — skipping billing initialization");
+    return;
+  }
+
+  // Pre-validate Stripe credentials with a lightweight balance call before
+  // creating StripeSync. StripeSync logs internally at ERROR level when its
+  // own getAccountId call fails; by bailing out here first we keep startup
+  // logs clean when Stripe isn't fully configured.
+  try {
+    const stripeClient = await getUncachableStripeClient();
+    await stripeClient.balance.retrieve();
+  } catch (err: unknown) {
+    logger.warn(
+      { err },
+      "Stripe not connected — subscription gate will not enforce billing. Connect Stripe integration to enable.",
+    );
+    return;
+  }
+
+  try {
     const stripeSync = await getStripeSync();
     const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
     if (domain) {
@@ -39,10 +64,7 @@ async function initStripe(): Promise<void> {
     });
     logger.info("Stripe initialized");
   } catch (err: unknown) {
-    logger.warn(
-      { err },
-      "Stripe not connected — subscription gate will not enforce billing. Connect Stripe integration to enable.",
-    );
+    logger.warn({ err }, "Stripe webhook/sync setup failed");
   }
 }
 
