@@ -6,7 +6,9 @@ import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import {
   invalidateUserSession,
   enrollUserHeadless,
+  getAuthorizeUrl,
 } from "../lib/bullhorn-auth.js";
+import { rememberState } from "../lib/oauth-state.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
@@ -685,7 +687,26 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       return;
     }
 
-    res.send(enrollForm(token, rows[0].name, firmName));
+    // Escape hatch: ?manual=1 renders the legacy server-side credential form.
+    // This is intentionally NOT linked from any page so search-engine crawlers
+    // never see a Bullhorn password field on this domain (the pattern that got
+    // the domain flagged as a "deceptive site"). Only used if Bullhorn's
+    // first-time browser consent screen bounces for a given user.
+    if (req.query["manual"] === "1") {
+      res.send(enrollForm(token, rows[0].name, firmName));
+      return;
+    }
+
+    // Default flow: redirect the recruiter to Bullhorn's own login page. The
+    // user authenticates and approves consent on bullhorn.com — no password is
+    // ever entered on this domain. Bullhorn redirects back to the shared
+    // /api/auth/bullhorn/callback with an authorization code; the embedded
+    // userId in the state routes it to completeUserEnrollment.
+    const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
+    rememberState(state);
+    const authorizeUrl = await getAuthorizeUrl(state);
+    res.set("Cache-Control", "no-store");
+    res.redirect(authorizeUrl);
   } catch (err) {
     logger.error({ err }, "Enrollment form failed");
     res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));

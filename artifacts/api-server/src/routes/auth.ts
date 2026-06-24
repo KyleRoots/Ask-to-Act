@@ -186,6 +186,12 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
       await completeUserEnrollment(userId, code);
       logger.info({ userId }, "Bullhorn: user enrollment complete via shared callback");
 
+      // One-time enrollment token is now spent — clear it so the link can't be reused.
+      await db
+        .update(usersTable)
+        .set({ enrollToken: null, enrollTokenExpiresAt: null, updatedAt: new Date() })
+        .where(eq(usersTable.id, userId));
+
       const baseUrl = getBaseUrl();
       const [userRow] = await db
         .select({ apiKey: usersTable.apiKey })
