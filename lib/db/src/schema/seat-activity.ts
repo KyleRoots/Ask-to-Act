@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, primaryKey, index } from "drizzle-orm/pg-core";
 import { firmsTable } from "./firms";
 import { usersTable } from "./users";
 
@@ -17,7 +17,10 @@ export const seatActivityTable = pgTable(
     firstCallAt: timestamp("first_call_at").notNull().defaultNow(),
     lastCallAt: timestamp("last_call_at").notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.userId, table.year, table.month] })],
+  (table) => [
+    primaryKey({ columns: [table.userId, table.year, table.month] }),
+    index("seat_activity_firm_id_idx").on(table.firmId),
+  ],
 );
 
 export type SeatActivity = typeof seatActivityTable.$inferSelect;

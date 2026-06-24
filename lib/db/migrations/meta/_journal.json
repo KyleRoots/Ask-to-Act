@@ -15,6 +15,13 @@
       "when": 1782272554995,
       "tag": "0001_add_email_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782273684808,
+      "tag": "0002_flowery_pepper_potts",
+      "breakpoints": true
     }
   ]
 }

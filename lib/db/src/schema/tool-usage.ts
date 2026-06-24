@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, primaryKey, index } from "drizzle-orm/pg-core";
 import { firmsTable } from "./firms";
 import { usersTable } from "./users";
 
@@ -38,6 +38,7 @@ export const toolUsageTable = pgTable(
     primaryKey({
       columns: [table.userId, table.toolName, table.year, table.month],
     }),
+    index("tool_usage_firm_id_idx").on(table.firmId),
   ],
 );
 
