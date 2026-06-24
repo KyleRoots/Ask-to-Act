@@ -35,6 +35,22 @@ import {
   BullhornPermissionError,
   listFieldOptions,
   SUPPORTED_ENTITIES,
+  updateSubmissionStatus,
+  createJobOrder,
+  updateJobOrder,
+  createCompany,
+  updateCompany,
+  createContact,
+  updateContact,
+  createTask,
+  createAppointment,
+  createTearsheet,
+  addCandidatesToTearsheet,
+  removeCandidatesFromTearsheet,
+  createPlacement,
+  updatePlacement,
+  uploadFileToRecord,
+  createCandidateFromResume,
 } from "./bullhorn-client.js";
 import { getUserSession } from "./bullhorn-auth.js";
 import { sendSupportEmail } from "./emailService.js";
@@ -1119,6 +1135,320 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
             "Your support ticket has been sent to the AskToAct team." +
             (reporter_email ? ` They will follow up at ${reporter_email}.` : " Provide your email next time for a direct reply."),
         };
+      }),
+  );
+
+  // -------------------------------------------------------------------------
+  // Write-back surface (Task 50). Every tool below routes through
+  // resolveWriteSession() + runWriteTool() so it runs as the calling recruiter,
+  // surfaces 403s as permission_denied, is never cached, and fires usage
+  // tracking. These are MCP-connector only — NOT in the public OpenAPI door.
+  // -------------------------------------------------------------------------
+
+  const additionalFieldsSchema = z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional()
+    .describe(
+      "Optional extra fields keyed by their exact Bullhorn API field name (use describe_entity to find names; list_field_options for picklist values). " +
+        "Unknown field names are rejected before submission. For an association set the *Id helper param instead where one exists.",
+    );
+
+  writeTool(
+    "update_submission_status",
+    "WRITE: Advances a JobSubmission to a new pipeline status (e.g. move from 'Internally Submitted' to 'Client Submission' or 'Interview Scheduled'). " +
+      "Runs as YOU and respects your Bullhorn permissions. " +
+      "ALWAYS call list_field_options(JobSubmission, status) first and confirm the target status with the user — the value is validated against this instance's options before writing. " +
+      "Use list_submissions_for_job or list_submissions_for_candidate to find the submissionId.",
+    {
+      submissionId: z.number().int().positive().describe("Bullhorn JobSubmission ID to update."),
+      status: z.string().min(1).describe("New submission status — must be a valid value from list_field_options(JobSubmission, status)."),
+    },
+    async ({ submissionId, status }) =>
+      runWriteTool("update_submission_status", { submissionId, status }, async () => {
+        const session = await resolveWriteSession();
+        return updateSubmissionStatus(session, submissionId, status);
+      }),
+  );
+
+  writeTool(
+    "create_job",
+    "WRITE: Creates a new JobOrder (open requisition) in Bullhorn, owned by YOU. " +
+      "Requires a title and the clientCorporationId (use search_entity(ClientCorporation) to resolve the company). " +
+      "Fields are validated against this instance's schema before submission. " +
+      "Use list_field_options(JobOrder, status) / (JobOrder, employmentType) for picklist values, and put any extra fields in additionalFields. " +
+      "ALWAYS confirm the job title, company, and key details with the user before creating — this is a live record visible to all recruiters.",
+    {
+      title: z.string().min(1).describe("Job title for the requisition."),
+      clientCorporationId: z.number().int().positive().describe("Bullhorn ClientCorporation (company) ID this job belongs to."),
+      clientContactId: z.number().int().positive().optional().describe("Optional Bullhorn ClientContact ID (hiring contact at the company)."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ title, clientCorporationId, clientContactId, additionalFields }) =>
+      runWriteTool("create_job", { title, clientCorporationId }, async () => {
+        const session = await resolveWriteSession();
+        return createJobOrder(session, { title, clientCorporationId, clientContactId, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_job",
+    "WRITE: Updates fields on an existing JobOrder in Bullhorn, as YOU. " +
+      "Provide only the fields you want to change in `fields` (keyed by exact Bullhorn field name; use describe_entity(JobOrder) and list_field_options for valid names/values). " +
+      "ALWAYS confirm the change with the user first.",
+    {
+      jobOrderId: z.number().int().positive().describe("Bullhorn JobOrder ID to update."),
+      fields: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Covered', numOpenings: 2 })."),
+    },
+    async ({ jobOrderId, fields }) =>
+      runWriteTool("update_job", { jobOrderId }, async () => {
+        const session = await resolveWriteSession();
+        return updateJobOrder(session, jobOrderId, fields);
+      }),
+  );
+
+  writeTool(
+    "create_company",
+    "WRITE: Creates a new ClientCorporation (company/client) in Bullhorn, as YOU. " +
+      "Blocks creation if a company with the same name already exists (returns the existing ID so you can use it instead). " +
+      "Use additionalFields for phone, address, status, etc. (describe_entity(ClientCorporation) for names). " +
+      "ALWAYS confirm the company name and details with the user first.",
+    {
+      name: z.string().min(1).describe("Company name."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ name, additionalFields }) =>
+      runWriteTool("create_company", { name }, async () => {
+        const session = await resolveWriteSession();
+        return createCompany(session, { name, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_company",
+    "WRITE: Updates fields on an existing ClientCorporation in Bullhorn, as YOU. " +
+      "Provide only the fields to change in `fields` (exact Bullhorn field names). ALWAYS confirm with the user first.",
+    {
+      companyId: z.number().int().positive().describe("Bullhorn ClientCorporation ID to update."),
+      fields: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { phone: '...', status: 'Active Account' })."),
+    },
+    async ({ companyId, fields }) =>
+      runWriteTool("update_company", { companyId }, async () => {
+        const session = await resolveWriteSession();
+        return updateCompany(session, companyId, fields);
+      }),
+  );
+
+  writeTool(
+    "create_contact",
+    "WRITE: Creates a new ClientContact (a person at a client company) in Bullhorn, as YOU. " +
+      "Requires firstName, lastName, and the clientCorporationId of the company they work at. " +
+      "Blocks creation if the same name already exists at that company (returns the existing ID). " +
+      "ALWAYS confirm the contact details with the user first.",
+    {
+      firstName: z.string().min(1).describe("Contact's first name."),
+      lastName: z.string().min(1).describe("Contact's last name."),
+      clientCorporationId: z.number().int().positive().describe("Bullhorn ClientCorporation ID the contact works at."),
+      email: z.string().email().optional().describe("Contact email address."),
+      phone: z.string().optional().describe("Contact phone number."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ firstName, lastName, clientCorporationId, email, phone, additionalFields }) =>
+      runWriteTool("create_contact", { firstName, lastName, clientCorporationId }, async () => {
+        const session = await resolveWriteSession();
+        return createContact(session, { firstName, lastName, clientCorporationId, email, phone, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_contact",
+    "WRITE: Updates fields on an existing ClientContact in Bullhorn, as YOU. " +
+      "Provide only the fields to change in `fields` (exact Bullhorn field names). ALWAYS confirm with the user first.",
+    {
+      contactId: z.number().int().positive().describe("Bullhorn ClientContact ID to update."),
+      fields: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', status: 'Active' })."),
+    },
+    async ({ contactId, fields }) =>
+      runWriteTool("update_contact", { contactId }, async () => {
+        const session = await resolveWriteSession();
+        return updateContact(session, contactId, fields);
+      }),
+  );
+
+  writeTool(
+    "create_task",
+    "WRITE: Creates a Task (to-do / reminder) in Bullhorn, owned by YOU unless ownerId is given. " +
+      "Optionally link it to a candidate, job, or contact. Dates accept 'YYYY-MM-DD' or ISO 8601. " +
+      "ALWAYS confirm the subject and timing with the user first.",
+    {
+      subject: z.string().min(1).describe("Short task subject/title."),
+      dateBegin: z.string().optional().describe("Scheduled date/time. 'YYYY-MM-DD' or ISO 8601 (UTC if no zone)."),
+      dateEnd: z.string().optional().describe("End date/time. 'YYYY-MM-DD' or ISO 8601 (UTC if no zone)."),
+      type: z.string().optional().describe("Task type (see list_field_options(Task, type))."),
+      priority: z.number().int().optional().describe("Numeric priority (instance-specific)."),
+      ownerId: z.number().int().positive().optional().describe("Bullhorn user ID to own the task. Defaults to you."),
+      candidateId: z.number().int().positive().optional().describe("Optional candidate to link the task to."),
+      jobOrderId: z.number().int().positive().optional().describe("Optional job order to link the task to."),
+      clientContactId: z.number().int().positive().optional().describe("Optional client contact to link the task to."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ subject, dateBegin, dateEnd, type, priority, ownerId, candidateId, jobOrderId, clientContactId, additionalFields }) =>
+      runWriteTool("create_task", { subject }, async () => {
+        const session = await resolveWriteSession();
+        return createTask(session, { subject, dateBegin, dateEnd, type, priority, ownerId, candidateId, jobOrderId, clientContactId, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "create_appointment",
+    "WRITE: Creates an Appointment/meeting in Bullhorn, owned by YOU unless ownerId is given. " +
+      "Requires subject, dateBegin and dateEnd ('YYYY-MM-DD' or ISO 8601). Optionally link a candidate, job, or contact. " +
+      "ALWAYS confirm the subject and timing with the user first.",
+    {
+      subject: z.string().min(1).describe("Appointment subject/title."),
+      dateBegin: z.string().min(1).describe("Start date/time. 'YYYY-MM-DD' or ISO 8601 (UTC if no zone)."),
+      dateEnd: z.string().min(1).describe("End date/time. 'YYYY-MM-DD' or ISO 8601 (UTC if no zone)."),
+      location: z.string().optional().describe("Meeting location."),
+      type: z.string().optional().describe("Appointment type (see list_field_options(Appointment, type))."),
+      description: z.string().optional().describe("Notes / agenda for the appointment."),
+      ownerId: z.number().int().positive().optional().describe("Bullhorn user ID to own the appointment. Defaults to you."),
+      candidateId: z.number().int().positive().optional().describe("Optional candidate to link."),
+      jobOrderId: z.number().int().positive().optional().describe("Optional job order to link."),
+      clientContactId: z.number().int().positive().optional().describe("Optional client contact to link."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ subject, dateBegin, dateEnd, location, type, description, ownerId, candidateId, jobOrderId, clientContactId, additionalFields }) =>
+      runWriteTool("create_appointment", { subject }, async () => {
+        const session = await resolveWriteSession();
+        return createAppointment(session, { subject, dateBegin, dateEnd, location, type, description, ownerId, candidateId, jobOrderId, clientContactId, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "create_tearsheet",
+    "WRITE: Creates a Tearsheet (a saved shortlist of candidates) in Bullhorn, owned by YOU. " +
+      "Blocks if you already own a tearsheet with the same name. After creating, use add_candidates_to_tearsheet to populate it.",
+    {
+      name: z.string().min(1).describe("Tearsheet name."),
+      description: z.string().optional().describe("Optional description."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ name, description, additionalFields }) =>
+      runWriteTool("create_tearsheet", { name }, async () => {
+        const session = await resolveWriteSession();
+        return createTearsheet(session, { name, description, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "add_candidates_to_tearsheet",
+    "WRITE: Adds one or more candidates to an existing Tearsheet, as YOU. " +
+      "Resolve candidate IDs via search first. Max 50 candidate IDs per call.",
+    {
+      tearsheetId: z.number().int().positive().describe("Bullhorn Tearsheet ID."),
+      candidateIds: z.array(z.number().int().positive()).min(1).max(50).describe("Candidate IDs to add (max 50)."),
+    },
+    async ({ tearsheetId, candidateIds }) =>
+      runWriteTool("add_candidates_to_tearsheet", { tearsheetId, count: candidateIds.length }, async () => {
+        const session = await resolveWriteSession();
+        return addCandidatesToTearsheet(session, tearsheetId, candidateIds);
+      }),
+  );
+
+  writeTool(
+    "remove_candidates_from_tearsheet",
+    "WRITE: Removes one or more candidates from a Tearsheet, as YOU. Max 50 candidate IDs per call.",
+    {
+      tearsheetId: z.number().int().positive().describe("Bullhorn Tearsheet ID."),
+      candidateIds: z.array(z.number().int().positive()).min(1).max(50).describe("Candidate IDs to remove (max 50)."),
+    },
+    async ({ tearsheetId, candidateIds }) =>
+      runWriteTool("remove_candidates_from_tearsheet", { tearsheetId, count: candidateIds.length }, async () => {
+        const session = await resolveWriteSession();
+        return removeCandidatesFromTearsheet(session, tearsheetId, candidateIds);
+      }),
+  );
+
+  writeTool(
+    "create_placement",
+    "WRITE (SENSITIVE): Creates a Placement (a hire — candidate placed on a job) in Bullhorn, as YOU. " +
+      "Placements drive billing and reporting, so be careful: blocks if a placement already exists for this candidate+job. " +
+      "Required money/rate/date fields vary by instance and are validated before submission — use describe_entity(Placement) and list_field_options to fill additionalFields (e.g. payRate, clientBillRate, status, employmentType, salary). " +
+      "ALWAYS confirm ALL details (candidate, job, dates, pay/bill rates, status) with the user before creating.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID being placed."),
+      jobOrderId: z.number().int().positive().describe("Bullhorn job order ID the candidate is placed on."),
+      dateBegin: z.string().optional().describe("Placement start date. 'YYYY-MM-DD' or ISO 8601."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ candidateId, jobOrderId, dateBegin, additionalFields }) =>
+      runWriteTool("create_placement", { candidateId, jobOrderId }, async () => {
+        const session = await resolveWriteSession();
+        return createPlacement(session, { candidateId, jobOrderId, dateBegin, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_placement",
+    "WRITE (SENSITIVE): Updates fields on an existing Placement in Bullhorn, as YOU. " +
+      "Placements affect billing — provide only the fields to change in `fields` (exact Bullhorn names) and ALWAYS confirm with the user first.",
+    {
+      placementId: z.number().int().positive().describe("Bullhorn Placement ID to update."),
+      fields: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Completed', payRate: 65 })."),
+    },
+    async ({ placementId, fields }) =>
+      runWriteTool("update_placement", { placementId }, async () => {
+        const session = await resolveWriteSession();
+        return updatePlacement(session, placementId, fields);
+      }),
+  );
+
+  writeTool(
+    "upload_file_to_record",
+    "WRITE: Uploads a file (e.g. a résumé or document) and attaches it to an existing Bullhorn record, as YOU. " +
+      "Provide the file as base64-encoded bytes in fileContentBase64. Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc.",
+    {
+      entityType: z.string().min(1).describe("Bullhorn entity to attach to (e.g. 'Candidate', 'JobOrder')."),
+      entityId: z.number().int().positive().describe("ID of the record to attach the file to."),
+      fileName: z.string().min(1).describe("File name including extension (e.g. 'jane_doe_resume.pdf')."),
+      fileContentBase64: z.string().min(1).describe("Base64-encoded file bytes."),
+      contentType: z.string().optional().describe("MIME type (e.g. 'application/pdf'). Defaults to application/octet-stream."),
+      fileType: z.string().optional().describe("Bullhorn file type/category. Defaults to 'SAMPLE'."),
+      description: z.string().optional().describe("Optional file description."),
+    },
+    async ({ entityType, entityId, fileName, fileContentBase64, contentType, fileType, description }) =>
+      runWriteTool("upload_file_to_record", { entityType, entityId, fileName }, async () => {
+        const session = await resolveWriteSession();
+        return uploadFileToRecord(session, { entityType, entityId, fileName, fileContentBase64, contentType, fileType, description });
+      }),
+  );
+
+  writeTool(
+    "create_candidate_from_resume",
+    "WRITE: Parses a résumé file and creates a new Candidate from it in Bullhorn, as YOU, then attaches the original file. " +
+      "Provide the résumé as base64-encoded bytes; supported types: pdf, doc, docx, rtf, txt, html, odt. " +
+      "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner) — overrides win over parsed values. " +
+      "ALWAYS confirm with the user before creating a new candidate record.",
+    {
+      fileName: z.string().min(1).describe("Résumé file name including extension (drives the parse format)."),
+      fileContentBase64: z.string().min(1).describe("Base64-encoded résumé file bytes."),
+      contentType: z.string().optional().describe("MIME type of the résumé (e.g. 'application/pdf')."),
+      overrideFields: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .optional()
+        .describe("Optional Candidate fields to set/override (exact Bullhorn names; use list_field_options for picklists like status)."),
+    },
+    async ({ fileName, fileContentBase64, contentType, overrideFields }) =>
+      runWriteTool("create_candidate_from_resume", { fileName }, async () => {
+        const session = await resolveWriteSession();
+        return createCandidateFromResume(session, { fileName, fileContentBase64, contentType, overrideFields });
       }),
   );
 

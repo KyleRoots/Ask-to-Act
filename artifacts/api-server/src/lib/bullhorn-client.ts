@@ -2889,3 +2889,756 @@ export async function findUsers(args: {
 
   return { total: data.length, start, count: page.length, data: page };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Write-back surface (Task 50)
+//
+// Every function below takes an explicit per-user `session` and routes through
+// `writeFetch` (or `fileFetch` for multipart), so Bullhorn enforces the calling
+// recruiter's own ACLs and 403s surface as BullhornPermissionError. Cross-cutting
+// safety — pre-flight field validation, picklist validation, and generalized
+// duplicate prevention — is shared by all create/update helpers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** A blocked write because an equivalent record already exists. */
+export class BullhornDuplicateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BullhornDuplicateError";
+  }
+}
+
+/** Field-level pre-flight validation failure (bad field name or missing required). */
+export class BullhornFieldValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BullhornFieldValidationError";
+  }
+}
+
+interface WriteFieldMeta {
+  name: string;
+  required: boolean;
+  readOnly: boolean;
+  type?: string;
+  dataType?: string;
+  associatedEntity?: string;
+}
+
+// System-managed fields Bullhorn populates itself; never flag these as "missing
+// required" even when meta marks them required.
+const SYSTEM_MANAGED_FIELDS = new Set(
+  ["id", "dateadded", "datelastmodified", "datelastcomment", "migrateguid", "isdeleted"].map(
+    (s) => s.toLowerCase(),
+  ),
+);
+
+/**
+ * Loads a field-name -> metadata map for an entity from Bullhorn `meta`. Uses
+ * the shared service session (field configuration is firm-wide, not per-user);
+ * field-level WRITE permission is still enforced by Bullhorn under the user's
+ * own session at write time. Results are cached by `bullhornFetch`.
+ */
+async function getEntityFieldMeta(entity: string): Promise<Map<string, WriteFieldMeta>> {
+  const meta = (await bullhornFetch(`meta/${entity}`, {
+    fields: "*",
+    meta: "basic",
+  })) as { fields?: Array<Record<string, unknown>> };
+  const map = new Map<string, WriteFieldMeta>();
+  for (const f of meta.fields ?? []) {
+    if (typeof f.name !== "string") continue;
+    map.set((f.name as string).toLowerCase(), {
+      name: f.name as string,
+      required: f.required === true,
+      readOnly: f.readOnly === true,
+      type: typeof f.type === "string" ? (f.type as string) : undefined,
+      dataType: typeof f.dataType === "string" ? (f.dataType as string) : undefined,
+      associatedEntity: (f.associatedEntity as { entity?: string } | undefined)?.entity,
+    });
+  }
+  return map;
+}
+
+/** Truncates a long comma-joined list for error messages. */
+function truncateList(items: string[], max = 40): string {
+  if (items.length <= max) return items.join(", ");
+  return `${items.slice(0, max).join(", ")}, … (+${items.length - max} more — use describe_entity)`;
+}
+
+/**
+ * Pre-flight validation of a write body against an entity's live field schema.
+ *
+ * - Unknown field names are rejected with the list of valid fields (prevents
+ *   raw Bullhorn 400s like "invalid field" and tells the AI exactly what to fix).
+ * - On create, fields Bullhorn marks `required` (and not readOnly/system-managed)
+ *   that are absent are rejected with a clear message.
+ *
+ * Fails OPEN: if the meta lookup itself fails we log and let the write proceed,
+ * so a transient meta error never blocks a legitimate write — Bullhorn remains
+ * the final authority.
+ */
+export async function validateWriteFields(
+  entityType: string,
+  body: Record<string, unknown>,
+  opts: { mode: "create" | "update" } = { mode: "create" },
+): Promise<void> {
+  const entry = resolveEntity(entityType);
+  let fieldMap: Map<string, WriteFieldMeta>;
+  try {
+    fieldMap = await getEntityFieldMeta(entry.canonical);
+  } catch (err) {
+    logger.warn(
+      { err, entity: entry.canonical },
+      "Bullhorn: field meta lookup failed — skipping pre-flight validation (failing open)",
+    );
+    return;
+  }
+  if (fieldMap.size === 0) return;
+
+  const unknown = Object.keys(body).filter(
+    (k) => k.toLowerCase() !== "id" && !fieldMap.has(k.toLowerCase()),
+  );
+  if (unknown.length > 0) {
+    const valid = [...fieldMap.values()].map((f) => f.name).sort();
+    throw new BullhornFieldValidationError(
+      `Invalid field${unknown.length > 1 ? "s" : ""} for ${entry.canonical}: ${unknown.join(", ")}. ` +
+        `Use describe_entity("${entry.canonical}") to find the correct field name(s). ` +
+        `Valid fields include: ${truncateList(valid)}.`,
+    );
+  }
+
+  if (opts.mode === "create") {
+    const provided = new Set(Object.keys(body).map((k) => k.toLowerCase()));
+    const missing = [...fieldMap.values()]
+      .filter(
+        (f) =>
+          f.required &&
+          !f.readOnly &&
+          !SYSTEM_MANAGED_FIELDS.has(f.name.toLowerCase()) &&
+          !provided.has(f.name.toLowerCase()),
+      )
+      .map((f) => f.name);
+    if (missing.length > 0) {
+      throw new BullhornFieldValidationError(
+        `Missing required field${missing.length > 1 ? "s" : ""} for ${entry.canonical}: ${missing.join(", ")}. ` +
+          `Provide ${missing.length > 1 ? "these values" : "this value"} before creating the record ` +
+          `(use describe_entity("${entry.canonical}") and list_field_options for valid values).`,
+      );
+    }
+  }
+}
+
+/**
+ * Validates a value against a picklist field's configured options for THIS
+ * instance. Throws BullhornFieldValidationError listing the valid options when
+ * the value is not allowed. Fails OPEN when the field is not a picklist or the
+ * options cannot be loaded (Bullhorn remains the final authority).
+ */
+export async function assertPicklistValue(
+  entityType: string,
+  fieldName: string,
+  value: string,
+): Promise<void> {
+  let result: Awaited<ReturnType<typeof listFieldOptions>>;
+  try {
+    result = await listFieldOptions({ entityType, fieldName });
+  } catch {
+    return; // not a picklist, or options unavailable — let Bullhorn validate
+  }
+  const field = result.fields.find(
+    (f) => f.name.toLowerCase() === fieldName.toLowerCase(),
+  );
+  if (!field || field.options.length === 0) return;
+  const ok = field.options.some(
+    (o) => o.value === value || o.label === value,
+  );
+  if (!ok) {
+    const opts = field.options.map((o) => o.value).join(", ");
+    throw new BullhornFieldValidationError(
+      `"${value}" is not a valid ${fieldName} for ${result.entity}. Valid options: ${opts}. ` +
+        `Call list_field_options("${result.entity}", "${fieldName}") and ask the user to pick one.`,
+    );
+  }
+}
+
+/**
+ * Generalized pre-write duplicate guard. Runs a scoped /query (under the user
+ * session) and throws BullhornDuplicateError — including the existing record's
+ * ID so the AI can update instead of creating a dirty duplicate. Non-fatal: an
+ * unexpected check failure is logged and the write is allowed to proceed.
+ */
+async function checkDuplicate(
+  session: BullhornWriteSession,
+  entity: string,
+  where: string,
+  describe: string,
+  hint: string,
+): Promise<void> {
+  try {
+    const url = new URL(`query/${entity}`, session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set("where", where);
+    url.searchParams.set("fields", "id");
+    url.searchParams.set("count", "1");
+    const res = await fetch(url.toString());
+    if (!res.ok) return;
+    const data = (await res.json()) as { data?: Array<{ id: number }> };
+    if (data.data && data.data.length > 0) {
+      throw new BullhornDuplicateError(
+        `Duplicate ${entity} blocked: ${describe} already exists (existing ID: ${data.data[0].id}). ${hint}`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof BullhornDuplicateError) throw err;
+    logger.warn({ err, entity }, "Bullhorn: duplicate-check query failed — proceeding with write");
+  }
+}
+
+/** Doubles single quotes for safe inclusion in a /query where literal. */
+function q(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/** PUT a new entity record; returns its new Bullhorn ID. */
+async function createEntityRecord(
+  session: BullhornWriteSession,
+  entity: string,
+  body: Record<string, unknown>,
+): Promise<number> {
+  const data = (await writeFetch(session, "PUT", `entity/${entity}`, body)) as {
+    changedEntityId?: number;
+  };
+  return data.changedEntityId ?? 0;
+}
+
+/** POST an update to an existing entity record. */
+async function updateEntityRecord(
+  session: BullhornWriteSession,
+  entity: string,
+  id: number,
+  body: Record<string, unknown>,
+): Promise<void> {
+  await writeFetch(session, "POST", `entity/${entity}/${id}`, body);
+}
+
+/** Maps an optional numeric association id to a Bullhorn `{ id }` reference. */
+function assoc(id: number | undefined): { id: number } | undefined {
+  return id === undefined ? undefined : { id };
+}
+
+/** Drops undefined values so they are never sent in a write body. */
+function compact(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+// ── Pipeline transitions ──────────────────────────────────────────────────
+
+/**
+ * Advances a JobSubmission to a new pipeline status. Validates the requested
+ * status against the instance's configured JobSubmission status options before
+ * writing so an invalid stage is rejected with the real option list.
+ */
+export async function updateSubmissionStatus(
+  session: BullhornWriteSession,
+  submissionId: number,
+  status: string,
+): Promise<{ updated: true; submissionId: number; status: string }> {
+  await assertPicklistValue("JobSubmission", "status", status);
+  await updateEntityRecord(session, "JobSubmission", submissionId, { status });
+  return { updated: true, submissionId, status };
+}
+
+// ── JobOrder create / update ──────────────────────────────────────────────
+
+export async function createJobOrder(
+  session: BullhornWriteSession,
+  args: {
+    title: string;
+    clientCorporationId: number;
+    clientContactId?: number;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ jobOrderId: number; title: string }> {
+  const ownerId = await getSessionUserId(session);
+  const body = compact({
+    title: args.title,
+    clientCorporation: assoc(args.clientCorporationId),
+    clientContact: assoc(args.clientContactId),
+    owner: assoc(ownerId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("JobOrder", body, { mode: "create" });
+  const jobOrderId = await createEntityRecord(session, "JobOrder", body);
+  return { jobOrderId, title: args.title };
+}
+
+export async function updateJobOrder(
+  session: BullhornWriteSession,
+  jobOrderId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; jobOrderId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the job order.");
+  }
+  await validateWriteFields("JobOrder", fields, { mode: "update" });
+  await updateEntityRecord(session, "JobOrder", jobOrderId, fields);
+  return { updated: true, jobOrderId };
+}
+
+// ── ClientCorporation (company) create / update ───────────────────────────
+
+export async function createCompany(
+  session: BullhornWriteSession,
+  args: { name: string; additionalFields?: Record<string, unknown> },
+): Promise<{ companyId: number; name: string }> {
+  await checkDuplicate(
+    session,
+    "ClientCorporation",
+    `name='${q(args.name)}'`,
+    `a company named "${args.name}"`,
+    "Use search_entity to find it, or update_company to edit the existing record.",
+  );
+  const body = compact({ name: args.name, ...(args.additionalFields ?? {}) });
+  await validateWriteFields("ClientCorporation", body, { mode: "create" });
+  const companyId = await createEntityRecord(session, "ClientCorporation", body);
+  return { companyId, name: args.name };
+}
+
+export async function updateCompany(
+  session: BullhornWriteSession,
+  companyId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; companyId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the company.");
+  }
+  await validateWriteFields("ClientCorporation", fields, { mode: "update" });
+  await updateEntityRecord(session, "ClientCorporation", companyId, fields);
+  return { updated: true, companyId };
+}
+
+// ── ClientContact create / update ─────────────────────────────────────────
+
+export async function createContact(
+  session: BullhornWriteSession,
+  args: {
+    firstName: string;
+    lastName: string;
+    clientCorporationId: number;
+    email?: string;
+    phone?: string;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ contactId: number; name: string }> {
+  await checkDuplicate(
+    session,
+    "ClientContact",
+    `firstName='${q(args.firstName)}' AND lastName='${q(args.lastName)}' AND clientCorporation.id=${args.clientCorporationId} AND isDeleted=false`,
+    `a contact "${args.firstName} ${args.lastName}" at company ${args.clientCorporationId}`,
+    "Use search_entity to find them, or update_contact to edit the existing record.",
+  );
+  const body = compact({
+    firstName: args.firstName,
+    lastName: args.lastName,
+    clientCorporation: assoc(args.clientCorporationId),
+    email: args.email,
+    phone: args.phone,
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("ClientContact", body, { mode: "create" });
+  const contactId = await createEntityRecord(session, "ClientContact", body);
+  return { contactId, name: `${args.firstName} ${args.lastName}` };
+}
+
+export async function updateContact(
+  session: BullhornWriteSession,
+  contactId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; contactId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the contact.");
+  }
+  await validateWriteFields("ClientContact", fields, { mode: "update" });
+  await updateEntityRecord(session, "ClientContact", contactId, fields);
+  return { updated: true, contactId };
+}
+
+// ── Task / Appointment create ─────────────────────────────────────────────
+
+export async function createTask(
+  session: BullhornWriteSession,
+  args: {
+    subject: string;
+    dateBegin?: string;
+    dateEnd?: string;
+    type?: string;
+    priority?: number;
+    ownerId?: number;
+    candidateId?: number;
+    jobOrderId?: number;
+    clientContactId?: number;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ taskId: number; subject: string }> {
+  const ownerId = args.ownerId ?? (await getSessionUserId(session));
+  const body = compact({
+    subject: args.subject,
+    dateBegin: args.dateBegin ? toEpochMillis(args.dateBegin, "dateBegin") : undefined,
+    dateEnd: args.dateEnd ? toEpochMillis(args.dateEnd, "dateEnd") : undefined,
+    type: args.type,
+    priority: args.priority,
+    owner: assoc(ownerId),
+    candidate: assoc(args.candidateId),
+    jobOrder: assoc(args.jobOrderId),
+    clientContact: assoc(args.clientContactId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Task", body, { mode: "create" });
+  const taskId = await createEntityRecord(session, "Task", body);
+  return { taskId, subject: args.subject };
+}
+
+export async function createAppointment(
+  session: BullhornWriteSession,
+  args: {
+    subject: string;
+    dateBegin: string;
+    dateEnd: string;
+    location?: string;
+    type?: string;
+    description?: string;
+    ownerId?: number;
+    candidateId?: number;
+    jobOrderId?: number;
+    clientContactId?: number;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ appointmentId: number; subject: string }> {
+  const ownerId = args.ownerId ?? (await getSessionUserId(session));
+  const body = compact({
+    subject: args.subject,
+    dateBegin: toEpochMillis(args.dateBegin, "dateBegin"),
+    dateEnd: toEpochMillis(args.dateEnd, "dateEnd"),
+    location: args.location,
+    type: args.type,
+    description: args.description,
+    owner: assoc(ownerId),
+    candidate: assoc(args.candidateId),
+    jobOrder: assoc(args.jobOrderId),
+    clientContact: assoc(args.clientContactId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Appointment", body, { mode: "create" });
+  const appointmentId = await createEntityRecord(session, "Appointment", body);
+  return { appointmentId, subject: args.subject };
+}
+
+// ── Tearsheet create + membership ─────────────────────────────────────────
+
+export async function createTearsheet(
+  session: BullhornWriteSession,
+  args: { name: string; description?: string; additionalFields?: Record<string, unknown> },
+): Promise<{ tearsheetId: number; name: string }> {
+  const ownerId = await getSessionUserId(session);
+  await checkDuplicate(
+    session,
+    "Tearsheet",
+    `name='${q(args.name)}' AND owner.id=${ownerId} AND isDeleted=false`,
+    `a tearsheet named "${args.name}" owned by you`,
+    "Use the existing tearsheet, or pick a different name.",
+  );
+  const body = compact({
+    name: args.name,
+    description: args.description,
+    owner: assoc(ownerId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Tearsheet", body, { mode: "create" });
+  const tearsheetId = await createEntityRecord(session, "Tearsheet", body);
+  return { tearsheetId, name: args.name };
+}
+
+/**
+ * Adds candidates to a tearsheet via the to-many association endpoint
+ * (POST entity/Tearsheet/{id}/candidates/{ids}). Association writes carry no body.
+ */
+export async function addCandidatesToTearsheet(
+  session: BullhornWriteSession,
+  tearsheetId: number,
+  candidateIds: number[],
+): Promise<{ tearsheetId: number; added: number[] }> {
+  if (candidateIds.length === 0) {
+    throw new BullhornFieldValidationError("No candidateIds provided to add to the tearsheet.");
+  }
+  await writeFetch(
+    session,
+    "POST",
+    `entity/Tearsheet/${tearsheetId}/candidates/${candidateIds.join(",")}`,
+    undefined,
+  );
+  return { tearsheetId, added: candidateIds };
+}
+
+export async function removeCandidatesFromTearsheet(
+  session: BullhornWriteSession,
+  tearsheetId: number,
+  candidateIds: number[],
+): Promise<{ tearsheetId: number; removed: number[] }> {
+  if (candidateIds.length === 0) {
+    throw new BullhornFieldValidationError("No candidateIds provided to remove from the tearsheet.");
+  }
+  await writeFetch(
+    session,
+    "DELETE",
+    `entity/Tearsheet/${tearsheetId}/candidates/${candidateIds.join(",")}`,
+    undefined,
+  );
+  return { tearsheetId, removed: candidateIds };
+}
+
+// ── Placement create / update (sensitive) ─────────────────────────────────
+
+export async function createPlacement(
+  session: BullhornWriteSession,
+  args: {
+    candidateId: number;
+    jobOrderId: number;
+    dateBegin?: string;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ placementId: number; candidateId: number; jobOrderId: number }> {
+  await checkDuplicate(
+    session,
+    "Placement",
+    `candidate.id=${args.candidateId} AND jobOrder.id=${args.jobOrderId} AND isDeleted=false`,
+    `a placement for candidate ${args.candidateId} on job ${args.jobOrderId}`,
+    "Use update_placement to change the existing placement instead of creating a duplicate.",
+  );
+  const body = compact({
+    candidate: assoc(args.candidateId),
+    jobOrder: assoc(args.jobOrderId),
+    dateBegin: args.dateBegin ? toEpochMillis(args.dateBegin, "dateBegin") : undefined,
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Placement", body, { mode: "create" });
+  const placementId = await createEntityRecord(session, "Placement", body);
+  return { placementId, candidateId: args.candidateId, jobOrderId: args.jobOrderId };
+}
+
+export async function updatePlacement(
+  session: BullhornWriteSession,
+  placementId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; placementId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the placement.");
+  }
+  await validateWriteFields("Placement", fields, { mode: "update" });
+  await updateEntityRecord(session, "Placement", placementId, fields);
+  return { updated: true, placementId };
+}
+
+// ── Files API: résumé / file upload + candidate-from-résumé ───────────────
+//
+// Distinct from the JSON entity/ door: file operations are multipart, and the
+// resume parser is a non-entity endpoint. fileFetch mirrors writeFetch's 403 →
+// permission, 429 → backoff, and error-formatting contract for these paths.
+
+const RESUME_FORMATS: Record<string, string> = {
+  pdf: "pdf",
+  doc: "doc",
+  docx: "docx",
+  rtf: "rtf",
+  txt: "text",
+  text: "text",
+  html: "html",
+  htm: "html",
+  odt: "odt",
+};
+
+/** Infers Bullhorn's `format` value from a filename extension. */
+function resumeFormatFromName(fileName: string): string {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  const fmt = RESUME_FORMATS[ext];
+  if (!fmt) {
+    throw new BullhornFieldValidationError(
+      `Unsupported résumé file type ".${ext}". Supported: ${Object.keys(RESUME_FORMATS).join(", ")}.`,
+    );
+  }
+  return fmt;
+}
+
+async function fileFetch(
+  session: BullhornWriteSession,
+  method: "PUT" | "POST",
+  path: string,
+  init: { body: FormData | Uint8Array; contentType?: string },
+  rlRetries = RATE_LIMIT_RETRIES,
+): Promise<unknown> {
+  const url = new URL(path, session.restUrl);
+  url.searchParams.set("BhRestToken", session.BhRestToken);
+
+  const headers: Record<string, string> = {};
+  if (init.contentType) headers["Content-Type"] = init.contentType;
+
+  const res = await fetch(url.toString(), { method, headers, body: init.body });
+
+  if (res.status === 403) {
+    const action = `${method} ${path.split("/").slice(0, 2).join("/")}`;
+    throw new BullhornPermissionError(action);
+  }
+  if (res.status === 429) {
+    if (rlRetries > 0) {
+      const attempt = RATE_LIMIT_RETRIES - rlRetries + 1;
+      await sleep(backoffMs(attempt));
+      return fileFetch(session, method, path, init, rlRetries - 1);
+    }
+    throw new Error(
+      "Bullhorn API rate limit exceeded after multiple retries. Wait 60 seconds and try again.",
+    );
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw formatBullhornError("file", res.status, text);
+  }
+  return res.json();
+}
+
+/**
+ * Uploads a file (e.g. a résumé) and attaches it to an existing Bullhorn record
+ * via the multipart Files API (PUT file/{Entity}/{id}). `fileContentBase64` is
+ * the file bytes base64-encoded.
+ */
+export async function uploadFileToRecord(
+  session: BullhornWriteSession,
+  args: {
+    entityType: string;
+    entityId: number;
+    fileName: string;
+    fileContentBase64: string;
+    contentType?: string;
+    fileType?: string;
+    description?: string;
+  },
+): Promise<{ fileId: number; entityType: string; entityId: number }> {
+  const entry = resolveEntity(args.entityType);
+  const bytes = Buffer.from(args.fileContentBase64, "base64");
+  if (bytes.length === 0) {
+    throw new BullhornFieldValidationError("File content is empty — provide base64-encoded file bytes.");
+  }
+  const blob = new Blob([bytes], {
+    type: args.contentType ?? "application/octet-stream",
+  });
+  const form = new FormData();
+  form.append("file", blob, args.fileName);
+
+  const path = `file/${entry.canonical}/${args.entityId}`;
+  const url = new URL(path, session.restUrl);
+  url.searchParams.set("externalID", `asktoact-${Date.now()}`);
+  url.searchParams.set("fileType", args.fileType ?? "SAMPLE");
+  if (args.description) url.searchParams.set("description", args.description);
+
+  // FormData sets its own multipart boundary; do NOT set Content-Type.
+  const data = (await fileFetch(
+    session,
+    "PUT",
+    `${path}${url.search}`,
+    { body: form },
+  )) as { fileId?: number };
+  return { fileId: data.fileId ?? 0, entityType: entry.canonical, entityId: args.entityId };
+}
+
+/**
+ * Creates a new Candidate from a résumé file. Parses the résumé with Bullhorn's
+ * resume/parseToCandidate (does not persist), merges the parsed scalar fields
+ * with any caller overrides, validates, creates the Candidate, then attaches the
+ * original résumé file to the new record. `overrideFields` wins over parsed data.
+ */
+export async function createCandidateFromResume(
+  session: BullhornWriteSession,
+  args: {
+    fileName: string;
+    fileContentBase64: string;
+    contentType?: string;
+    overrideFields?: Record<string, unknown>;
+  },
+): Promise<{ candidateId: number; fileId?: number; parsedName?: string }> {
+  const format = resumeFormatFromName(args.fileName);
+  const bytes = Buffer.from(args.fileContentBase64, "base64");
+  if (bytes.length === 0) {
+    throw new BullhornFieldValidationError("Résumé content is empty — provide base64-encoded file bytes.");
+  }
+
+  // 1. Parse (non-persisting). Returns { candidate, skillList, ... }.
+  const parsed = (await fileFetch(
+    session,
+    "POST",
+    `resume/parseToCandidate?format=${encodeURIComponent(format)}&populateDescription=text`,
+    {
+      body: new Uint8Array(bytes),
+      contentType: args.contentType ?? "application/octet-stream",
+    },
+  )) as { candidate?: Record<string, unknown> };
+
+  const parsedCandidate = parsed.candidate ?? {};
+
+  // 2. Take only safe scalar fields from the parse; overrides win.
+  const PARSE_SCALAR_FIELDS = [
+    "firstName",
+    "lastName",
+    "name",
+    "email",
+    "email2",
+    "phone",
+    "mobile",
+    "occupation",
+    "companyName",
+    "description",
+    "skillSet",
+    "address",
+  ];
+  const fromParse: Record<string, unknown> = {};
+  for (const key of PARSE_SCALAR_FIELDS) {
+    if (parsedCandidate[key] !== undefined && parsedCandidate[key] !== null) {
+      fromParse[key] = parsedCandidate[key];
+    }
+  }
+
+  const body = compact({ ...fromParse, ...(args.overrideFields ?? {}) });
+  if (!body.name && (body.firstName || body.lastName)) {
+    body.name = `${body.firstName ?? ""} ${body.lastName ?? ""}`.trim();
+  }
+
+  await validateWriteFields("Candidate", body, { mode: "create" });
+  const candidateId = await createEntityRecord(session, "Candidate", body);
+
+  // 3. Attach the original résumé file to the new candidate (best-effort).
+  let fileId: number | undefined;
+  try {
+    const uploaded = await uploadFileToRecord(session, {
+      entityType: "Candidate",
+      entityId: candidateId,
+      fileName: args.fileName,
+      fileContentBase64: args.fileContentBase64,
+      contentType: args.contentType,
+      fileType: "Resume",
+      description: "Résumé (auto-attached on creation)",
+    });
+    fileId = uploaded.fileId;
+  } catch (err) {
+    logger.warn(
+      { err, candidateId },
+      "Bullhorn: candidate created but résumé file attachment failed",
+    );
+  }
+
+  return {
+    candidateId,
+    fileId,
+    parsedName: typeof body.name === "string" ? body.name : undefined,
+  };
+}
