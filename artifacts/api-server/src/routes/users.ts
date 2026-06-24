@@ -148,7 +148,7 @@ router.get("/users", bearerAuth, requireService, async (_req: Request, res: Resp
           name: r.name,
           email: r.email,
           enrolled: r.enrolled !== null,
-          enrollUrl: tokenValid ? `/api/auth/user/enroll?token=${r.enrollToken}` : null,
+          enrollUrl: tokenValid ? `${getBaseUrl()}/api/auth/user/enroll?token=${r.enrollToken}` : null,
           createdAt: r.createdAt,
         };
       }),
