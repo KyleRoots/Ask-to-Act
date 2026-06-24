@@ -7,4 +7,4 @@ pnpm install --frozen-lockfile
 # a populated table) and fails with a non-zero exit code on any error so the
 # problem is visible immediately.
 pnpm --filter db generate
-pnpm --filter db migrate
+pnpm --filter db migrate:run
