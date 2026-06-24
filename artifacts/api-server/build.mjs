@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { rm, cp } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -121,6 +121,23 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  // stripe-replit-sync's runMigrations() resolves its SQL migration files
+  // relative to its own module location via import.meta.url. Once the package
+  // is bundled into dist/index.mjs that path resolves to <distDir>/migrations,
+  // which esbuild does not emit. Without these files runMigrations() silently
+  // skips (fs.existsSync === false), creating an empty `stripe` schema with no
+  // tables and triggering runtime `relation "stripe.accounts" does not exist`.
+  // Copy the package's migrations next to the bundle so the lookup succeeds.
+  const require2 = createRequire(import.meta.url);
+  const stripeSyncDist = path.dirname(
+    require2.resolve("stripe-replit-sync"),
+  );
+  await cp(
+    path.resolve(stripeSyncDist, "migrations"),
+    path.resolve(distDir, "migrations"),
+    { recursive: true },
+  );
 }
 
 buildAll().catch((err) => {
