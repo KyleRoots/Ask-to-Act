@@ -56,7 +56,7 @@ export default function ExecSummary() {
         <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderLeft: '3px solid #fbbf24', borderRadius: '0.75rem', padding: '1.25rem 1.75rem', maxWidth: '680px', marginBottom: '1.25rem' }}>
           <div style={{ fontSize: '0.7rem', color: '#fbbf24', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>The Cost of Not Subscribing</div>
           <p style={{ fontSize: '0.95rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0 }}>
-            6 hours/week of copy-paste per recruiter × $85/hr burdened cost = <strong style={{ color: '#fbbf24' }}>~$2,200/month in lost productivity per desk</strong>. AskToAct for a 10-seat desk is <strong style={{ color: '#38bdf8' }}>$789/month</strong>. That's a 28× ROI — before counting the audit trail, the error reduction, or the governance story. Month-to-month, cancel anytime.
+            6 hours/week of copy-paste per recruiter × $60/hr burdened cost = <strong style={{ color: '#fbbf24' }}>~$1,560/month in lost productivity per seat</strong>. Across a 10-seat desk that's <strong style={{ color: '#fbbf24' }}>~$15,600/month</strong> — and AskToAct for that desk is <strong style={{ color: '#38bdf8' }}>$789/month</strong>. That's a <strong style={{ color: '#38bdf8' }}>~20× ROI</strong> — before counting the audit trail, the error reduction, or the governance story. Month-to-month, cancel anytime.
           </p>
         </div>
 
@@ -73,9 +73,9 @@ export default function ExecSummary() {
 
         {/* Key stats row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
-          <Stat number="~$2,200" label="Monthly productivity lost per recruiter desk to AI copy-paste (6h/wk × $85/hr burdened). AskToAct costs $789/mo for 10 seats." />
+          <Stat number="~$1,560" label="Monthly productivity lost per recruiter seat to AI copy-paste (6h/wk × $60/hr burdened). A 10-seat desk loses ~$15,600/mo; AskToAct costs $789/mo for those 10 seats — a ~20× return." />
           <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
-          <Stat number="37" label="Specific recruiting actions live in production today: search, read, submit, note, update — directly from ChatGPT or Claude" accent="#4ade80" />
+          <Stat number="53" label="Recruiting actions live in production: 33 read + 20 write tools — search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload — directly from ChatGPT or Claude" accent="#4ade80" />
         </div>
 
         {/* Section: The Problem */}
@@ -118,10 +118,13 @@ export default function ExecSummary() {
 
           <p style={bodyStyle}>
             AskToAct is model-agnostic by design. It does not sell an AI; it assumes the customer already has one.
-            The first connector covers 37 tools across the complete Bullhorn workflow: candidate search and profile reads,
-            contact lookup, job management, submission tracking, note writing, and placement recording. Every write tool
+            The first connector covers 53 tools across the complete Bullhorn workflow — 33 read and 20 write. On the read side:
+            candidate search and profile reads, contact and company lookup, résumé reads, and live reporting. On the write side:
+            submissions and pipeline status changes, note writing, job/company/contact create and update, tasks and appointments,
+            tearsheet curation, placement recording, and résumé/file upload with new-candidate creation. Every write tool
             runs under the recruiter's own Bullhorn OAuth session — not a shared service account — so Bullhorn's own
-            permission gates enforce what each user can and cannot do. The implementation is live and in production.
+            permission gates enforce what each user can and cannot do, with server-side field validation and duplicate guards
+            before every write. The implementation is live and in production.
           </p>
         </Section>
 
@@ -242,9 +245,9 @@ export default function ExecSummary() {
             </div>
             <p style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: 1.7, margin: 0 }}>
               The Bullhorn connector is deployed and running in production. Myticas Consulting, a staffing firm
-              on Bullhorn ATS, is Customer Zero: 37 MCP tools live, per-user OAuth enforced, full audit logging active.
-              Recruiters can search candidates, read profiles, create submissions, add notes, and update statuses
-              directly from ChatGPT or Claude — with no elevated permissions and no manual copy-paste.
+              on Bullhorn ATS, is Customer Zero: 53 MCP tools live (33 read · 20 write), per-user OAuth enforced, full audit logging active.
+              Recruiters can search candidates, read profiles and résumés, create and advance submissions, add notes, manage jobs and
+              contacts, record placements, and upload résumés — directly from ChatGPT or Claude, with no elevated permissions and no manual copy-paste.
               This is not a prototype. It is a functioning product on a real ATS with a real custom domain.
             </p>
           </div>

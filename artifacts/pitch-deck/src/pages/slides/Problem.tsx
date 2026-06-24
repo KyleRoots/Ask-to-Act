@@ -32,8 +32,8 @@ export default function Problem() {
             6h
           </div>
           <div className="mt-[2vh] font-body text-[1.5vw] text-muted leading-snug">
-            Per recruiter per week lost to copy-paste between AI and ATS. At $85/hr burdened cost,{" "}
-            <span className="text-text font-display font-semibold">that's ~$2,200/month per desk.</span>
+            Per recruiter per week lost to copy-paste between AI and ATS. At $60/hr burdened cost,{" "}
+            <span className="text-text font-display font-semibold">that's ~$1,560/month per seat.</span>
           </div>
         </div>
 

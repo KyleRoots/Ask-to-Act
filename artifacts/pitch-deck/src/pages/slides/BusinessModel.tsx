@@ -69,9 +69,9 @@ export default function BusinessModel() {
             <div className="font-body text-[1.3vw] text-muted leading-snug">
               Cost of AskToAct: <span className="text-text font-display font-semibold">$789 / mo</span>
               {" "}·{" "}
-              Value recovered: <span className="text-gold font-display font-semibold">~$22,000 / mo</span>
+              Value recovered: <span className="text-gold font-display font-semibold">~$15,600 / mo</span>
               <br />
-              <span className="text-[1.1vw]">6h/week × 10 recruiters × $85/hr burdened cost = 28× ROI from month one.</span>
+              <span className="text-[1.1vw]">6h/week × 10 recruiters × $60/hr burdened cost = ~20× ROI from month one.</span>
             </div>
           </div>
         </div>

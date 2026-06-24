@@ -1,6 +1,6 @@
 # Bullhorn ATS MCP Server
 
-A remote Model Context Protocol (MCP) server that connects ChatGPT Enterprise to Bullhorn ATS. Recruiters toggle the Bullhorn app on inside ChatGPT and can search and retrieve live ATS data through natural language — without leaving ChatGPT. No UI, pure middleware.
+A remote Model Context Protocol (MCP) server that connects any MCP-compatible AI (ChatGPT, Claude, Gemini, Grok) to Bullhorn ATS. Recruiters enable the Bullhorn connector inside their AI and can both read live ATS data and write back to it through natural language — search, submit, note, update statuses, manage jobs/companies/contacts, record placements, upload résumés — without leaving the AI. Reads run on a shared, cacheable service-account session; every write runs under the recruiter's own Bullhorn OAuth session with their permission gates enforced.
 
 ## Run & Operate
 
@@ -20,8 +20,8 @@ A remote Model Context Protocol (MCP) server that connects ChatGPT Enterprise to
 ## Where things live
 
 - `artifacts/api-server/src/lib/bullhorn-auth.ts` — Bullhorn OAuth + session lifecycle (singleton)
-- `artifacts/api-server/src/lib/bullhorn-client.ts` — all read-only Bullhorn API operations (search/query/get primitives + curated helpers)
-- `artifacts/api-server/src/lib/mcp-server.ts` — MCP server factory with all 21 read tool definitions
+- `artifacts/api-server/src/lib/bullhorn-client.ts` — all Bullhorn API operations: read (search/query/get primitives + curated helpers) and write (create/update entities, file upload) with server-side field validation, picklist checks, and duplicate guards
+- `artifacts/api-server/src/lib/mcp-server.ts` — MCP server factory: 33 read tools + 20 Bullhorn write tools (writes via resolveWriteSession/runWriteTool, never cached, 403 → permission_denied). Writes are MCP-connector-only — never exposed on the REST /api/v1 or public OpenAPI surface
 - `artifacts/api-server/src/lib/cache.ts` — short-TTL in-memory response cache for read tools
 - `artifacts/api-server/src/routes/mcp.ts` — Express route mounting the MCP server (POST + GET /api/mcp)
 - `artifacts/api-server/src/middlewares/bearer-auth.ts` — shared secret bearer token validation
@@ -31,14 +31,14 @@ A remote Model Context Protocol (MCP) server that connects ChatGPT Enterprise to
 
 - **Stateless MCP**: A fresh `McpServer` + `StreamableHTTPServerTransport` is created per request. This avoids session state on the server and works correctly with ChatGPT Enterprise's stateless MCP app model.
 - **Response cache**: A process-wide short-TTL LRU cache (`cache.ts`) sits in front of the read tools, keyed by tool name + full arguments (incl. `fields`). It is a module-level singleton shared across the per-request MCP servers, so repeated identical reads skip the Bullhorn round-trip. Only successful results are cached; errors propagate uncached. Configurable via `CACHE_TTL_MS` (default 60000) and `CACHE_MAX_ENTRIES` (default 500); set TTL to 0 to disable.
-- **Service-account auth (v1)**: One shared Bullhorn session for all ChatGPT users. Simpler to operate; per-user OAuth deferred to v2 when write tools are added and audit trail matters.
+- **Auth model**: Read tools run on a shared service-account Bullhorn session (simple, cacheable). Write tools run under each recruiter's own per-user Bullhorn OAuth session, so Bullhorn's own permission gates enforce what each user can do and every write is attributable in the audit trail. Writes are never cached and surface a 403 from Bullhorn as `permission_denied`.
 - **Bearer token security**: `MCP_BEARER_TOKEN` is the only access gate. All requests without it return 401. No IP allowlisting yet (v2 option after OpenAI publishes stable egress IP ranges).
 - **In-memory rate limiting**: `express-rate-limit` with configurable window/max via env vars. No Redis dependency for v1.
 - **Bullhorn session management**: Sessions are built from a rotating refresh token (persisted in Postgres); on failure it falls back to a headless authorization_code login (guarded by a cooldown to avoid API-user lockout). Session is invalidated on 401 responses from the API.
 
 ## Product
 
-Recruiters in ChatGPT Enterprise toggle the Bullhorn app on and can immediately ask: "Find candidates in Chicago with .NET experience", "What are the open jobs at Acme Corp?", "Show me submissions for job #456." 21 read-only tools are available, spanning dedicated entity tools (candidates, jobs, companies, contacts, submissions, placements, notes, leads, opportunities, appointments, tasks, users) plus generic fallbacks (search_entity, query_entity, get_entity, describe_entity) for full read coverage.
+Recruiters enable the Bullhorn connector in their AI (ChatGPT, Claude, Gemini, or Grok) and can immediately ask: "Find candidates in Chicago with .NET experience", "What are the open jobs at Acme Corp?", "Submit candidate #123 to job #456 and add a note." 33 read tools span dedicated entity tools (candidates, jobs, companies, contacts, submissions, placements, notes, leads, opportunities, appointments, tasks, users), reporting tools, and generic fallbacks (search_entity, query_entity, get_entity, describe_entity). 20 write tools cover submissions and status changes, notes, job/company/contact create+update, tasks and appointments, tearsheet curation, placements, and file/résumé upload with new-candidate creation — each under the recruiter's own OAuth session.
 
 ## Required environment variables (set in Replit Secrets)
 
