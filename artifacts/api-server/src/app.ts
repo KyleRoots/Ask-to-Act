@@ -10,6 +10,7 @@ import {
   getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
+import legalRouter from "./routes/legal";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
@@ -166,6 +167,11 @@ app.get("/", (_req, res) => {
 </body>
 </html>`);
 });
+
+// Public legal pages (Privacy, Terms) — served at the root for clean URLs
+// (e.g. connect.asktoact.ai/privacy) so they can be linked publicly and from
+// the admin/portal footers.
+app.use(legalRouter);
 
 app.use("/api", router);
 

@@ -415,6 +415,19 @@ export default function FirmsList() {
         )}
       </main>
 
+      <footer
+        className="max-w-5xl mx-auto px-4 sm:px-6 py-6 border-t flex flex-col sm:flex-row items-center justify-between gap-3"
+        style={{ borderColor: BORDER }}
+      >
+        <span className="text-xs" style={{ color: "#3A4460" }}>
+          © {new Date().getFullYear()} AskToAct · All rights reserved
+        </span>
+        <span className="flex items-center gap-4 text-xs" style={{ color: "#3A4460" }}>
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-[#818CF8] transition-colors">Privacy</a>
+          <a href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-[#818CF8] transition-colors">Terms</a>
+        </span>
+      </footer>
+
       {showCreate && (
         <CreateFirmModal onClose={() => setShowCreate(false)} onCreated={handleCreated} />
       )}
