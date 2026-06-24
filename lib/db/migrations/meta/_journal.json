@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1782272242110,
+      "tag": "0000_neat_winter_soldier",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782272554995,
+      "tag": "0001_add_email_unique",
+      "breakpoints": true
+    }
+  ]
+}
