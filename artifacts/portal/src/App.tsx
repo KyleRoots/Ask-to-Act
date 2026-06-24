@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
@@ -87,41 +87,144 @@ const clerkAppearance = {
   },
 };
 
-function SignInPage() {
+const AUTH_FEATURES = [
+  { icon: "🤖", text: "Ask ChatGPT, Claude, or Gemini to search and update Bullhorn" },
+  { icon: "🔒", text: "Every action respects each recruiter's existing permissions" },
+  { icon: "📊", text: "See team usage insights across all AI tools" },
+];
+
+function AuthBrandPanel({ heading, sub }: { heading: string; sub: string }) {
   return (
     <div
-      className="flex min-h-[100dvh] items-center justify-center px-4 py-10"
-      style={{ background: "hsl(220 50% 4%)" }}
+      className="hidden lg:flex flex-col justify-between p-12 relative overflow-hidden"
+      style={{
+        background: "linear-gradient(155deg, #0f0c29 0%, #1a1060 50%, #0d1728 100%)",
+        minHeight: "100dvh",
+        width: "48%",
+      }}
     >
-      <div className="pointer-events-none fixed inset-0" aria-hidden>
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full opacity-15"
-          style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }} />
+      {/* Ambient glows */}
+      <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div className="absolute -top-20 -left-20 w-96 h-96 rounded-full opacity-20"
+          style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 65%)" }} />
+        <div className="absolute bottom-0 right-0 w-72 h-72 rounded-full opacity-10"
+          style={{ background: "radial-gradient(circle, #0EA5E9 0%, transparent 65%)" }} />
       </div>
+
+      {/* Logo */}
+      <div className="relative flex items-center gap-3">
+        <svg width="36" height="36" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="apg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#4338CA" />
+              <stop offset="55%" stopColor="#4F46E5" />
+              <stop offset="100%" stopColor="#0EA5E9" />
+            </linearGradient>
+          </defs>
+          <rect width="48" height="48" rx="13" fill="url(#apg)" />
+          <path d="M11 5 C11 3.3 12.3 2 14 2 L34 2 C35.7 2 37 3.3 37 5 L37 27 C37 28.7 35.7 30 34 30 L27.5 30 L24 36.5 L20.5 30 L14 30 C12.3 30 11 28.7 11 27 Z" fill="white" fillOpacity="0.97" />
+          <line x1="15.5" y1="16" x2="29.5" y2="16" stroke="#4338CA" strokeWidth="3" strokeLinecap="round" />
+          <polyline points="25,11 31,16 25,21" fill="none" stroke="#4338CA" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span className="text-lg font-extrabold text-white" style={{ letterSpacing: "-0.025em" }}>
+          Ask<span style={{ color: "#38BDF8" }}>To</span>Act
+        </span>
+      </div>
+
+      {/* Headline + features */}
+      <div className="relative">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-6"
+          style={{ background: "rgba(79,70,229,.18)", border: "1px solid rgba(79,70,229,.3)", color: "#818CF8" }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+          Customer Portal
+        </div>
+        <h2 className="text-3xl font-extrabold text-white mb-3" style={{ letterSpacing: "-0.03em", lineHeight: 1.25 }}>
+          {heading}
+        </h2>
+        <p className="text-sm mb-10" style={{ color: "#6B7A99", lineHeight: 1.75 }}>{sub}</p>
+        <div className="flex flex-col gap-4">
+          {AUTH_FEATURES.map((f) => (
+            <div key={f.text} className="flex items-start gap-4">
+              <div className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-lg"
+                style={{ background: "rgba(79,70,229,.15)", border: "1px solid rgba(79,70,229,.25)" }}>
+                {f.icon}
+              </div>
+              <p className="text-sm leading-relaxed pt-1.5" style={{ color: "#94A3B8" }}>{f.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Footer note */}
+      <p className="relative text-xs" style={{ color: "#3A4460" }}>
+        © {new Date().getFullYear()} AskToAct · Secure · SOC2-ready
+      </p>
+    </div>
+  );
+}
+
+function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: string; sub: string }) {
+  return (
+    <div className="flex min-h-[100dvh]" style={{ background: "hsl(220 50% 4%)" }}>
+      <AuthBrandPanel heading={heading} sub={sub} />
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 relative">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          <div className="absolute top-0 right-0 w-[420px] h-[420px] rounded-full opacity-[0.07]"
+            style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }} />
+          <div className="absolute bottom-0 left-0 w-64 h-64 rounded-full opacity-[0.05]"
+            style={{ background: "radial-gradient(circle, #0EA5E9 0%, transparent 70%)" }} />
+        </div>
+        {/* Mobile-only logo */}
+        <div className="lg:hidden flex items-center gap-2 mb-8">
+          <svg width="30" height="30" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="mlg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#4338CA" />
+                <stop offset="100%" stopColor="#0EA5E9" />
+              </linearGradient>
+            </defs>
+            <rect width="48" height="48" rx="13" fill="url(#mlg)" />
+            <path d="M11 5 C11 3.3 12.3 2 14 2 L34 2 C35.7 2 37 3.3 37 5 L37 27 C37 28.7 35.7 30 34 30 L27.5 30 L24 36.5 L20.5 30 L14 30 C12.3 30 11 28.7 11 27 Z" fill="white" fillOpacity="0.97" />
+            <line x1="15.5" y1="16" x2="29.5" y2="16" stroke="#4338CA" strokeWidth="3" strokeLinecap="round" />
+            <polyline points="25,11 31,16 25,21" fill="none" stroke="#4338CA" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="text-base font-extrabold text-white" style={{ letterSpacing: "-0.025em" }}>
+            Ask<span style={{ color: "#38BDF8" }}>To</span>Act
+          </span>
+        </div>
+        <div className="relative w-full max-w-[420px]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function SignInPage() {
+  return (
+    <AuthLayout
+      heading={"Your team's AI\ncommand centre"}
+      sub="Sign in to manage your team's Bullhorn AI access, view usage insights, and keep everything running smoothly."
+    >
       <SignIn
         routing="path"
         path={`${basePath}/sign-in`}
         signUpUrl={`${basePath}/sign-up`}
       />
-    </div>
+    </AuthLayout>
   );
 }
 
 function SignUpPage() {
   return (
-    <div
-      className="flex min-h-[100dvh] items-center justify-center px-4 py-10"
-      style={{ background: "hsl(220 50% 4%)" }}
+    <AuthLayout
+      heading="Get your team connected to AI"
+      sub="Set up your AskToAct workspace and give your recruiters AI-powered access to Bullhorn in minutes."
     >
-      <div className="pointer-events-none fixed inset-0" aria-hidden>
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full opacity-15"
-          style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }} />
-      </div>
       <SignUp
         routing="path"
         path={`${basePath}/sign-up`}
         signInUrl={`${basePath}/sign-in`}
       />
-    </div>
+    </AuthLayout>
   );
 }
 
