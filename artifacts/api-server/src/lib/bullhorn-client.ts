@@ -3579,14 +3579,18 @@ export async function createCandidateFromResume(
   }
 
   // 1. Parse (non-persisting). Returns { candidate, skillList, ... }.
+  // Bullhorn's parseToCandidate endpoint requires multipart/form-data — sending
+  // raw binary with application/octet-stream returns a 500 "Bad File Uploaded".
+  const parseBlob = new Blob([bytes], {
+    type: args.contentType ?? "application/octet-stream",
+  });
+  const parseForm = new FormData();
+  parseForm.append("resume", parseBlob, args.fileName);
   const parsed = (await fileFetch(
     session,
     "POST",
     `resume/parseToCandidate?format=${encodeURIComponent(format)}&populateDescription=text`,
-    {
-      body: new Uint8Array(bytes),
-      contentType: args.contentType ?? "application/octet-stream",
-    },
+    { body: parseForm },
   )) as { candidate?: Record<string, unknown> };
 
   const parsedCandidate = parsed.candidate ?? {};
