@@ -155,10 +155,10 @@ export const api = {
   deleteUser: (userId: string) =>
     apiFetch<{ deleted: boolean; id: string }>(`/users/${userId}`, { method: "DELETE" }),
 
-  sendInvites: (firmId: string, resend = false) =>
+  sendInvites: (firmId: string, resend = false, userIds?: string[]) =>
     apiFetch<InviteResult>(`/firms/${firmId}/invite`, {
       method: "POST",
-      body: JSON.stringify({ resend }),
+      body: JSON.stringify(userIds && userIds.length > 0 ? { resend, userIds } : { resend }),
     }),
 
   sendInviteToUser: (firmId: string, userId: string) =>

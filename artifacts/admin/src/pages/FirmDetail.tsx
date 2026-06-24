@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, clearToken, type UserRow, type UsageMonth, type UsageDetail } from "@/lib/api";
@@ -388,6 +388,7 @@ function AddUsersModal({ firmId, onClose, onDone }: AddUsersModalProps) {
 export default function FirmDetail({ firmId }: { firmId: string }) {
   const [tab, setTab] = useState<"overview" | "users" | "usage">("overview");
   const [showAddUsers, setShowAddUsers] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -404,6 +405,17 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     queryFn: () => api.listUsers(firmId),
     enabled: tab === "users",
   });
+
+  // Keep the selection in sync with the latest user list: drop any ids that no
+  // longer exist or have since enrolled, so "N selected" never goes stale.
+  useEffect(() => {
+    if (!users) return;
+    const eligible = new Set(users.filter((u) => !u.enrolled).map((u) => u.id));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => eligible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [users]);
 
   const { data: usage, isLoading: usageLoading } = useQuery({
     queryKey: ["firm-usage", firmId],
@@ -444,9 +456,11 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
   });
 
   const inviteMutation = useMutation({
-    mutationFn: (resend: boolean) => api.sendInvites(firmId, resend),
+    mutationFn: ({ resend, userIds }: { resend: boolean; userIds?: string[] }) =>
+      api.sendInvites(firmId, resend, userIds),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+      setSelectedIds(new Set());
       toast({
         title: data.sent > 0 ? `${data.sent} invite${data.sent !== 1 ? "s" : ""} sent ✓` : "No invites sent",
         description: data.message,
@@ -455,6 +469,14 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     },
     onError: (err: Error) => toast({ title: "Invite failed", description: err.message, variant: "destructive" }),
   });
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const sendOneInviteMutation = useMutation({
     mutationFn: (userId: string) => api.sendInviteToUser(firmId, userId),
@@ -859,7 +881,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                 </button>
                 <div className="flex-1" />
                 <button
-                  onClick={() => inviteMutation.mutate(false)}
+                  onClick={() => inviteMutation.mutate({ resend: false })}
                   disabled={inviteMutation.isPending}
                   className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-60"
                   style={{
@@ -869,12 +891,12 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.18)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.1)"; }}
-                  title="Send invites to users who haven't been invited yet"
+                  title="Send invites to all users who haven't been invited yet"
                 >
-                  {inviteMutation.isPending ? "Sending…" : "✉ Send invites"}
+                  {inviteMutation.isPending ? "Sending…" : "✉ Send invites to all"}
                 </button>
                 <button
-                  onClick={() => inviteMutation.mutate(true)}
+                  onClick={() => inviteMutation.mutate({ resend: true })}
                   disabled={inviteMutation.isPending}
                   className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-60"
                   style={{
@@ -886,9 +908,51 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                   onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(79,70,229,.08)"; }}
                   title="Re-send invites to all unenrolled users"
                 >
-                  ↺ Resend invites
+                  ↺ Resend to all
                 </button>
               </div>
+
+              {/* Selection toolbar — appears when one or more users are selected */}
+              {selectedIds.size > 0 && (
+                <div
+                  className="flex items-center gap-2.5 flex-wrap px-4 py-3 rounded-xl"
+                  style={{ background: "rgba(79,70,229,.08)", border: "1px solid rgba(129,140,248,.3)" }}
+                >
+                  <span className="text-sm font-semibold" style={{ color: "#C4B5FD" }}>
+                    {selectedIds.size} selected
+                  </span>
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => inviteMutation.mutate({ resend: false, userIds: [...selectedIds] })}
+                    disabled={inviteMutation.isPending}
+                    className="px-3.5 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-60 whitespace-nowrap"
+                    style={{ background: "rgba(16,185,129,.12)", color: "#34D399", border: "1px solid rgba(52,211,153,.25)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.2)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(16,185,129,.12)"; }}
+                    title="Send invites to selected users who haven't been invited yet"
+                  >
+                    {inviteMutation.isPending ? "Sending…" : "✉ Send invites to selected"}
+                  </button>
+                  <button
+                    onClick={() => inviteMutation.mutate({ resend: true, userIds: [...selectedIds] })}
+                    disabled={inviteMutation.isPending}
+                    className="px-3.5 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-60 whitespace-nowrap"
+                    style={{ background: "rgba(79,70,229,.1)", color: "#818CF8", border: "1px solid rgba(129,140,248,.25)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(79,70,229,.18)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(79,70,229,.1)"; }}
+                    title="Re-send invites to the selected users"
+                  >
+                    ↺ Resend to selected
+                  </button>
+                  <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap"
+                    style={{ background: "rgba(148,163,184,.08)", color: "#6B7A99", border: "1px solid rgba(148,163,184,.2)" }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
 
               {/* Users list */}
               <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${BORDER}` }}>
@@ -902,6 +966,16 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                       {users.map((u: UserRow) => (
                         <div key={u.id} className="p-4" style={{ background: SURFACE }}>
                           <div className="flex items-center gap-3 mb-2">
+                            {!u.enrolled && (
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(u.id)}
+                                onChange={() => toggleSelected(u.id)}
+                                className="w-4 h-4 shrink-0 cursor-pointer"
+                                style={{ accentColor: "#6366F1" }}
+                                aria-label={`Select ${u.name ?? u.email ?? "user"}`}
+                              />
+                            )}
                             <div
                               className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
                               style={{ background: "hsl(217 35% 20%)" }}
@@ -990,6 +1064,26 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                       <table className="w-full text-sm">
                         <thead>
                           <tr style={{ borderBottom: `1px solid ${BORDER}`, background: "rgba(255,255,255,.015)" }}>
+                            <th className="px-5 py-3.5 w-10">
+                              {(() => {
+                                const selectable = users.filter((u: UserRow) => !u.enrolled);
+                                const allSelected =
+                                  selectable.length > 0 && selectable.every((u: UserRow) => selectedIds.has(u.id));
+                                return (
+                                  <input
+                                    type="checkbox"
+                                    checked={allSelected}
+                                    disabled={selectable.length === 0}
+                                    onChange={() =>
+                                      setSelectedIds(allSelected ? new Set() : new Set(selectable.map((u: UserRow) => u.id)))
+                                    }
+                                    className="w-4 h-4 cursor-pointer disabled:opacity-40"
+                                    style={{ accentColor: "#6366F1" }}
+                                    aria-label="Select all invitable users"
+                                  />
+                                );
+                              })()}
+                            </th>
                             {["Name", "Email", "Role", "Status", "Invited", "Enroll link", "Actions"].map((h) => (
                               <th
                                 key={h}
@@ -1010,6 +1104,18 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                 borderBottom: i < users.length - 1 ? `1px solid ${BORDER}` : "none",
                               }}
                             >
+                              <td className="px-5 py-4 w-10">
+                                {!u.enrolled && (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIds.has(u.id)}
+                                    onChange={() => toggleSelected(u.id)}
+                                    className="w-4 h-4 cursor-pointer"
+                                    style={{ accentColor: "#6366F1" }}
+                                    aria-label={`Select ${u.name ?? u.email ?? "user"}`}
+                                  />
+                                )}
+                              </td>
                               <td className="px-5 py-4 font-medium text-white">{u.name ?? "—"}</td>
                               <td className="px-5 py-4" style={{ color: "#6B7A99" }}>{u.email ?? "—"}</td>
                               <td className="px-5 py-4">
@@ -1098,7 +1204,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                           ))}
                           {users.length === 0 && (
                             <tr>
-                              <td colSpan={7} className="px-5 py-14 text-center text-sm" style={{ color: "#3A4460", background: SURFACE }}>
+                              <td colSpan={8} className="px-5 py-14 text-center text-sm" style={{ color: "#3A4460", background: SURFACE }}>
                                 No users yet. Click "+ Add users" to get started.
                               </td>
                             </tr>

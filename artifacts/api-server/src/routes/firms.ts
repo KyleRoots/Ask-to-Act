@@ -218,16 +218,21 @@ router.get(
 /**
  * POST /api/firms/:id/invite
  * Admin-only. Bulk-sends invite emails via SendGrid.
- * Body: { resend?: boolean }
+ * Body: { resend?: boolean, userIds?: string[] }
  *   resend=false (default): only users who have never been invited AND are not enrolled
  *   resend=true: all unenrolled users with an email (re-invite everyone pending)
+ *   userIds: when provided, restricts the send to ONLY these users (still skips
+ *     enrolled users and users without an email). Combine with resend to control
+ *     whether already-invited selected users are re-sent.
  */
 router.post(
   "/firms/:id/invite",
   bearerAuth, requireService,
   async (req: Request, res: Response) => {
     const { id } = req.params as { id: string };
-    const { resend = false } = req.body as { resend?: boolean };
+    const { resend = false, userIds } = req.body as { resend?: boolean; userIds?: string[] };
+    const targetSet =
+      Array.isArray(userIds) && userIds.length > 0 ? new Set(userIds) : null;
 
     const [firm] = await db
       .select({ id: firmsTable.id, name: firmsTable.name })
@@ -257,6 +262,7 @@ router.post(
     const now = new Date();
 
     const candidates = allUsers.filter((u) => {
+      if (targetSet && !targetSet.has(u.id)) return false;
       if (!u.email) return false;
       const isEnrolled = u.refreshToken != null;
       if (isEnrolled) return false;
@@ -269,9 +275,11 @@ router.post(
         sent: 0,
         skipped: 0,
         errors: [],
-        message: resend
-          ? "No unenrolled users with email addresses found."
-          : "No uninvited users found. Use resend=true to re-invite existing users.",
+        message: targetSet
+          ? "No eligible users in the selection — selected users are already enrolled, have no email, or were already invited (use resend to re-send)."
+          : resend
+            ? "No unenrolled users with email addresses found."
+            : "No uninvited users found. Use resend=true to re-invite existing users.",
       });
       return;
     }
