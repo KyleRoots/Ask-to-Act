@@ -166,6 +166,11 @@ export const api = {
       method: "POST",
     }),
 
+  resendAccessLink: (userId: string) =>
+    apiFetch<{ id: string; enrollUrl: string }>(`/users/${userId}/invite`, {
+      method: "POST",
+    }),
+
   uploadLogo: (firmId: string, logoData: string) =>
     apiFetch<{ ok: boolean; message: string }>(`/firms/${firmId}/logo`, {
       method: "POST",

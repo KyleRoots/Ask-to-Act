@@ -487,6 +487,15 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     onError: (err: Error) => toast({ title: "Invite failed", description: err.message, variant: "destructive" }),
   });
 
+  const resendAccessLinkMutation = useMutation({
+    mutationFn: (userId: string) => api.resendAccessLink(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+      toast({ title: "Access link resent ✓" });
+    },
+    onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  });
+
   const logoMutation = useMutation({
     mutationFn: (logoData: string) => api.uploadLogo(firmId, logoData),
     onSuccess: () => {
@@ -1029,6 +1038,17 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                 {u.invitedAt ? "↺ Resend" : "✉ Invite"}
                               </button>
                             )}
+                            {u.enrolled && (
+                              <button
+                                onClick={() => resendAccessLinkMutation.mutate(u.id)}
+                                disabled={resendAccessLinkMutation.isPending}
+                                className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
+                                style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
+                                title="Regenerate and resend the connector setup link"
+                              >
+                                ↺ Resend access link
+                              </button>
+                            )}
                             <button
                               onClick={() => updateRoleMutation.mutate({ userId: u.id, role: u.role === "admin" ? "recruiter" : "admin" })}
                               disabled={updateRoleMutation.isPending}
@@ -1172,6 +1192,19 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                       title={u.invitedAt ? "Re-send invite email to this user" : "Send invite email to this user"}
                                     >
                                       {u.invitedAt ? "↺ Resend" : "✉ Invite"}
+                                    </button>
+                                  )}
+                                  {u.enrolled && (
+                                    <button
+                                      onClick={() => resendAccessLinkMutation.mutate(u.id)}
+                                      disabled={resendAccessLinkMutation.isPending}
+                                      className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60 whitespace-nowrap"
+                                      style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
+                                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.16)"; }}
+                                      onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.08)"; }}
+                                      title="Regenerate and resend the connector setup link"
+                                    >
+                                      ↺ Resend access link
                                     </button>
                                   )}
                                   <button

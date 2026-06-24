@@ -310,6 +310,186 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
   }
 });
 
+/**
+ * Shared connector-setup page rendered both after a fresh Bullhorn connection
+ * (alreadyConnected=false) and when a returning connected user re-opens their
+ * access link (alreadyConnected=true).
+ */
+function connectorSetupPage(displayName: string, mcpUrl: string | null, alreadyConnected: boolean): string {
+  const e = escapeHtml;
+  const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
+    chatgpt: {
+      label: "ChatGPT",
+      tagline: "Recommended — full read &amp; write (notes, status updates, submittals) with your own Bullhorn identity.",
+      steps: [
+        "Go to <strong>chatgpt.com</strong>, click your profile icon (top-right), then <strong>Settings</strong>",
+        "Select <strong>Connectors</strong> from the left menu, then click <strong>Add</strong>",
+        "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name you like. This name is how you activate the connector in chat (by typing a backslash followed by the name), so choose something easy to remember",
+        "<strong>Description</strong> (optional, but recommended): copy and paste — <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em> — or write your own",
+        "Under <strong>Connection</strong>, confirm <strong>Server URL</strong> is selected, then paste your connector URL (above) into the URL field",
+        "Set <strong>Authentication</strong> to <strong>No authentication</strong> — your personal key is already embedded in the URL",
+        "Check <strong>I understand and want to continue</strong>, then click <strong>Create</strong>",
+        "<strong>Important — enable write access:</strong> After the connector is created, click on it to view its tools. Any tool listed as <strong>Block</strong> will prevent write actions (adding notes, updating records, submitting candidates). Click each blocked tool and change it to <strong>Always allow</strong>",
+        "Open a new chat. To activate the connector, type <strong>\\</strong> (backslash), start typing the name you chose (e.g. <strong>AskToAct</strong>), and select it from the list — your Bullhorn tools are now active for that conversation",
+      ],
+    },
+    claude: {
+      label: "Claude",
+      tagline: "Full read &amp; write via Claude's custom connectors (Pro, Max, Team, or Enterprise).",
+      steps: [
+        "Go to <strong>claude.ai</strong> and sign in, then open <strong>Settings</strong> and select <strong>Connectors</strong>",
+        "Click <strong>Add custom connector</strong>",
+        "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. You will select this connector by name when starting a chat or attaching it to a Project",
+        "<strong>Description</strong> (optional, but recommended): copy and paste — <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em> — or write your own",
+        "Paste your connector URL (above) as the <strong>Remote MCP server URL</strong>, then click <strong>Add</strong>",
+        "In a new chat, click the connector/tools icon and enable <strong>AskToAct</strong> (or the name you chose) — or attach it to a Project so it is always available",
+        "Start a conversation — your Bullhorn tools will be active",
+      ],
+    },
+    gemini: {
+      label: "Gemini",
+      tagline: "MCP connector support — steps may vary by plan and Google Workspace version.",
+      steps: [
+        "Go to <strong>gemini.google.com</strong> and sign in with your Google account",
+        "Click your profile icon (top-right) then <strong>Settings</strong>, and look for <strong>Extensions</strong>, <strong>Integrations</strong>, or <strong>Connectors</strong>",
+        "Select <strong>Add custom connector</strong> or <strong>Add MCP server</strong>",
+        "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. <strong>Description</strong> (if prompted): <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em>",
+        "Paste your connector URL (above) and authorize the connection",
+        "If you see any permission or access settings, ensure write actions are set to <strong>Allow</strong> (not Block) so the connector can update records in your ATS",
+        "Start a conversation — your Bullhorn tools will be available. Refer to your Gemini plan's documentation if the connector option does not appear",
+      ],
+    },
+    grok: {
+      label: "Grok",
+      tagline: "Full read &amp; write via Grok's custom connectors.",
+      steps: [
+        "Go to <strong>grok.com</strong> (or open Grok within X) and sign in",
+        "Click <strong>Settings</strong> then look for <strong>Connectors</strong> or <strong>Integrations</strong>",
+        "Select <strong>Add custom connector</strong>",
+        "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. <strong>Description</strong> (if prompted): <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em>",
+        "Paste your connector URL (above) and authorize the connection",
+        "If you see any permission settings, ensure write actions are set to <strong>Allow</strong> so the connector can update your ATS records",
+        "Start a new chat and activate the connector — your Bullhorn tools will be available",
+      ],
+    },
+    other: {
+      label: "Other tool",
+      tagline: "Any tool that supports a remote MCP server.",
+      steps: [
+        "Open your AI tool and sign in",
+        "Find <strong>Settings</strong> then look for <strong>Connectors</strong>, <strong>Integrations</strong>, or <strong>MCP servers</strong>",
+        "Add a new custom connector. <strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. <strong>Description</strong> (if prompted): <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em>",
+        "Paste your connector URL (above) and authorize or save the connection",
+        "If you see any permission or access settings, ensure write actions are set to <strong>Allow</strong> (not Block) so the connector can update records in your ATS",
+        "Start a conversation and confirm your Bullhorn tools appear",
+      ],
+    },
+  };
+
+  const toolOrder = ["chatgpt", "claude", "gemini", "grok", "other"] as const;
+
+  const toolTabsHtml = toolOrder.map((key) => `
+      <button class="tool-tab" data-tool="${key}" onclick="selectTool('${key}')">${toolSteps[key].label}</button>
+    `).join("");
+
+  const toolPanelsHtml = toolOrder.map((key) => {
+    const stepsHtml = toolSteps[key].steps.map((s, i) => `
+        <div class="step">
+          <span class="step-num">${i + 1}</span>
+          <p class="step-text">${s}</p>
+        </div>`).join("");
+    const tagline = toolSteps[key].tagline ? `<p class="tool-tagline">${toolSteps[key].tagline}</p>` : "";
+    return `<div class="tool-panel" id="panel-${key}" style="display:none">${tagline}${stepsHtml}</div>`;
+  }).join("");
+
+  const subtitle = alreadyConnected
+    ? `Welcome back, <strong style="color:#e8ecf3">${e(displayName)}</strong>. You're already connected to Bullhorn — here's your connector setup to complete or reference:`
+    : `Linked as <strong style="color:#e8ecf3">${e(displayName)}</strong>. Your AI connector is ready.`;
+
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connected | AskToAct</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
+  display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
+main{max-width:500px;width:100%}
+.logo{display:flex;align-items:center;gap:8px;margin-bottom:28px}
+.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}
+.logo-text span{color:#38BDF8}
+.card{background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:32px}
+.check{width:44px;height:44px;border-radius:50%;background:rgba(16,185,129,.15);border:1px solid rgba(52,211,153,.3);
+  display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:16px}
+h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
+.sub{font-size:14px;color:#7a8ba0;margin:0 0 24px;line-height:1.6}
+.mcp-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#38bdf8;text-transform:uppercase;margin-bottom:8px}
+.mcp-box{background:#0b1020;border:1px solid #1e2a3a;border-radius:10px;padding:14px 16px;
+  font-family:monospace;font-size:12px;color:#cbd5e1;word-break:break-all;line-height:1.6;margin-bottom:8px;cursor:pointer}
+.mcp-box:hover{border-color:#38bdf8}
+.copy-btn{width:100%;padding:10px;background:#4F46E5;color:#fff;border:none;border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer;margin-bottom:24px}
+.copy-btn:hover{background:#4338ca}
+.tool-section{border-top:1px solid #1e2a3a;padding-top:20px}
+.tool-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#64748b;text-transform:uppercase;margin-bottom:12px}
+.tool-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+.tool-tab{padding:6px 14px;border-radius:20px;border:1px solid #1e2a3a;background:#0f1622;
+  color:#64748b;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
+.tool-tab:hover{border-color:#38bdf8;color:#94a3b8}
+.tool-tab.active{border-color:#4F46E5;background:rgba(79,70,229,.15);color:#818cf8;font-weight:600}
+.tool-tagline{font-size:12px;color:#94a3b8;line-height:1.5;margin:0 0 16px;padding:10px 12px;
+  background:rgba(79,70,229,.08);border:1px solid rgba(79,70,229,.2);border-radius:8px}
+.step{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
+.step-num{width:22px;height:22px;border-radius:50%;background:rgba(79,70,229,.2);border:1px solid rgba(79,70,229,.4);
+  color:#818cf8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-text{font-size:13px;color:#6b7a99;line-height:1.6;margin:0}
+.step-text strong{color:#cbd5e1}
+.note{margin-top:16px;font-size:11px;color:#2d3748;line-height:1.5}
+</style></head>
+<body><main>
+<div class="logo">
+<svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4338CA"/><stop offset="55%" stop-color="#4F46E5"/><stop offset="100%" stop-color="#0EA5E9"/></linearGradient></defs><rect width="48" height="48" rx="13" fill="url(#g)"/><path d="M11 5 C11 3.3 12.3 2 14 2 L34 2 C35.7 2 37 3.3 37 5 L37 27 C37 28.7 35.7 30 34 30 L27.5 30 L24 36.5 L20.5 30 L14 30 C12.3 30 11 28.7 11 27 Z" fill="white" fill-opacity="0.97"/><line x1="15.5" y1="16" x2="29.5" y2="16" stroke="#4338CA" stroke-width="3" stroke-linecap="round"/><polyline points="25,11 31,16 25,21" fill="none" stroke="#4338CA" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<span class="logo-text">Ask<span>To</span>Act</span>
+</div>
+<div class="card">
+  <div class="check">✓</div>
+  <h1>Bullhorn account connected!</h1>
+  <p class="sub">${subtitle}</p>
+  ${mcpUrl ? `
+  <p class="mcp-label">Your personal connector URL</p>
+  <div class="mcp-box" id="mcp" title="Click to select all">${e(mcpUrl)}</div>
+  <button class="copy-btn" id="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000)})">Copy connector URL</button>
+  ` : ""}
+  <div class="tool-section">
+    <p class="tool-label">Which AI tool are you using?</p>
+    <div class="tool-tabs">${toolTabsHtml}</div>
+    ${toolPanelsHtml}
+    <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
+  </div>
+</div>
+</main>
+<script>
+function selectTool(key) {
+  document.querySelectorAll('.tool-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tool === key);
+  });
+  document.querySelectorAll('.tool-panel').forEach(function(p) {
+    p.style.display = p.id === 'panel-' + key ? 'block' : 'none';
+  });
+}
+// Pre-select MCP URL on click
+const box = document.getElementById('mcp');
+if (box) box.addEventListener('click', function() {
+  const sel = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(box);
+  sel.removeAllRanges();
+  sel.addRange(range);
+});
+// Default to ChatGPT
+selectTool('chatgpt');
+</script>
+</body></html>`;
+}
+
 function enrollForm(token: string, userName: string, firmName?: string | null, errorMsg?: string): string {
   const e = escapeHtml;
   const err = errorMsg
@@ -387,6 +567,8 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
         firmId: usersTable.firmId,
         enrollToken: usersTable.enrollToken,
         enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
+        refreshToken: usersTable.refreshToken,
+        apiKey: usersTable.apiKey,
       })
       .from(usersTable)
       .where(eq(usersTable.enrollToken, token))
@@ -421,6 +603,16 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
         ));
         return;
       }
+    }
+
+    // Already connected to Bullhorn — skip the credentials form and show the
+    // connector-setup page (next phase) directly so the user can copy their
+    // connector URL and follow the AI-tool instructions.
+    if (rows[0].refreshToken) {
+      const baseUrl = getBaseUrl();
+      const mcpUrl = rows[0].apiKey ? `${baseUrl}/api/mcp/${rows[0].apiKey}` : null;
+      res.send(connectorSetupPage(rows[0].name, mcpUrl, true));
+      return;
     }
 
     res.send(enrollForm(token, rows[0].name, firmName));
@@ -489,175 +681,8 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
 
     const baseUrl = getBaseUrl();
     const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp/${enrolledUser.apiKey}` : null;
-    const e = escapeHtml;
 
-    const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
-      chatgpt: {
-        label: "ChatGPT",
-        tagline: "Recommended — full read &amp; write (notes, status updates, submittals) with your own Bullhorn identity.",
-        steps: [
-          "Go to <strong>chatgpt.com</strong>, click your profile icon (top-right), then <strong>Settings</strong>",
-          "Select <strong>Connectors</strong> from the left menu, then click <strong>Add</strong>",
-          "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name you like. This name is how you activate the connector in chat (by typing a backslash followed by the name), so choose something easy to remember",
-          "<strong>Description</strong> (optional, but recommended): copy and paste — <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em> — or write your own",
-          "Under <strong>Connection</strong>, confirm <strong>Server URL</strong> is selected, then paste your connector URL (above) into the URL field",
-          "Set <strong>Authentication</strong> to <strong>No authentication</strong> — your personal key is already embedded in the URL",
-          "Check <strong>I understand and want to continue</strong>, then click <strong>Create</strong>",
-          "<strong>Important — enable write access:</strong> After the connector is created, click on it to view its tools. Any tool listed as <strong>Block</strong> will prevent write actions (adding notes, updating records, submitting candidates). Click each blocked tool and change it to <strong>Always allow</strong>",
-          "Open a new chat. To activate the connector, type <strong>\\</strong> (backslash), start typing the name you chose (e.g. <strong>AskToAct</strong>), and select it from the list — your Bullhorn tools are now active for that conversation",
-        ],
-      },
-      claude: {
-        label: "Claude",
-        tagline: "Full read &amp; write via Claude's custom connectors (Pro, Max, Team, or Enterprise).",
-        steps: [
-          "Go to <strong>claude.ai</strong> and sign in, then open <strong>Settings</strong> and select <strong>Connectors</strong>",
-          "Click <strong>Add custom connector</strong>",
-          "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. You will select this connector by name when starting a chat or attaching it to a Project",
-          "<strong>Description</strong> (optional, but recommended): copy and paste — <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em> — or write your own",
-          "Paste your connector URL (above) as the <strong>Remote MCP server URL</strong>, then click <strong>Add</strong>",
-          "In a new chat, click the connector/tools icon and enable <strong>AskToAct</strong> (or the name you chose) — or attach it to a Project so it is always available",
-          "Start a conversation — your Bullhorn tools will be active",
-        ],
-      },
-      gemini: {
-        label: "Gemini",
-        tagline: "MCP connector support — steps may vary by plan and Google Workspace version.",
-        steps: [
-          "Go to <strong>gemini.google.com</strong> and sign in with your Google account",
-          "Click your profile icon (top-right) then <strong>Settings</strong>, and look for <strong>Extensions</strong>, <strong>Integrations</strong>, or <strong>Connectors</strong>",
-          "Select <strong>Add custom connector</strong> or <strong>Add MCP server</strong>",
-          "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. <strong>Description</strong> (if prompted): <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em>",
-          "Paste your connector URL (above) and authorize the connection",
-          "If you see any permission or access settings, ensure write actions are set to <strong>Allow</strong> (not Block) so the connector can update records in your ATS",
-          "Start a conversation — your Bullhorn tools will be available. Refer to your Gemini plan's documentation if the connector option does not appear",
-        ],
-      },
-      grok: {
-        label: "Grok",
-        tagline: "Full read &amp; write via Grok's custom connectors.",
-        steps: [
-          "Go to <strong>grok.com</strong> (or open Grok within X) and sign in",
-          "Click <strong>Settings</strong> then look for <strong>Connectors</strong> or <strong>Integrations</strong>",
-          "Select <strong>Add custom connector</strong>",
-          "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. <strong>Description</strong> (if prompted): <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em>",
-          "Paste your connector URL (above) and authorize the connection",
-          "If you see any permission settings, ensure write actions are set to <strong>Allow</strong> so the connector can update your ATS records",
-          "Start a new chat and activate the connector — your Bullhorn tools will be available",
-        ],
-      },
-      other: {
-        label: "Other tool",
-        tagline: "Any tool that supports a remote MCP server.",
-        steps: [
-          "Open your AI tool and sign in",
-          "Find <strong>Settings</strong> then look for <strong>Connectors</strong>, <strong>Integrations</strong>, or <strong>MCP servers</strong>",
-          "Add a new custom connector. <strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name. <strong>Description</strong> (if prompted): <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em>",
-          "Paste your connector URL (above) and authorize or save the connection",
-          "If you see any permission or access settings, ensure write actions are set to <strong>Allow</strong> (not Block) so the connector can update records in your ATS",
-          "Start a conversation and confirm your Bullhorn tools appear",
-        ],
-      },
-    };
-
-    const toolOrder = ["chatgpt", "claude", "gemini", "grok", "other"] as const;
-
-    const toolTabsHtml = toolOrder.map((key) => `
-      <button class="tool-tab" data-tool="${key}" onclick="selectTool('${key}')">${toolSteps[key].label}</button>
-    `).join("");
-
-    const toolPanelsHtml = toolOrder.map((key) => {
-      const stepsHtml = toolSteps[key].steps.map((s, i) => `
-        <div class="step">
-          <span class="step-num">${i + 1}</span>
-          <p class="step-text">${s}</p>
-        </div>`).join("");
-      const tagline = toolSteps[key].tagline ? `<p class="tool-tagline">${toolSteps[key].tagline}</p>` : "";
-      return `<div class="tool-panel" id="panel-${key}" style="display:none">${tagline}${stepsHtml}</div>`;
-    }).join("");
-
-    res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connected | AskToAct</title>
-<style>
-*{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
-  display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
-main{max-width:500px;width:100%}
-.logo{display:flex;align-items:center;gap:8px;margin-bottom:28px}
-.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}
-.logo-text span{color:#38BDF8}
-.card{background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:32px}
-.check{width:44px;height:44px;border-radius:50%;background:rgba(16,185,129,.15);border:1px solid rgba(52,211,153,.3);
-  display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:16px}
-h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
-.sub{font-size:14px;color:#7a8ba0;margin:0 0 24px;line-height:1.6}
-.mcp-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#38bdf8;text-transform:uppercase;margin-bottom:8px}
-.mcp-box{background:#0b1020;border:1px solid #1e2a3a;border-radius:10px;padding:14px 16px;
-  font-family:monospace;font-size:12px;color:#cbd5e1;word-break:break-all;line-height:1.6;margin-bottom:8px;cursor:pointer}
-.mcp-box:hover{border-color:#38bdf8}
-.copy-btn{width:100%;padding:10px;background:#4F46E5;color:#fff;border:none;border-radius:8px;
-  font-size:13px;font-weight:600;cursor:pointer;margin-bottom:24px}
-.copy-btn:hover{background:#4338ca}
-.tool-section{border-top:1px solid #1e2a3a;padding-top:20px}
-.tool-label{font-size:11px;font-weight:600;letter-spacing:.1em;color:#64748b;text-transform:uppercase;margin-bottom:12px}
-.tool-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
-.tool-tab{padding:6px 14px;border-radius:20px;border:1px solid #1e2a3a;background:#0f1622;
-  color:#64748b;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s}
-.tool-tab:hover{border-color:#38bdf8;color:#94a3b8}
-.tool-tab.active{border-color:#4F46E5;background:rgba(79,70,229,.15);color:#818cf8;font-weight:600}
-.tool-tagline{font-size:12px;color:#94a3b8;line-height:1.5;margin:0 0 16px;padding:10px 12px;
-  background:rgba(79,70,229,.08);border:1px solid rgba(79,70,229,.2);border-radius:8px}
-.step{display:flex;gap:12px;margin-bottom:14px;align-items:flex-start}
-.step-num{width:22px;height:22px;border-radius:50%;background:rgba(79,70,229,.2);border:1px solid rgba(79,70,229,.4);
-  color:#818cf8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
-.step-text{font-size:13px;color:#6b7a99;line-height:1.6;margin:0}
-.step-text strong{color:#cbd5e1}
-.note{margin-top:16px;font-size:11px;color:#2d3748;line-height:1.5}
-</style></head>
-<body><main>
-<div class="logo">
-<svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4338CA"/><stop offset="55%" stop-color="#4F46E5"/><stop offset="100%" stop-color="#0EA5E9"/></linearGradient></defs><rect width="48" height="48" rx="13" fill="url(#g)"/><path d="M11 5 C11 3.3 12.3 2 14 2 L34 2 C35.7 2 37 3.3 37 5 L37 27 C37 28.7 35.7 30 34 30 L27.5 30 L24 36.5 L20.5 30 L14 30 C12.3 30 11 28.7 11 27 Z" fill="white" fill-opacity="0.97"/><line x1="15.5" y1="16" x2="29.5" y2="16" stroke="#4338CA" stroke-width="3" stroke-linecap="round"/><polyline points="25,11 31,16 25,21" fill="none" stroke="#4338CA" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-<span class="logo-text">Ask<span>To</span>Act</span>
-</div>
-<div class="card">
-  <div class="check">✓</div>
-  <h1>Bullhorn account connected!</h1>
-  <p class="sub">Linked as <strong style="color:#e8ecf3">${e(bhUsername.trim())}</strong>. Your AI connector is ready.</p>
-  ${mcpUrl ? `
-  <p class="mcp-label">Your personal connector URL</p>
-  <div class="mcp-box" id="mcp" title="Click to select all">${e(mcpUrl)}</div>
-  <button class="copy-btn" id="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000)})">Copy connector URL</button>
-  ` : ""}
-  <div class="tool-section">
-    <p class="tool-label">Which AI tool are you using?</p>
-    <div class="tool-tabs">${toolTabsHtml}</div>
-    ${toolPanelsHtml}
-    <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
-  </div>
-</div>
-</main>
-<script>
-function selectTool(key) {
-  document.querySelectorAll('.tool-tab').forEach(function(t) {
-    t.classList.toggle('active', t.dataset.tool === key);
-  });
-  document.querySelectorAll('.tool-panel').forEach(function(p) {
-    p.style.display = p.id === 'panel-' + key ? 'block' : 'none';
-  });
-}
-// Pre-select MCP URL on click
-const box = document.getElementById('mcp');
-if (box) box.addEventListener('click', function() {
-  const sel = window.getSelection();
-  const range = document.createRange();
-  range.selectNodeContents(box);
-  sel.removeAllRanges();
-  sel.addRange(range);
-});
-// Default to ChatGPT
-selectTool('chatgpt');
-</script>
-</body></html>`);
+    res.send(connectorSetupPage(bhUsername.trim(), mcpUrl, false));
   } catch (err) {
     const msg = (err as Error).message ?? "Unknown error";
     logger.error({ err }, "Per-user headless enrollment failed");
