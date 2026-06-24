@@ -21,3 +21,4 @@
 - [React role guard pattern](react-role-guard.md) — `notAdmin = me && me.role !== "admin"` is falsy when me is undefined (loading/failed) → exposes content. Always gate on `isAdmin = me?.role === "admin"` with explicit loading / denied / content branches.
 - [Write phase: per-user OAuth + write tools](bullhorn-write-phase.md) — users table + personal apiKey → per-user Bullhorn session; 3 write tools (add_note, update_candidate_status, create_job_submission); shared OAuth callback routes service vs user: states; write tools never cached.
 - [Stripe connector integration](stripe-connector-integration.md) — header="X-Replit-Token", key=settings.secret (not secret_key); runMigrations before StripeSync; canonical seed = api-server `seed:stripe`.
+- [getBaseUrl REPLIT_DOMAINS trap](getbaseurl-replit-domains.md) — REPLIT_DOMAINS in prod = *.replit.app host (NOT custom domain); never use as fallback; correct prod branch: `PROD_URL ?? "https://connect.asktoact.ai"`.

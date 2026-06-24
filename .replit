@@ -89,5 +89,8 @@ externalPort = 9000
 [userenv.shared]
 SUPPORT_EMAIL = "support@asktoact.ai"
 
+[userenv.production]
+PROD_URL = "https://connect.asktoact.ai"
+
 [nix]
 channel = "stable-25_05"
