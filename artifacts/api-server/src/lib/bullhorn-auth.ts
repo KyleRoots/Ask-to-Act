@@ -52,12 +52,17 @@ function decryptToken(stored: string): string {
   const parts = stored.slice(ENC_PREFIX.length).split(":");
   if (parts.length !== 3) throw new Error("Malformed encrypted token.");
   const [ivHex, tagHex, ctHex] = parts;
+  const tag = Buffer.from(tagHex, "hex");
+  if (tag.length !== 16) {
+    throw new Error("Malformed encrypted token: invalid auth tag length.");
+  }
   const decipher = createDecipheriv(
     "aes-256-gcm",
     key,
     Buffer.from(ivHex, "hex"),
+    { authTagLength: 16 },
   );
-  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  decipher.setAuthTag(tag);
   return (
     decipher.update(Buffer.from(ctHex, "hex")).toString("utf8") +
     decipher.final("utf8")

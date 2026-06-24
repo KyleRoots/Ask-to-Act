@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, firmsTable, usersTable, seatActivityTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, count, sql } from "drizzle-orm";
 import { buildFirmUsageDetail } from "../lib/usage-report.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
@@ -9,6 +9,35 @@ import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 
 const router: IRouter = Router();
+
+/**
+ * Bulk-assigns enroll tokens in a single UPDATE statement (avoids N+1 writes).
+ * Each user gets its own token/expiry via a VALUES join. Timestamps are
+ * serialized to match Drizzle's `timestamp` (without time zone) format.
+ */
+async function bulkSetEnrollTokens(
+  updates: { id: string; token: string; expires: Date }[],
+): Promise<void> {
+  if (updates.length === 0) return;
+  const rows = sql.join(
+    updates.map(
+      (u) =>
+        sql`(${u.id}, ${u.token}, ${u.expires
+          .toISOString()
+          .replace("T", " ")
+          .replace("Z", "")}::timestamp)`,
+    ),
+    sql`, `,
+  );
+  await db.execute(sql`
+    UPDATE users AS u
+    SET enroll_token = v.token,
+        enroll_token_expires_at = v.expires,
+        updated_at = now()
+    FROM (VALUES ${rows}) AS v(id, token, expires)
+    WHERE u.id = v.id
+  `);
+}
 
 /**
  * POST /api/firms
@@ -145,16 +174,22 @@ router.get("/firms/:id", bearerAuth, requireService, async (req: Request, res: R
  */
 router.get("/firms", bearerAuth, requireService, async (_req: Request, res: Response) => {
   const firms = await db.select().from(firmsTable);
-  const rows = await Promise.all(
-    firms.map(async (f) => ({
-      id: f.id,
-      name: f.name,
-      subscriptionStatus: f.subscriptionStatus ?? "none",
-      enrolledSeats: await stripeStorage.countFirmUsers(f.id),
-      seatLimit: f.seatLimit,
-      logoUrl: f.logoUrl ?? null,
-    })),
-  );
+
+  // Single aggregate query instead of one count per firm (avoids N+1).
+  const counts = await db
+    .select({ firmId: usersTable.firmId, total: count() })
+    .from(usersTable)
+    .groupBy(usersTable.firmId);
+  const countByFirm = new Map(counts.map((c) => [c.firmId, c.total]));
+
+  const rows = firms.map((f) => ({
+    id: f.id,
+    name: f.name,
+    subscriptionStatus: f.subscriptionStatus ?? "none",
+    enrolledSeats: countByFirm.get(f.id) ?? 0,
+    seatLimit: f.seatLimit,
+    logoUrl: f.logoUrl ?? null,
+  }));
   res.json({ data: rows });
 });
 
@@ -196,20 +231,17 @@ router.get(
     const baseUrl = getBaseUrl();
     const now = new Date();
 
-    const usersWithTokens = await Promise.all(
-      users.map(async (u) => {
-        let token = u.enrollToken;
-        if (!token || !u.enrollTokenExpiresAt || u.enrollTokenExpiresAt < now) {
-          token = randomBytes(32).toString("hex");
-          const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-          await db
-            .update(usersTable)
-            .set({ enrollToken: token, enrollTokenExpiresAt: expires, updatedAt: now })
-            .where(eq(usersTable.id, u.id));
-        }
-        return { ...u, enrolled: u.enrolled != null, invitedAt: u.invitedAt ?? null, enrollUrl: u.enrolled != null ? null : `${baseUrl}/api/auth/user/enroll?token=${token}` };
-      }),
-    );
+    const tokenUpdates: { id: string; token: string; expires: Date }[] = [];
+    const usersWithTokens = users.map((u) => {
+      let token = u.enrollToken;
+      if (!token || !u.enrollTokenExpiresAt || u.enrollTokenExpiresAt < now) {
+        token = randomBytes(32).toString("hex");
+        const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        tokenUpdates.push({ id: u.id, token, expires });
+      }
+      return { ...u, enrolled: u.enrolled != null, invitedAt: u.invitedAt ?? null, enrollUrl: u.enrolled != null ? null : `${baseUrl}/api/auth/user/enroll?token=${token}` };
+    });
+    await bulkSetEnrollTokens(tokenUpdates);
 
     res.json({ data: usersWithTokens });
   },
@@ -284,20 +316,17 @@ router.post(
       return;
     }
 
-    const candidatesWithTokens = await Promise.all(
-      candidates.map(async (u) => {
-        let token = u.enrollToken;
-        if (!token || !u.enrollTokenExpiresAt || u.enrollTokenExpiresAt < now) {
-          token = randomBytes(32).toString("hex");
-          const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-          await db
-            .update(usersTable)
-            .set({ enrollToken: token, enrollTokenExpiresAt: expires, updatedAt: now })
-            .where(eq(usersTable.id, u.id));
-        }
-        return { ...u, enrollUrl: `${baseUrl}/api/auth/user/enroll?token=${token}` };
-      }),
-    );
+    const inviteTokenUpdates: { id: string; token: string; expires: Date }[] = [];
+    const candidatesWithTokens = candidates.map((u) => {
+      let token = u.enrollToken;
+      if (!token || !u.enrollTokenExpiresAt || u.enrollTokenExpiresAt < now) {
+        token = randomBytes(32).toString("hex");
+        const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        inviteTokenUpdates.push({ id: u.id, token, expires });
+      }
+      return { ...u, enrollUrl: `${baseUrl}/api/auth/user/enroll?token=${token}` };
+    });
+    await bulkSetEnrollTokens(inviteTokenUpdates);
 
     const { sendBulkInvites } = await import("../lib/emailService.js");
     const result = await sendBulkInvites(

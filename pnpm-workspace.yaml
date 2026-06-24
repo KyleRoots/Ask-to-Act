@@ -48,11 +48,7 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
-  hono: '>=4.12.25'
   '@babel/core': '>=7.29.6 <8'
-  js-yaml: '>=4.2.0'
-  markdown-it: '>=14.2.0'
-  qs: '>=6.15.2'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
@@ -100,6 +96,8 @@ overrides:
   esbuild>@esbuild/win32-arm64: '-'
   esbuild>@esbuild/win32-ia32: '-'
   esbuild>@esbuild/win32-x64: '-'
+  hono: '>=4.12.25'
+  js-yaml: '>=4.2.0'
   lightningcss>lightningcss-android-arm64: '-'
   lightningcss>lightningcss-darwin-arm64: '-'
   lightningcss>lightningcss-darwin-x64: '-'
@@ -110,6 +108,8 @@ overrides:
   lightningcss>lightningcss-linux-x64-musl: '-'
   lightningcss>lightningcss-win32-arm64-msvc: '-'
   lightningcss>lightningcss-win32-x64-msvc: '-'
+  markdown-it: '>=14.2.0'
+  qs: '>=6.15.2'
   rollup>@rollup/rollup-android-arm-eabi: '-'
   rollup>@rollup/rollup-android-arm64: '-'
   rollup>@rollup/rollup-darwin-arm64: '-'

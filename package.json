@@ -17,5 +17,10 @@
   "dependencies": {
     "stripe": "^22.2.2",
     "stripe-replit-sync": "^1.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "^7.3.5"
+    }
   }
 }
