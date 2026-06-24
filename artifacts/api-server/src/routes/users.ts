@@ -326,9 +326,9 @@ function enrollForm(token: string, userName: string, firmName?: string | null, e
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
   display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
 main{max-width:420px;width:100%;padding:40px 32px;background:#141927;border-radius:12px;border:1px solid #1e2a3a}
-.logo{display:flex;align-items:center;gap:8px;margin-bottom:24px}
-.logo-dot{width:8px;height:8px;border-radius:50%;background:#38bdf8}
-.logo-name{font-weight:700;font-size:15px;letter-spacing:-0.01em}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}
+.logo-text span{color:#38BDF8}
 h1{font-size:20px;margin:0 0 6px}
 .sub{font-size:14px;color:#7a8ba0;margin:0 0 24px}
 label{display:block;font-size:13px;color:#aab4c5;margin-bottom:6px}
@@ -341,7 +341,10 @@ button:hover{background:#2563eb}
 .note{font-size:12px;color:#4a5568;margin-top:16px;text-align:center}
 </style></head>
 <body><main>
-<div class="logo"><span class="logo-dot"></span><span class="logo-name">AskToAct</span></div>
+<div class="logo">
+<svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#4338CA"/><stop offset="55%" stop-color="#4F46E5"/><stop offset="100%" stop-color="#0EA5E9"/></linearGradient></defs><rect width="48" height="48" rx="13" fill="url(#g)"/><path d="M11 5 C11 3.3 12.3 2 14 2 L34 2 C35.7 2 37 3.3 37 5 L37 27 C37 28.7 35.7 30 34 30 L27.5 30 L24 36.5 L20.5 30 L14 30 C12.3 30 11 28.7 11 27 Z" fill="white" fill-opacity="0.97"/><line x1="15.5" y1="16" x2="29.5" y2="16" stroke="#4338CA" stroke-width="3" stroke-linecap="round"/><polyline points="25,11 31,16 25,21" fill="none" stroke="#4338CA" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<span class="logo-text">Ask<span>To</span>Act</span>
+</div>
 ${firmBadge}
 <h1>Connect your Bullhorn account</h1>
 <p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn and are not stored by this server.</p>
