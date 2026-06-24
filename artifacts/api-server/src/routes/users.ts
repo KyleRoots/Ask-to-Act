@@ -407,6 +407,10 @@ function connectorSetupPage(displayName: string, mcpUrl: string | null, alreadyC
     ? `Welcome back, <strong style="color:#e8ecf3">${e(displayName)}</strong>. You're already connected to Bullhorn — here's your connector setup to complete or reference:`
     : `Linked as <strong style="color:#e8ecf3">${e(displayName)}</strong>. Your AI connector is ready.`;
 
+  const helpHref = `mailto:support@asktoact.ai?subject=${encodeURIComponent("Help setting up my AskToAct connector")}&body=${encodeURIComponent(
+    "Hi AskToAct support,\n\nI'm setting up my AI connector for Bullhorn and I could use a hand.\n\nMy name: " + displayName +
+    "\n\nWhat I'm trying to do / where I'm stuck:\n\n\nThanks!")}`;
+
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connected | AskToAct</title>
 <style>
@@ -444,6 +448,11 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
 .step-text{font-size:13px;color:#6b7a99;line-height:1.6;margin:0}
 .step-text strong{color:#cbd5e1}
 .note{margin-top:16px;font-size:11px;color:#2d3748;line-height:1.5}
+.help-row{border-top:1px solid #1e2a3a;margin-top:22px;padding-top:18px;text-align:center}
+.help-link{display:inline-block;font-size:13px;font-weight:600;color:#818cf8;text-decoration:none;
+  padding:9px 16px;border:1px solid rgba(79,70,229,.35);border-radius:8px;transition:all .15s}
+.help-link:hover{border-color:#4F46E5;background:rgba(79,70,229,.12);color:#a5b4fc}
+.help-sub{font-size:12px;color:#64748b;margin:10px 0 0}
 </style></head>
 <body><main>
 <div class="logo">
@@ -464,6 +473,10 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
     <div class="tool-tabs">${toolTabsHtml}</div>
     ${toolPanelsHtml}
     <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
+  </div>
+  <div class="help-row">
+    <a class="help-link" href="${helpHref}">✉️ Ask for help with setup</a>
+    <p class="help-sub">Stuck on any step? This opens your email with a message to our support team.</p>
   </div>
 </div>
 </main>

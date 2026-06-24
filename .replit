@@ -107,7 +107,7 @@ externalPort = 9000
 [userenv]
 
 [userenv.shared]
-SUPPORT_EMAIL = "support@asktoact.ai"
+SUPPORT_EMAIL = "kroots@myticas.com"
 
 [userenv.production]
 PROD_URL = "https://connect.asktoact.ai"
