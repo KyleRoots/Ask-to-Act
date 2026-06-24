@@ -14,6 +14,18 @@ export const logger = pino({
     "bhPassword",
     "*.password",
     "*.bhPassword",
+    "refreshToken",
+    "*.refreshToken",
+    "bhRestToken",
+    "*.bhRestToken",
+    "apiKey",
+    "*.apiKey",
+    "enrollToken",
+    "*.enrollToken",
+    "restUrl",
+    "*.restUrl",
+    "req.body.refreshToken",
+    "req.body.apiKey",
   ],
   ...(isProduction
     ? {}

@@ -21,6 +21,36 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+// Fail fast on missing critical configuration. In production a missing secret
+// (e.g. TOKEN_ENCRYPTION_KEY, without which Bullhorn refresh tokens would be
+// stored in plaintext) must stop startup rather than silently degrade. In
+// development we only warn so local work isn't blocked.
+const REQUIRED_ENV = [
+  "DATABASE_URL",
+  "MCP_BEARER_TOKEN",
+  "TOKEN_ENCRYPTION_KEY",
+  "CLERK_SECRET_KEY",
+  "BULLHORN_CLIENT_ID",
+  "BULLHORN_CLIENT_SECRET",
+] as const;
+
+const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
+if (missingEnv.length > 0) {
+  const message = `Missing required environment variables: ${missingEnv.join(", ")}`;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(message);
+  }
+  logger.warn(`${message} — continuing in degraded mode (development only).`);
+}
+
+process.on("unhandledRejection", (reason) => {
+  logger.error({ reason }, "Unhandled promise rejection");
+});
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception — exiting");
+  process.exit(1);
+});
+
 async function initStripe(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {

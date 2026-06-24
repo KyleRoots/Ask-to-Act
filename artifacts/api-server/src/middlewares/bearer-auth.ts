@@ -37,11 +37,6 @@ function extractProvidedToken(req: Request): string | null {
     return pathToken;
   }
 
-  const queryToken = req.query["key"] ?? req.query["token"];
-  if (typeof queryToken === "string" && queryToken.length > 0) {
-    return queryToken;
-  }
-
   return null;
 }
 
@@ -59,7 +54,7 @@ export async function bearerAuth(req: Request, res: Response, next: NextFunction
   if (!provided) {
     res.status(401).json({
       error:
-        "Missing credentials. Provide the token via 'Authorization: Bearer <token>' header, a '/mcp/<token>' path, or a '?key=<token>' query parameter.",
+        "Missing credentials. Provide the token via an 'Authorization: Bearer <token>' header or a '/mcp/<token>' path.",
     });
     return;
   }

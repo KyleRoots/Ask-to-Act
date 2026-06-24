@@ -37,7 +37,43 @@ app.use(
     },
   }),
 );
-app.use(cors());
+// Restrict cross-origin browser access to known first-party origins. Non-browser
+// callers (curl, server-to-server MCP from ChatGPT/Claude) send no Origin header
+// and are always allowed. Extra origins can be added via ALLOWED_ORIGINS (CSV).
+const explicitOrigins = (process.env["ALLOWED_ORIGINS"] ?? "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+function isAllowedOrigin(origin: string): boolean {
+  if (explicitOrigins.includes(origin)) return true;
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1") return true;
+  return (
+    hostname === "asktoact.ai" ||
+    hostname.endsWith(".asktoact.ai") ||
+    hostname.endsWith(".replit.dev") ||
+    hostname.endsWith(".replit.app") ||
+    hostname.endsWith(".repl.co")
+  );
+}
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, isAllowedOrigin(origin));
+    },
+  }),
+);
 
 // Stripe webhook — must be registered BEFORE express.json() so body stays as raw Buffer
 app.post(
@@ -127,5 +163,25 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/api", router);
+
+// Global error handler. Express 5 forwards rejected async handlers here, which
+// keeps the process alive and prevents stack traces from leaking to clients.
+app.use(
+  (
+    err: Error & { status?: number; statusCode?: number },
+    req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    void _next;
+    logger.error(
+      { err, reqId: (req as express.Request & { id?: string }).id },
+      "Unhandled request error",
+    );
+    if (res.headersSent) return;
+    const status = err.status ?? err.statusCode ?? 500;
+    res.status(status).json({ error: "Internal server error" });
+  },
+);
 
 export default app;

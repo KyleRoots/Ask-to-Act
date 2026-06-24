@@ -480,7 +480,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       .limit(1);
 
     const baseUrl = getBaseUrl();
-    const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp?apiKey=${enrolledUser.apiKey}` : null;
+    const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp/${enrolledUser.apiKey}` : null;
     const e = escapeHtml;
 
     const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
