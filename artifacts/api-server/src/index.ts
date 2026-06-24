@@ -98,7 +98,27 @@ async function initStripe(): Promise<void> {
   }
 }
 
-await ensureColumns();
+// Retry ensureColumns up to 3 times with a short backoff to survive Neon
+// compute cold-starts (57P01 "terminating connection") during deployment.
+async function ensureColumnsWithRetry(maxAttempts = 3, delayMs = 2000): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await ensureColumns();
+      return;
+    } catch (err) {
+      const code = (err as Record<string, unknown>)["code"];
+      if (attempt < maxAttempts && (code === "57P01" || code === "ECONNRESET" || code === "ECONNREFUSED")) {
+        logger.warn({ err, attempt }, `ensureColumns attempt ${attempt} failed — retrying in ${delayMs}ms`);
+        await new Promise((res) => setTimeout(res, delayMs));
+      } else {
+        logger.error({ err }, "ensureColumns failed after all attempts");
+        // Non-fatal: log and continue so the server can still start up.
+      }
+    }
+  }
+}
+
+await ensureColumnsWithRetry();
 await initStripe();
 
 app.listen(port, (err) => {
