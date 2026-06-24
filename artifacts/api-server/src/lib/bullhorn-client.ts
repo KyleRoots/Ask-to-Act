@@ -145,16 +145,19 @@ function sanitizeFields(fields: string): string {
 
 /**
  * Entities that have a meaningful standalone record view in the Bullhorn UI, so
- * a deep link to open them is useful. Transactional/junction entities
- * (JobSubmission, Placement, Note, Task, etc.) are intentionally excluded.
+ * a deep link to open them is useful. Pure junction/log entities (Note, Task,
+ * Appointment, Sendout, etc.) are excluded; Placement and JobSubmission are
+ * included because recruiters navigate to them directly.
  */
 const UI_LINKABLE_ENTITIES = new Set<string>([
   "Candidate",
   "ClientContact",
   "ClientCorporation",
   "JobOrder",
+  "JobSubmission",
   "Lead",
   "Opportunity",
+  "Placement",
 ]);
 
 // Cache the swimlane-derived host keyed by the restUrl it was derived from, so a
@@ -778,7 +781,7 @@ export async function listSubmissionsForJob(args: {
   const fields =
     args.fields ??
     "id,candidate,jobOrder,status,dateAdded,sendingUser,salary,payRate";
-  return queryEntity(
+  const result = await queryEntity(
     "JobSubmission",
     conditions.join(" AND "),
     fields,
@@ -786,6 +789,7 @@ export async function listSubmissionsForJob(args: {
     args.start ?? 0,
     "-dateAdded",
   );
+  return enrichWithProfileUrls("JobSubmission", result);
 }
 
 export async function listPlacements(args: {
@@ -840,7 +844,7 @@ export async function listPlacements(args: {
       `report confirmedPlacements (${confirmedPlacements}), or call the placements_report tool. ` +
       `Use the all-status total only if the user explicitly asked for all/pending/canceled placements.`;
   }
-  return result;
+  return enrichWithProfileUrls("Placement", result);
 }
 
 export async function getNotes(args: {
@@ -2443,7 +2447,7 @@ export async function listSubmissionsForCandidate(args: {
   const fields =
     args.fields ??
     "id,candidate,jobOrder,status,dateAdded,sendingUser,salary,payRate";
-  return queryEntity(
+  const result = await queryEntity(
     "JobSubmission",
     conditions.join(" AND "),
     fields,
@@ -2451,6 +2455,7 @@ export async function listSubmissionsForCandidate(args: {
     args.start ?? 0,
     "-dateAdded",
   );
+  return enrichWithProfileUrls("JobSubmission", result);
 }
 
 /** Appointments/meetings, filtered by owner and/or scheduled-time window. */

@@ -447,7 +447,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_submissions_for_job",
-    "List candidate submissions (applications) for a specific job order, optionally restricted to a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`.",
+    "List candidate submissions (applications) for a specific job order, optionally restricted to a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`. Each record includes a `bullhornUrl` deep link — render the submission ID (or candidate name) as a clickable link to open it directly in Bullhorn.",
     {
       jobId: z.number().int().positive().describe("Bullhorn job order ID"),
       dateAddedStart: z
@@ -477,7 +477,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_placements",
-    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. This instance stores each placement's \"Internal Department\" (office/branch) in field correlatedCustomText1. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd; this tool is for viewing specific records only (page with `start` if needed). Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`. To COUNT/total placements (e.g. 'how many placements in 2026', 'placements by department'), do NOT add them up from this list — use `count_entity` for an exact, fast total. CONVENTION for this instance: \"placements made\" / \"placements so far\" means CONFIRMED placements only — filter `status:Approved OR status:Completed OR status:Ended` (i.e. exclude Canceled, Archive, AND pending Submitted) unless the user explicitly asks for all/pending/canceled placements. Do NOT rank offices/recruiters or pick a 'most/fewest/top' from this record page — it is a truncated sample; use count_entity or the report tools (placements_report, recruiter_leaderboard) for any total, ranking, or by-group breakdown.",
+    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. This instance stores each placement's \"Internal Department\" (office/branch) in field correlatedCustomText1. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd; this tool is for viewing specific records only (page with `start` if needed). Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`. Each record includes a `bullhornUrl` deep link — render the placement ID (or candidate name) as a clickable link to open it directly in Bullhorn. To COUNT/total placements (e.g. 'how many placements in 2026', 'placements by department'), do NOT add them up from this list — use `count_entity` for an exact, fast total. CONVENTION for this instance: \"placements made\" / \"placements so far\" means CONFIRMED placements only — filter `status:Approved OR status:Completed OR status:Ended` (i.e. exclude Canceled, Archive, AND pending Submitted) unless the user explicitly asks for all/pending/canceled placements. Do NOT rank offices/recruiters or pick a 'most/fewest/top' from this record page — it is a truncated sample; use count_entity or the report tools (placements_report, recruiter_leaderboard) for any total, ranking, or by-group breakdown.",
     {
       candidateId: z.number().int().positive().optional().describe("Filter by candidate Bullhorn ID"),
       jobId: z.number().int().positive().optional().describe("Filter by job order Bullhorn ID"),
@@ -675,7 +675,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_submissions_for_candidate",
-    "List the job submissions (applications) for a specific candidate — i.e. which jobs a candidate has been submitted to — optionally within a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`.",
+    "List the job submissions (applications) for a specific candidate — i.e. which jobs a candidate has been submitted to — optionally within a dateAdded range. Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`. Each record includes a `bullhornUrl` deep link — render the submission ID (or job title) as a clickable link to open it directly in Bullhorn.",
     {
       candidateId: z.number().int().positive().describe("Bullhorn candidate ID"),
       dateAddedStart: z
