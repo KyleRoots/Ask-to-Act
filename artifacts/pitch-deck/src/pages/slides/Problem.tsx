@@ -29,28 +29,30 @@ export default function Problem() {
       <div className="absolute bottom-[8vh] left-[6vw] right-[6vw] grid grid-cols-3 gap-[3vw]">
         <div className="border-t border-line pt-[3vh]">
           <div className="font-display font-extrabold text-[7vw] leading-none text-accent tracking-tight">
-            5–8h
+            6h
           </div>
           <div className="mt-[2vh] font-body text-[1.5vw] text-muted leading-snug">
-            Lost per recruiter per week to manual transfer between AI and ATS.
+            Per recruiter per week lost to copy-paste between AI and ATS. At $85/hr burdened cost,{" "}
+            <span className="text-text font-display font-semibold">that's ~$2,200/month per desk.</span>
           </div>
         </div>
 
         <div className="border-t border-line pt-[3vh]">
           <div className="font-display font-extrabold text-[7vw] leading-none text-accent tracking-tight">
-            0
+            $0
           </div>
           <div className="mt-[2vh] font-body text-[1.5vw] text-muted leading-snug">
-            Audit trail of what an AI was asked, what it returned, what changed.
+            Audit trail of what an AI was asked, what it returned, what changed. Zero. At any firm.
           </div>
         </div>
 
-        <div className="border-t border-line pt-[3vh]">
-          <div className="font-display font-extrabold text-[7vw] leading-none text-accent tracking-tight">
-            Every
+        <div className="border-t-2 border-gold pt-[3vh]">
+          <div className="font-display font-extrabold text-[7vw] leading-none text-gold tracking-tight">
+            $789
           </div>
           <div className="mt-[2vh] font-body text-[1.5vw] text-muted leading-snug">
-            Desk, every day. The friction scales with every new AI tool a team adopts.
+            AskToAct for a 10-seat desk — per month, no commitment.{" "}
+            <span className="text-text font-display font-semibold">ROI positive from week one.</span>
           </div>
         </div>
       </div>

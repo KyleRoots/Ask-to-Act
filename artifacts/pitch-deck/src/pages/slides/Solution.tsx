@@ -17,9 +17,12 @@ export default function Solution() {
 
       <div className="absolute top-[16vh] left-[6vw] right-[6vw]">
         <h1 className="font-display font-bold text-[4.8vw] leading-[1] tracking-tight text-text max-w-[70vw]">
-          The bridge between any AI
-          <span className="text-accent"> and the systems that run the business.</span>
+          Plug in, not rip and replace —
+          <span className="text-accent"> keep your AI, keep your ATS.</span>
         </h1>
+        <p className="mt-[2vh] font-body text-[1.8vw] text-muted max-w-[65vw] leading-relaxed">
+          Your team keeps the AI they already pay for. Their ATS stays exactly as-is. AskToAct is the invisible bridge that closes the loop. Live in under 30 minutes, no IT department required.
+        </p>
       </div>
 
       <div className="absolute top-[42vh] left-[6vw] right-[6vw]">

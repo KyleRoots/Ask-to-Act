@@ -22,45 +22,55 @@ export default function Moat() {
         </h1>
       </div>
 
-      <div className="absolute top-[36vh] left-[6vw] right-[6vw] grid grid-cols-4 gap-[2vw]">
+      <div className="absolute top-[36vh] left-[6vw] right-[6vw] grid grid-cols-5 gap-[1.8vw]">
 
-        <div className="flex flex-col gap-[1.5vh]">
-          <div className="font-display font-extrabold text-[4.5vw] leading-none text-accent">01</div>
-          <div className="font-display font-bold text-[1.8vw] text-text leading-tight">
+        <div className="flex flex-col gap-[1.2vh]">
+          <div className="font-display font-extrabold text-[3.8vw] leading-none text-accent">01</div>
+          <div className="font-display font-bold text-[1.5vw] text-text leading-tight">
             Model-agnostic
           </div>
-          <div className="font-body text-[1.3vw] text-muted leading-snug">
+          <div className="font-body text-[1.2vw] text-muted leading-snug">
             Works with whatever AI the customer already pays for. As models commoditize, the bridge becomes more valuable, not less.
           </div>
         </div>
 
-        <div className="flex flex-col gap-[1.5vh]">
-          <div className="font-display font-extrabold text-[4.5vw] leading-none text-accent">02</div>
-          <div className="font-display font-bold text-[1.8vw] text-text leading-tight">
+        <div className="flex flex-col gap-[1.2vh]">
+          <div className="font-display font-extrabold text-[3.8vw] leading-none text-accent">02</div>
+          <div className="font-display font-bold text-[1.5vw] text-text leading-tight">
             Per-user permissions
           </div>
-          <div className="font-body text-[1.3vw] text-muted leading-snug">
+          <div className="font-body text-[1.2vw] text-muted leading-snug">
             Every write runs under the recruiter's own Bullhorn session — not a shared admin account. IT can deploy without fear of privilege escalation.
           </div>
         </div>
 
-        <div className="flex flex-col gap-[1.5vh]">
-          <div className="font-display font-extrabold text-[4.5vw] leading-none text-accent">03</div>
-          <div className="font-display font-bold text-[1.8vw] text-text leading-tight">
+        <div className="flex flex-col gap-[1.2vh]">
+          <div className="font-display font-extrabold text-[3.8vw] leading-none text-accent">03</div>
+          <div className="font-display font-bold text-[1.5vw] text-text leading-tight">
             Data integrity layer
           </div>
-          <div className="font-body text-[1.3vw] text-muted leading-snug">
+          <div className="font-body text-[1.2vw] text-muted leading-snug">
             Duplicate-proof writes, locked headline metrics, validation before every API call. Generic wrappers write whatever the AI says.
           </div>
         </div>
 
-        <div className="flex flex-col gap-[1.5vh]">
-          <div className="font-display font-extrabold text-[4.5vw] leading-none text-accent">04</div>
-          <div className="font-display font-bold text-[1.8vw] text-text leading-tight">
+        <div className="flex flex-col gap-[1.2vh]">
+          <div className="font-display font-extrabold text-[3.8vw] leading-none text-accent">04</div>
+          <div className="font-display font-bold text-[1.5vw] text-text leading-tight">
             First-mover on the standard
           </div>
-          <div className="font-body text-[1.3vw] text-muted leading-snug">
-            Built on the open protocol adopted by ChatGPT, Claude, and Gemini. Domain vocabulary and workflow patterns in place before horizontal players notice the vertical.
+          <div className="font-body text-[1.2vw] text-muted leading-snug">
+            Built on the open protocol adopted by ChatGPT, Claude, and Gemini. Domain vocabulary in place before horizontal players notice the vertical.
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-[1.2vh] border-l border-accent/30 pl-[1.5vw]">
+          <div className="font-display font-extrabold text-[3.8vw] leading-none text-gold">05</div>
+          <div className="font-display font-bold text-[1.5vw] text-text leading-tight">
+            Zero lock-in
+          </div>
+          <div className="font-body text-[1.2vw] text-muted leading-snug">
+            Built on open standards (MCP). If a better model drops tomorrow, it still works. Customers aren't betting on a proprietary platform — that's a trust advantage in every sales conversation.
           </div>
         </div>
 

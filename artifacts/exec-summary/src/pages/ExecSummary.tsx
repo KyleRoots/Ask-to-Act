@@ -46,17 +46,25 @@ export default function ExecSummary() {
         <h1 style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 800, fontSize: 'clamp(2.5rem, 5vw, 4rem)', lineHeight: 1, letterSpacing: '-0.03em', margin: '0 0 1.5rem' }}>
           We sell the rails,<br /><span style={{ color: '#38bdf8' }}>not the chatbot.</span>
         </h1>
-        <p style={{ fontSize: '1.2rem', color: '#cbd5e1', lineHeight: 1.6, maxWidth: '680px', margin: '0 0 2rem' }}>
+        <p style={{ fontSize: '1.2rem', color: '#cbd5e1', lineHeight: 1.6, maxWidth: '680px', margin: '0 0 1.5rem' }}>
           AskToAct is the AI action layer for the recruiting and staffing stack: a model-agnostic middleware
           that lets any AI assistant read and write to Bullhorn, Salesforce, Workday, and the rest, with
           role-based permissions and a full audit trail baked in from day one.
         </p>
 
+        {/* ROI hook */}
+        <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderLeft: '3px solid #fbbf24', borderRadius: '0.75rem', padding: '1.25rem 1.75rem', maxWidth: '680px', marginBottom: '1.25rem' }}>
+          <div style={{ fontSize: '0.7rem', color: '#fbbf24', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>The Cost of Not Subscribing</div>
+          <p style={{ fontSize: '0.95rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0 }}>
+            6 hours/week of copy-paste per recruiter × $85/hr burdened cost = <strong style={{ color: '#fbbf24' }}>~$2,200/month in lost productivity per desk</strong>. AskToAct for a 10-seat desk is <strong style={{ color: '#38bdf8' }}>$789/month</strong>. That's a 28× ROI — before counting the audit trail, the error reduction, or the governance story. Month-to-month, cancel anytime.
+          </p>
+        </div>
+
         {/* Elevator pitch callout */}
         <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.25)', borderLeft: '3px solid #38bdf8', borderRadius: '0.75rem', padding: '1.5rem 1.75rem', maxWidth: '680px' }}>
           <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>The 30-Second Version</div>
           <p style={{ fontSize: '1rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
-            "Your recruiters already pay for ChatGPT or Claude. AskToAct makes it actually do something inside their ATS — with their own Bullhorn permissions enforced server-side, duplicate-proof writes, and a full audit trail on every action. They don't replace the AI. They don't replace the ATS. We close the loop between them. We sell the rails, not the chatbot."
+            "Your recruiters already pay for ChatGPT or Claude. AskToAct makes it actually do something inside their ATS — with their own Bullhorn permissions enforced server-side, duplicate-proof writes, and a full audit trail on every action. They don't replace the AI. They don't replace the ATS. We close the loop between them. Live in under 30 minutes. No IT department required."
           </p>
         </div>
       </div>
@@ -65,9 +73,9 @@ export default function ExecSummary() {
 
         {/* Key stats row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
-          <Stat number="5–8h" label="Recruiter time lost per week to manual copy-paste between AI and ATS" />
-          <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do" accent="#fbbf24" />
-          <Stat number="37" label="Specific recruiting actions a recruiter can take from ChatGPT or Claude — search, read, submit, note, update — all live in production today" accent="#4ade80" />
+          <Stat number="~$2,200" label="Monthly productivity lost per recruiter desk to AI copy-paste (6h/wk × $85/hr burdened). AskToAct costs $789/mo for 10 seats." />
+          <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
+          <Stat number="37" label="Specific recruiting actions live in production today: search, read, submit, note, update — directly from ChatGPT or Claude" accent="#4ade80" />
         </div>
 
         {/* Section: The Problem */}
@@ -143,6 +151,19 @@ export default function ExecSummary() {
 
         <Divider />
 
+        {/* Why It's a No-Brainer callout */}
+        <div style={{ background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '1rem', padding: '2rem 2.25rem', marginBottom: '3rem' }}>
+          <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Why It's a No-Brainer</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem' }}>
+            <NoBrainerItem icon="✓" title="Zero lock-in" body="Built on MCP — the open standard adopted by ChatGPT, Claude, and Gemini. If a better model launches tomorrow, it still works. Customers aren't betting on a proprietary platform." />
+            <NoBrainerItem icon="✓" title="Minimal setup" body="Self-serve onboarding: admin provisions seats, recruiters connect their own Bullhorn accounts via OAuth, paste a URL into ChatGPT. Live in under 30 minutes. No IT department, no implementation project." />
+            <NoBrainerItem icon="✓" title="Month-to-month, cancel anytime" body="No long-term commitment required. The product has to earn its place on the budget every month. That's the model — and it's by design." />
+            <NoBrainerItem icon="✓" title="Works with AI they already have" body="AskToAct doesn't sell an AI assistant. It connects to whatever the customer already pays for — ChatGPT, Claude, Gemini, or anything else MCP-compatible." />
+          </div>
+        </div>
+
+        <Divider />
+
         {/* Section: Business Model */}
         <Section title="How It Makes Money" index="04">
           <p style={bodyStyle}>
@@ -152,24 +173,27 @@ export default function ExecSummary() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '2rem 0' }}>
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Pricing Structure</div>
+              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Pricing Structure · Month-to-Month Default</div>
               <RevenueRow label="Platform · $499 / mo" desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
-              <RevenueRow label="Per-active-seat · $29 / mo" desc="Only billed when a seat makes at least one AI call that month" />
+              <RevenueRow label="Per-active-seat · $29 / mo" desc="Only billed when a seat makes at least one AI call that month — idle seats cost nothing" />
               <RevenueRow label="Additional connectors · $299 / mo" desc="Each system beyond the first (Salesforce, Workday, Greenhouse…)" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
-                <RevenueRow label="Onboarding · $3,500 one-time" desc="Setup, training, OAuth registration. Waived on annual plans." gold />
+                <RevenueRow label="White-glove setup · $3,500 · Optional" desc="Guided setup, training, OAuth registration. Self-serve is free. Most firms don't need this." gold />
+              </div>
+              <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '0.5rem', padding: '0.875rem 1rem', marginTop: '1rem' }}>
+                <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginBottom: '0.25rem', fontWeight: 600 }}>No-commitment terms</div>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5 }}>Month-to-month on all plans. Annual available (onboarding waived). Cancel anytime — no termination fees, no data hostage situations.</div>
               </div>
             </div>
 
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Worked Examples · Monthly Recurring</div>
-              <PricingRow seats="10 active seats · 1 connector" range="~$789 / mo" />
-              <PricingRow seats="25 active seats · 1 connector" range="~$1,200 / mo" />
-              <PricingRow seats="50 active seats · 2 connectors" range="~$2,200 / mo" />
-              <PricingRow seats="100 active seats · 3 connectors" range="~$4,000 / mo" />
+              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Revenue vs. Gross Margin</div>
+              <PricingRow seats="10 active seats · 1 connector" range="~$789 / mo" margin="~95% GM" />
+              <PricingRow seats="25 active seats · 1 connector" range="~$1,200 / mo" margin="~95% GM" />
+              <PricingRow seats="50 active seats · 2 connectors" range="~$2,200 / mo" margin="~95% GM" />
+              <PricingRow seats="100 active seats · 3 connectors" range="~$4,000 / mo" margin="~96% GM" />
               <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.5 }}>
-                Natural expansion motion: firms add seats as AI proves its value to the desk,
-                then add connectors as the second system demands it. Each step is incremental revenue at near-zero incremental cost.
+                AI cost is borne entirely by the customer. Infrastructure cost per seat is $30–150/mo depending on firm size and falls with volume. Each new seat added is near-zero incremental cost — expansion revenue is effectively pure margin.
               </p>
             </div>
           </div>
@@ -235,16 +259,14 @@ export default function ExecSummary() {
         <Divider />
 
         {/* Section: What We Need */}
-        <Section title="Next Steps" index="07">
+        <Section title="Next Steps · Start a Pilot" index="07">
           <p style={bodyStyle}>
-            The implementation is live and the platform is production-ready. The billing layer, customer portal,
-            and self-serve onboarding flow are all deployed. The next milestone is converting the proof of concept
-            to paid revenue and expanding the platform. Three decisions move this forward:
+            The product is live, billing is wired, and self-serve onboarding is deployed. There is no implementation blocker — the next action is a sales call, not a sprint. The ask is deliberately low-friction: a 30-day paid pilot, month-to-month, no long-term commitment. The customer walks away if it doesn't deliver.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', margin: '1.75rem 0' }}>
-            <AskCard number="1" title="First paying customer" body="Convert the Myticas deployment to a paid pilot or sign a comparable staffing firm. Validates pricing, surfaces field-mapping requirements for customer two, and produces the first case study." />
-            <AskCard number="2" title="Production go-live" body="Deploy to connect.asktoact.ai, activate live-mode Stripe billing, and complete Clerk authentication setup for the production domain. The platform is ready — this is a configuration step, not a build step." />
-            <AskCard number="3" title="Second connector decision" body="Prioritize the next ATS or CRM connector (Salesforce, Greenhouse, Lever) based on the first three commercial customer conversations." />
+            <AskCard number="1" title="Name a firm" body="Identify one mid-market staffing firm for first commercial outreach. We handle the demo, onboarding, and first month of support. One conversation to start." />
+            <AskCard number="2" title="Greenlight the pilot" body="A 30-day paid pilot — month-to-month, no contractual lock-in. If they don't see ROI in 30 days, they cancel. That's the whole ask." />
+            <AskCard number="3" title="30-day check-in" body="Review usage data, recruiter feedback, and the expansion motion 30 days after go-live. One meeting. Then decide on second connector and second customer." />
           </div>
           <p style={bodyStyle}>
             AskToAct does not need more product to start selling. The connector is live, the billing layer is built,
@@ -332,11 +354,26 @@ function RevenueRow({ label, desc, gold }: { label: string; desc: string; gold?:
   );
 }
 
-function PricingRow({ seats, range }: { seats: string; range: string }) {
+function PricingRow({ seats, range, margin }: { seats: string; range: string; margin?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderBottom: '1px solid #1e3a5f', paddingBottom: '0.75rem', marginBottom: '0.75rem' }}>
       <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 600, fontSize: '0.9rem', color: '#cbd5e1' }}>{seats}</span>
-      <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1rem', color: '#38bdf8' }}>{range}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
+        <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1rem', color: '#38bdf8' }}>{range}</span>
+        {margin && <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 600, fontSize: '0.75rem', color: '#4ade80' }}>{margin}</span>}
+      </div>
+    </div>
+  );
+}
+
+function NoBrainerItem({ icon, title, body }: { icon: string; title: string; body: string }) {
+  return (
+    <div style={{ display: 'flex', gap: '0.875rem' }}>
+      <div style={{ flexShrink: 0, width: '1.5rem', height: '1.5rem', borderRadius: '50%', background: 'rgba(56,189,248,0.15)', border: '1px solid rgba(56,189,248,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: '#38bdf8', fontWeight: 700 }}>{icon}</div>
+      <div>
+        <div style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 600, fontSize: '0.95rem', color: '#f8fafc', marginBottom: '0.25rem' }}>{title}</div>
+        <div style={{ fontSize: '0.875rem', color: '#94a3b8', lineHeight: 1.6 }}>{body}</div>
+      </div>
     </div>
   );
 }

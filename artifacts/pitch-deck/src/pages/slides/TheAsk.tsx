@@ -16,51 +16,55 @@ export default function TheAsk() {
         <LogoWordmark vw={2.2} />
       </div>
 
-      <div className="absolute top-[20vh] left-[6vw] right-[6vw]">
-        <h1 className="font-display font-bold text-[5.6vw] leading-[0.98] tracking-tight text-text max-w-[75vw]">
-          Three decisions
-          <span className="text-accent"> from this room.</span>
+      <div className="absolute top-[18vh] left-[6vw] right-[6vw]">
+        <h1 className="font-display font-bold text-[5.2vw] leading-[0.98] tracking-tight text-text max-w-[75vw]">
+          Start a pilot.
+          <span className="text-accent"> No commitment required.</span>
         </h1>
+        <p className="mt-[2vh] font-body text-[1.9vw] text-muted max-w-[65vw] leading-relaxed">
+          The product is live. The billing is wired. The only thing left is a sales call and a 30-day window to prove the ROI. Walk away if it doesn't deliver.
+        </p>
       </div>
 
-      <div className="absolute top-[46vh] left-[6vw] right-[6vw] grid grid-cols-3 gap-[3vw]">
+      <div className="absolute top-[52vh] left-[6vw] right-[6vw] grid grid-cols-3 gap-[3vw]">
 
         <div className="flex flex-col gap-[2vh] border-t-2 border-accent pt-[3vh]">
-          <div className="font-display font-extrabold text-[2.4vw] text-text leading-tight">
-            Resource alignment
+          <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
+            Name a firm
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            Confirm budget envelope and engineering hours through first paid customer.
+            Identify one mid-market staffing firm for first commercial outreach. We handle the rest — demo, onboarding, and first month of support.
           </div>
         </div>
 
         <div className="flex flex-col gap-[2vh] border-t-2 border-accent pt-[3vh]">
-          <div className="font-display font-extrabold text-[2.4vw] text-text leading-tight">
-            Timeline approval
+          <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
+            Greenlight the pilot
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            Sign off on the path to multi-system support and onboarding the first three firms.
+            Approve a 30-day paid pilot — month-to-month, no contractual lock-in. If they don't see ROI in 30 days, they cancel. That's the whole ask.
           </div>
         </div>
 
         <div className="flex flex-col gap-[2vh] border-t-2 border-gold pt-[3vh]">
-          <div className="font-display font-extrabold text-[2.4vw] text-text leading-tight">
-            Go / No-go
+          <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
+            Set a check-in
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            A clear green light to begin commercializing, or the specific objections to address first.
+            30 days from first customer go-live: review usage data, recruiter feedback, and the expansion motion. One meeting, not a committee.
           </div>
         </div>
 
       </div>
 
       <div className="absolute bottom-[5vh] left-[6vw] right-[6vw] flex items-end justify-between">
-        <div className="font-display font-bold text-[3.6vw] text-text leading-tight max-w-[70vw]">
+        <div className="font-display font-bold text-[3.2vw] text-text leading-tight max-w-[70vw]">
           AskToAct
-          <span className="text-muted font-display font-medium text-[2.2vw]"> · We sell the rails, not the chatbot.</span>
+          <span className="text-muted font-display font-medium text-[2vw]"> · We sell the rails, not the chatbot.</span>
         </div>
-        <div className="font-body text-[1.3vw] text-muted">
-          End of briefing
+        <div className="font-body text-[1.3vw] text-muted text-right">
+          <div className="text-accent font-display font-semibold">connect.asktoact.ai</div>
+          <div>Live in production today</div>
         </div>
       </div>
     </div>
