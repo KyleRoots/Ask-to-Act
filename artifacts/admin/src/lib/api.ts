@@ -1,15 +1,32 @@
 const API_BASE = "/api";
 
+// Admin sessions are bound to an absolute expiry so a token left in a shared or
+// unattended browser stops working on its own. On expiry getToken() returns
+// null, which the AuthGuard treats as signed-out and redirects to /login.
+const TOKEN_KEY = "admin_token";
+const TOKEN_EXP_KEY = "admin_token_exp";
+const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 export function getToken(): string | null {
-  return localStorage.getItem("admin_token");
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return null;
+  const expRaw = localStorage.getItem(TOKEN_EXP_KEY);
+  const exp = expRaw ? Number(expRaw) : 0;
+  if (!exp || Number.isNaN(exp) || Date.now() > exp) {
+    clearToken();
+    return null;
+  }
+  return token;
 }
 
 export function setToken(token: string) {
-  localStorage.setItem("admin_token", token);
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(TOKEN_EXP_KEY, String(Date.now() + TOKEN_TTL_MS));
 }
 
 export function clearToken() {
-  localStorage.removeItem("admin_token");
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXP_KEY);
 }
 
 async function apiFetch<T>(

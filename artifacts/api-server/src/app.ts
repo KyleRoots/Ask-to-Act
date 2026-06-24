@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
@@ -18,6 +19,40 @@ app.set("trust proxy", 1);
 
 // Clerk FAPI proxy — must be before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+
+// Security headers (helmet). Applied AFTER the Clerk FAPI proxy so Clerk's
+// proxied frontend-API responses are left untouched. This app serves only its
+// own self-contained HTML pages (landing, legal, enroll/connector/OAuth) plus
+// the JSON /api — it does NOT serve the portal/admin SPAs — so a tailored CSP
+// here is self-contained and low-risk. Inline <script>/<style> are permitted
+// because those pages rely on them and all dynamic content is already
+// HTML-escaped; tightening to per-request nonces is a future hardening step.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        // helmet defaults to script-src-attr 'none', which would block the
+        // inline onclick/onsubmit handlers the connector-setup, enroll and
+        // OAuth pages rely on. Allow them explicitly (content is HTML-escaped).
+        scriptSrcAttr: ["'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    // The JSON API may be read cross-origin by first-party tools; helmet's
+    // default same-origin CORP would block legitimate cross-origin reads.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  }),
+);
 
 app.use(
   pinoHttp({
