@@ -6,7 +6,7 @@ import { firmsTable } from "./firms";
 export const usersTable = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  email: text("email"),
+  email: text("email").unique(),
   apiKey: text("api_key").notNull().unique(),
   firmId: text("firm_id").references(() => firmsTable.id, { onDelete: "set null" }),
   role: text("role").notNull().default("recruiter"),
