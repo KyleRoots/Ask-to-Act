@@ -407,9 +407,7 @@ function connectorSetupPage(displayName: string, mcpUrl: string | null, alreadyC
     ? `Welcome back, <strong style="color:#e8ecf3">${e(displayName)}</strong>. You're already connected to Bullhorn — here's your connector setup to complete or reference:`
     : `Linked as <strong style="color:#e8ecf3">${e(displayName)}</strong>. Your AI connector is ready.`;
 
-  const helpHref = `mailto:support@asktoact.ai?subject=${encodeURIComponent("Help setting up my AskToAct connector")}&body=${encodeURIComponent(
-    "Hi AskToAct support,\n\nI'm setting up my AI connector for Bullhorn and I could use a hand.\n\nMy name: " + displayName +
-    "\n\nWhat I'm trying to do / where I'm stuck:\n\n\nThanks!")}`;
+  const helpNameJson = JSON.stringify(displayName).replace(/</g, "\\u003c");
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connected | AskToAct</title>
@@ -453,6 +451,25 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   padding:9px 16px;border:1px solid rgba(79,70,229,.35);border-radius:8px;transition:all .15s}
 .help-link:hover{border-color:#4F46E5;background:rgba(79,70,229,.12);color:#a5b4fc}
 .help-sub{font-size:12px;color:#64748b;margin:10px 0 0}
+.help-toggle{display:inline-block;font-size:13px;font-weight:600;color:#818cf8;background:none;cursor:pointer;
+  padding:9px 16px;border:1px solid rgba(79,70,229,.35);border-radius:8px;transition:all .15s}
+.help-toggle:hover{border-color:#4F46E5;background:rgba(79,70,229,.12);color:#a5b4fc}
+.help-form{margin-top:16px;text-align:left;display:none}
+.help-form.open{display:block}
+.help-field{margin-bottom:12px}
+.help-field label{display:block;font-size:12px;color:#94a3b8;margin-bottom:5px;font-weight:500}
+.help-input,.help-textarea{width:100%;background:#0b1020;border:1px solid #1e2a3a;border-radius:8px;
+  padding:10px 12px;color:#e8ecf3;font-size:13px;font-family:inherit}
+.help-input:focus,.help-textarea:focus{outline:none;border-color:#4F46E5}
+.help-textarea{resize:vertical;min-height:90px;line-height:1.5}
+.help-hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.help-send{width:100%;padding:11px;background:#4F46E5;color:#fff;border:none;border-radius:8px;
+  font-size:13px;font-weight:600;cursor:pointer}
+.help-send:hover{background:#4338ca}
+.help-send:disabled{opacity:.6;cursor:default}
+.help-status{font-size:12px;margin-top:10px;line-height:1.5}
+.help-status.ok{color:#34d399}
+.help-status.err{color:#f87171}
 </style></head>
 <body><main>
 <div class="logo">
@@ -475,8 +492,21 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
     <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
   </div>
   <div class="help-row">
-    <a class="help-link" href="${helpHref}">✉️ Ask for help with setup</a>
-    <p class="help-sub">Stuck on any step? This opens your email with a message to our support team.</p>
+    <button type="button" class="help-toggle" id="help-toggle" onclick="toggleHelp()">✉️ Ask for help with setup</button>
+    <p class="help-sub" id="help-sub">Stuck on any step? Send our support team a message and we'll reply by email.</p>
+    <form class="help-form" id="help-form" onsubmit="return submitHelp(event)">
+      <input type="text" class="help-hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <div class="help-field">
+        <label for="help-email">Your email (so we can reply)</label>
+        <input type="email" class="help-input" id="help-email" required placeholder="you@company.com">
+      </div>
+      <div class="help-field">
+        <label for="help-message">What do you need help with?</label>
+        <textarea class="help-textarea" id="help-message" required placeholder="Describe where you're stuck…"></textarea>
+      </div>
+      <button type="submit" class="help-send" id="help-send">Send message</button>
+      <p class="help-status" id="help-status"></p>
+    </form>
   </div>
 </div>
 </main>
@@ -500,6 +530,48 @@ if (box) box.addEventListener('click', function() {
 });
 // Default to ChatGPT
 selectTool('chatgpt');
+// Inline help form
+var HELP_NAME = ${helpNameJson};
+function toggleHelp() {
+  var f = document.getElementById('help-form');
+  var sub = document.getElementById('help-sub');
+  var open = f.classList.toggle('open');
+  document.getElementById('help-toggle').textContent = open ? '✕ Close' : '✉️ Ask for help with setup';
+  if (sub) sub.style.display = open ? 'none' : 'block';
+  if (open) document.getElementById('help-email').focus();
+}
+function submitHelp(ev) {
+  ev.preventDefault();
+  var btn = document.getElementById('help-send');
+  var status = document.getElementById('help-status');
+  status.textContent = ''; status.className = 'help-status';
+  btn.disabled = true; btn.textContent = 'Sending…';
+  fetch('/api/support/help', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: HELP_NAME,
+      email: document.getElementById('help-email').value,
+      message: document.getElementById('help-message').value,
+      website: document.querySelector('#help-form [name=website]').value
+    })
+  }).then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); })
+    .then(function(res){
+      if (res.ok) {
+        document.getElementById('help-form').innerHTML =
+          '<p class="help-status ok">' + ((res.d && res.d.message) || 'Your message has been sent — our team will reach out shortly.') + '</p>';
+      } else {
+        status.textContent = (res.d && res.d.error) || 'Something went wrong. Please try again.';
+        status.className = 'help-status err';
+        btn.disabled = false; btn.textContent = 'Send message';
+      }
+    }).catch(function(){
+      status.textContent = 'Network error. Please try again.';
+      status.className = 'help-status err';
+      btn.disabled = false; btn.textContent = 'Send message';
+    });
+  return false;
+}
 </script>
 </body></html>`;
 }

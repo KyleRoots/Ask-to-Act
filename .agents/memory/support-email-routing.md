@@ -12,18 +12,27 @@ There are TWO ways a support message reaches us, and they route differently:
    `process.env.SUPPORT_EMAIL ?? "support@asktoact.ai"`. This path IS
    server-controlled: change `SUPPORT_EMAIL` to reroute it.
 
-2. **The onboarding "Ask for help" mailto** (connector setup + enroll pages in
-   routes/users.ts) — a plain `mailto:support@asktoact.ai` link. It opens the
-   recruiter's OWN email client and never touches our server, so `SUPPORT_EMAIL`
-   has zero effect on it.
+2. **The connector setup "Ask for help" form** (connector setup page in
+   routes/users.ts) — NO LONGER a mailto. It is now an inline form that POSTs to
+   the PUBLIC endpoint `POST /api/support/help` (routes/support.ts), which calls
+   the same `sendSupportEmail` → `SUPPORT_EMAIL`. So this path IS now
+   server-controlled too: `SUPPORT_EMAIL` reroutes it, no domain forwarding
+   needed. The endpoint is unauthenticated with a dedicated rate limiter
+   (5/10min/IP) + a honeypot field.
 
-**Why this matters:** "route support@asktoact.ai to <inbox>" can only be fully
-satisfied for path #1 in code. Path #2 (the mailto) requires a mailbox
-forwarding/alias rule on the **asktoact.ai domain** at the email provider
-(Google Workspace / Cloudflare Email Routing / registrar) — that is external to
-this repo and cannot be set from the codebase.
+   **Why switched from mailto:** mailto depends on the user having a configured
+   desktop mail client (often absent on web-only setups, so it silently does
+   nothing), AND it required external domain mail forwarding (Cloudflare/registrar/
+   Workspace) to ever reach us. The form sidesteps both by reusing the already-
+   authorized SendGrid send path.
 
-**How to apply:** If asked to redirect support email, set `SUPPORT_EMAIL` for the
-app path AND either (a) have the user configure domain forwarding for the mailto
-path, or (b) change the mailto `to` address directly (tradeoff: exposes a
-non-brand personal address in the recruiter's email client).
+**Remaining mailto/inbound dependency:** Other `support@asktoact.ai` /
+`CONTACT_EMAIL` mailtos still exist (e.g. routes/legal.ts) and STILL need domain
+forwarding to be received. If asked to make support@asktoact.ai *receive* mail,
+that is external to this repo (Cloudflare Email Routing / Workspace alias /
+registrar forwarding). SendGrid being authorized only covers *sending*, not
+receiving (inbound would need an MX change + Inbound Parse webhook).
+
+**How to apply:** For in-app/help-form support routing, just set `SUPPORT_EMAIL`.
+For any literal `mailto:support@asktoact.ai` link to deliver, set up domain-level
+forwarding/alias on asktoact.ai.
