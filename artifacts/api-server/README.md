@@ -1,6 +1,6 @@
 # Bullhorn ATS MCP Server
 
-A remote [Model Context Protocol](https://modelcontextprotocol.io/) server that connects **ChatGPT Enterprise** to **Bullhorn ATS**. When a user enables the Bullhorn app in ChatGPT, they can search and retrieve live Bullhorn data through natural language — without ever leaving ChatGPT.
+A remote [Model Context Protocol](https://modelcontextprotocol.io/) server that connects **ChatGPT, Claude, Gemini, and Grok** to **Bullhorn ATS**. Recruiters can search, read, and write back to Bullhorn directly from their AI chat — adding notes, updating statuses, submitting candidates, and creating placements — without ever leaving the chat.
 
 This is pure middleware. No UI, no user login screens. ChatGPT calls this server silently in the background.
 
@@ -9,8 +9,8 @@ This is pure middleware. No UI, no user login screens. ChatGPT calls this server
 ## Architecture
 
 ```
-ChatGPT Enterprise  ──►  This MCP Server  ──►  Bullhorn REST API
-   (user toggle)         (hosted on Replit)      (your ATS data)
+ChatGPT / Claude / Gemini / Grok  ──►  This MCP Server  ──►  Bullhorn REST API
+   (recruiter toggle)                 (hosted on Replit)          (your ATS data)
 ```
 
 All requests from ChatGPT must include a shared bearer token. Requests without the token are rejected with `401 Unauthorized`.
@@ -27,21 +27,19 @@ All requests from ChatGPT must include a shared bearer token. Requests without t
 
 ---
 
-## Available Tools (Read-Only, v1)
+## Available Tools (33 Read + 20 Write)
 
-| Tool | Description |
-|------|-------------|
-| `search_candidates` | Full-text search across candidates using Lucene queries |
-| `search_jobs` | Search job orders by status, title, client, and more |
-| `search_companies` | Search client company (ClientCorporation) records |
-| `search_contacts` | Search client contact records |
-| `get_candidate` | Fetch a full candidate record by Bullhorn ID |
-| `get_job` | Fetch a full job order record by Bullhorn ID |
-| `get_company` | Fetch a full client company record by Bullhorn ID |
-| `get_contact` | Fetch a full client contact record by Bullhorn ID |
-| `list_submissions_for_job` | List all candidate submissions for a job order |
-| `list_placements` | List placements, filtered by candidate or job ID |
-| `get_notes` | Retrieve notes/activity log for a candidate or job |
+**Read — 33 tools**
+- Search, fetch, and list: `search_candidates`, `search_jobs`, `search_companies`, `search_contacts`, `get_candidate`, `get_job`, `get_company`, `get_contact`, `list_submissions_for_job`, `list_placements`, `get_notes`, `get_candidate_resume`, `list_candidate_attachments`, `read_candidate_attachment`, `count_entity`, `get_report`, `get_leaderboard`, `get_candidate_scorecard`, and 15 more.
+- Reports: scorecards, leaderboards, open-job counts, confirmed-placement counts, and custom breakdowns.
+
+**Write — 20 Bullhorn write tools** (per-user; each action runs as the recruiter's own Bullhorn identity)
+- Candidate actions: `add_note`, `update_candidate_status`, `create_job_submission`, `bulk_create_submissions`, `update_submission_status`, `create_candidate_from_resume`
+- Job & company: `create_job`, `update_job`, `create_company`, `update_company`, `create_contact`, `update_contact`
+- Workflow: `create_task`, `create_appointment`, `create_tearsheet`, `add_candidates_to_tearsheet`, `remove_candidates_from_tearsheet`
+- Placements & files: `create_placement`, `update_placement`, `upload_file_to_record`
+
+**Internal:** `create_support_ticket` (AskToAct support team)
 
 ### Lucene Query Examples
 
@@ -126,7 +124,7 @@ https://<your-replit-app-name>.replit.app/api/mcp
 ### Step 4 — Set access controls
 
 1. Under **Access**, choose which users or groups can enable this app
-2. Set write permissions to **Disabled** (this is read-only; write tools are v2)
+2. Set write permissions to **Enabled** (the 20 write tools require per-user Bullhorn enrollment; each recruiter writes under their own Bullhorn identity)
 3. Click **Save and publish**
 
 ### Step 5 — User enablement
@@ -183,13 +181,17 @@ curl -X POST http://localhost:5000/api/mcp \
 1. Contact **Bullhorn Support** or your Bullhorn account manager and request API access
 2. They will provision a `client_id` and `client_secret` for your organization
 3. Create a dedicated service account in Bullhorn to use for the API (do not use a personal user account)
-4. The service account needs read access to: Candidates, JobOrders, ClientCorporations, ClientContacts, Notes, JobSubmissions, Placements
+4. The service account needs read/write access to: Candidates, JobOrders, ClientCorporations, ClientContacts, Notes, JobSubmissions, Placements, Tasks, Appointments, Tearsheets, and file attachments
 
 ---
 
+## Available features
+
+- **v1 — Read tools**: 33 search, fetch, report, and résumé-reading tools
+- **v2 — Write tools (live)**: 20 write tools for notes, submissions, placements, jobs, companies, tasks, tearsheets, and file uploads
+- **v2 — Per-user OAuth (live)**: Each recruiter authenticates as their own Bullhorn user (not a shared service account), so every write is properly attributed
+
 ## Roadmap
 
-- **v2 — Write tools**: Add note, update candidate status, update job fields, change placement status (with ChatGPT confirmation prompts)
-- **v2 — Per-user OAuth**: Each ChatGPT user authenticates as themselves in Bullhorn (proper audit trail)
 - **v3 — Bulk outreach**: Search candidates → generate personalized messages via GPT → send via Bullhorn email
 - **Multi-ATS**: Greenhouse, Lever, Vincere, Avionte connector library

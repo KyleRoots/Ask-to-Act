@@ -23,7 +23,7 @@ function LogoIcon({ size = 40 }: { size?: number }) {
 }
 
 const features = [
-  { icon: "🤖", title: "AI-powered ATS access", body: "Your team uses ChatGPT, Claude, or Gemini to query Bullhorn — no manual searching." },
+  { icon: "🤖", title: "AI-powered ATS access", body: "Your team uses ChatGPT, Claude, or Gemini to search, read, and update Bullhorn directly from chat — no manual searching." },
   { icon: "🔒", title: "Permission-aware", body: "Every AI action respects each recruiter's existing Bullhorn permissions automatically." },
   { icon: "📊", title: "Team usage insights", body: "See who's using AI tools, how often, and where it's making the biggest impact." },
 ];
