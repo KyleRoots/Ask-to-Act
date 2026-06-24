@@ -48,6 +48,19 @@ then allow text/* and a *word-bounded* xml/html/json/csv. Add a magic-byte safet
 the decoded buffer (`PK\x03\x04` zip, `%PDF`, `\xD0\xCF\x11\xE0` OLE, or an embedded NUL)
 so a mislabeled binary still degrades to metadata instead of emitting garbage.
 
+## createCandidateFromResume / parseToCandidate write-path gotchas
+The parse endpoint fails in a sequence of *distinct* errors, each masking the next:
+1. Raw binary body + `application/octet-stream` → **500 "Bad File Uploaded"** (endpoint
+   demands `multipart/form-data`; send a `FormData` part, do NOT set Content-Type).
+2. multipart but `format` in **lowercase** (e.g. `docx`) → **422 "Error occurred while
+   parsing resume"**. Bullhorn's parser requires the UPPERCASE enum
+   `PDF/DOC/DOCX/RTF/TEXT/HTML/ODT`. Lowercase is accepted as multipart but mis-parses.
+3. base64 with a `data:<mime>;base64,` prefix (ChatGPT sometimes prepends it) → corrupt
+   bytes → parse/upload failure. Strip the prefix before `Buffer.from(...,"base64")`.
+**Why:** the error *changes* at each fix, so it looks like a brand-new bug each deploy.
+**How to apply:** when résumé upload "still fails" but the error TEXT changed, that is
+progress — you cleared one layer; fix the next, do not revert.
+
 ## REST rate limit bites during probing
 Bullhorn REST is **120 requests / 60s** (`RateLimit-Limit: 120; w=60`). Bursty probing
 exhausts it and the MCP endpoint then returns an **empty body with no SSE `data:` line**

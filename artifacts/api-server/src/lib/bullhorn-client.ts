@@ -3453,16 +3453,20 @@ export async function updatePlacement(
 // resume parser is a non-entity endpoint. fileFetch mirrors writeFetch's 403 →
 // permission, 429 → backoff, and error-formatting contract for these paths.
 
+// Bullhorn's resume parser requires the `format` value in UPPERCASE (TEXT, HTML,
+// PDF, DOC, DOCX, RTF, ODT). Sending a lowercase value (e.g. "docx") is accepted
+// as multipart but then fails parsing with 422 "Error occurred while parsing
+// resume", so the canonical Bullhorn enum casing is used here.
 const RESUME_FORMATS: Record<string, string> = {
-  pdf: "pdf",
-  doc: "doc",
-  docx: "docx",
-  rtf: "rtf",
-  txt: "text",
-  text: "text",
-  html: "html",
-  htm: "html",
-  odt: "odt",
+  pdf: "PDF",
+  doc: "DOC",
+  docx: "DOCX",
+  rtf: "RTF",
+  txt: "TEXT",
+  text: "TEXT",
+  html: "HTML",
+  htm: "HTML",
+  odt: "ODT",
 };
 
 /** Infers Bullhorn's `format` value from a filename extension. */
@@ -3475,6 +3479,25 @@ function resumeFormatFromName(fileName: string): string {
     );
   }
   return fmt;
+}
+
+/**
+ * Decodes a base64 file payload to bytes, tolerating a leading data-URI prefix
+ * (e.g. `data:application/...;base64,XXXX`) that some clients (ChatGPT included)
+ * prepend. Sending that prefix verbatim corrupts the decoded bytes and makes
+ * Bullhorn reject/mis-parse the file, so it is stripped first. Throws a clear
+ * validation error on empty/garbage input rather than handing Bullhorn an empty
+ * upload.
+ */
+function decodeFileBase64(base64: string, label = "File"): Buffer {
+  const stripped = base64.replace(/^data:[^;,]*;base64,/i, "").trim();
+  const bytes = Buffer.from(stripped, "base64");
+  if (bytes.length === 0) {
+    throw new BullhornFieldValidationError(
+      `${label} content is empty — provide base64-encoded file bytes.`,
+    );
+  }
+  return bytes;
 }
 
 async function fileFetch(
@@ -3531,10 +3554,7 @@ export async function uploadFileToRecord(
   },
 ): Promise<{ fileId: number; entityType: string; entityId: number }> {
   const entry = resolveEntity(args.entityType);
-  const bytes = Buffer.from(args.fileContentBase64, "base64");
-  if (bytes.length === 0) {
-    throw new BullhornFieldValidationError("File content is empty — provide base64-encoded file bytes.");
-  }
+  const bytes = decodeFileBase64(args.fileContentBase64, "File");
   const blob = new Blob([bytes], {
     type: args.contentType ?? "application/octet-stream",
   });
@@ -3573,10 +3593,7 @@ export async function createCandidateFromResume(
   },
 ): Promise<{ candidateId: number; fileId?: number; parsedName?: string }> {
   const format = resumeFormatFromName(args.fileName);
-  const bytes = Buffer.from(args.fileContentBase64, "base64");
-  if (bytes.length === 0) {
-    throw new BullhornFieldValidationError("Résumé content is empty — provide base64-encoded file bytes.");
-  }
+  const bytes = decodeFileBase64(args.fileContentBase64, "Résumé");
 
   // 1. Parse (non-persisting). Returns { candidate, skillList, ... }.
   // Bullhorn's parseToCandidate endpoint requires multipart/form-data — sending
