@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, firmsTable } from "@workspace/db";
+import { db, firmsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { getBaseUrl } from "../lib/getBaseUrl.js";
 import {
   requireClerkUser,
   requireFirmAdmin,
@@ -19,14 +20,28 @@ router.get(
   requireClerkUser,
   async (req: Request, res: Response) => {
     const u = req.portalUser!;
-    let firmName: string | null = null;
-    if (u.firmId) {
-      const [firm] = await db
-        .select({ name: firmsTable.name })
-        .from(firmsTable)
-        .where(eq(firmsTable.id, u.firmId));
-      firmName = firm?.name ?? null;
-    }
+
+    const [firmName, userRow] = await Promise.all([
+      u.firmId
+        ? db
+            .select({ name: firmsTable.name })
+            .from(firmsTable)
+            .where(eq(firmsTable.id, u.firmId))
+            .then((rows) => rows[0]?.name ?? null)
+        : Promise.resolve(null),
+      db
+        .select({ apiKey: usersTable.apiKey, refreshToken: usersTable.refreshToken })
+        .from(usersTable)
+        .where(eq(usersTable.id, u.id))
+        .then((rows) => rows[0] ?? null),
+    ]);
+
+    const enrolled = userRow?.refreshToken != null;
+    const mcpUrl = enrolled && userRow?.apiKey
+      ? `${getBaseUrl()}/api/mcp/${userRow.apiKey}`
+      : null;
+
+    res.set("Cache-Control", "no-store");
     res.json({
       id: u.id,
       name: u.name,
@@ -34,6 +49,8 @@ router.get(
       role: u.role,
       firmId: u.firmId,
       firmName,
+      enrolled,
+      mcpUrl,
     });
   },
 );

@@ -18,6 +18,7 @@ export type PortalMe = {
   firmId: string;
   firmName: string | null;
   enrolled: boolean;
+  mcpUrl: string | null;
 };
 
 export type ToolBreakdown = {

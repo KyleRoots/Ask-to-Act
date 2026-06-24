@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useClerk, useUser } from "@clerk/react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -38,6 +39,69 @@ function buildQuickLinks(isAdmin: boolean): QuickLink[] {
     { icon: "🔗", label: "AI Connections", desc: "Connect ChatGPT, Claude, or Gemini", soon: true, href: null },
     { icon: "🛟", label: "Support & Feedback", desc: "Report a bug, request a feature, or ask a question", soon: false, href: "/support" },
   ];
+}
+
+function ConnectorCard({ mcpUrl }: { mcpUrl: string }) {
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard
+      .writeText(mcpUrl)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        setFailed(true);
+        setTimeout(() => setFailed(false), 2000);
+      });
+  }
+
+  return (
+    <div
+      className="rounded-2xl p-5 mb-8"
+      style={{ background: "rgba(16,185,129,.06)", border: "1px solid rgba(52,211,153,.2)" }}
+    >
+      <div className="flex items-start gap-4 mb-4">
+        <div
+          className="w-10 h-10 rounded-xl shrink-0 text-xl"
+          style={{ background: "rgba(16,185,129,.15)", border: "1px solid rgba(52,211,153,.2)", display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          🔗
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-white mb-0.5">Your AI Connector is ready</p>
+          <p className="text-xs" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
+            Paste this URL into ChatGPT, Claude, or Gemini under Settings → Connectors to connect your AI tool directly to Bullhorn.
+          </p>
+        </div>
+      </div>
+
+      <div
+        className="rounded-xl flex items-center gap-3 p-3.5"
+        style={{ background: "#0f1622", border: `1px solid ${BORDER}` }}
+      >
+        <span
+          className="flex-1 text-xs font-mono break-all leading-relaxed select-all"
+          style={{ color: "#94a3b8" }}
+        >
+          {mcpUrl}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="shrink-0 px-4 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap"
+          style={copied
+            ? { background: "rgba(16,185,129,.15)", color: "#34D399", border: "1px solid rgba(52,211,153,.3)" }
+            : failed
+            ? { background: "rgba(248,113,113,.12)", color: "#FCA5A5", border: "1px solid rgba(248,113,113,.3)" }
+            : { background: "rgba(79,70,229,.15)", color: "#818CF8", border: "1px solid rgba(129,140,248,.3)" }}
+        >
+          {copied ? "Copied!" : failed ? "Copy failed" : "Copy URL"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -86,7 +150,7 @@ export default function Dashboard() {
 
       <main className="max-w-4xl mx-auto px-5 sm:px-8 py-10">
         {/* Welcome */}
-        <div className="mb-10">
+        <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2"
             style={{ letterSpacing: "-0.03em" }}>
             Welcome back, {firstName} 👋
@@ -96,27 +160,33 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Status banner */}
-        <div
-          className="rounded-2xl p-5 mb-8 flex flex-col sm:flex-row items-start sm:items-center gap-4"
-          style={{ background: "rgba(79,70,229,.08)", border: "1px solid rgba(79,70,229,.2)" }}
-        >
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-            style={{ background: "rgba(79,70,229,.15)" }}>
-            <span className="text-xl">🔐</span>
+        {/* Enrollment-aware status section */}
+        {me?.enrolled && me.mcpUrl ? (
+          <ConnectorCard mcpUrl={me.mcpUrl} />
+        ) : me && !me.enrolled ? (
+          <div
+            className="rounded-2xl p-5 mb-8 flex flex-col sm:flex-row items-start sm:items-center gap-4"
+            style={{ background: "rgba(251,191,36,.06)", border: "1px solid rgba(251,191,36,.2)" }}
+          >
+            <div
+              className="w-10 h-10 rounded-xl shrink-0 text-xl"
+              style={{ background: "rgba(251,191,36,.1)", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              ⚠️
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-white mb-0.5">Bullhorn not yet connected</p>
+              <p className="text-xs" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
+                Your administrator will send you an enrollment link to connect your Bullhorn account. Check your email, or contact your admin.
+              </p>
+            </div>
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-white mb-0.5">Portal coming online</p>
-            <p className="text-xs" style={{ color: "#6B7A99" }}>
-              Your account is set up. Full team management features are being activated — your administrator will let you know when everything is ready.
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium shrink-0"
-            style={{ background: "rgba(16,185,129,.1)", border: "1px solid rgba(52,211,153,.2)", color: "#34D399" }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#34D399" }} />
-            Authenticated
-          </div>
-        </div>
+        ) : (
+          <div
+            className="rounded-2xl mb-8"
+            style={{ background: SURFACE, border: `1px solid ${BORDER}`, height: 80 }}
+          />
+        )}
 
         {/* Quick links grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
