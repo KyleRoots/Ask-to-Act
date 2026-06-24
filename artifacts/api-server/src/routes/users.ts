@@ -366,7 +366,7 @@ router.post("/users/:id/reset", bearerAuth, requireService, async (req: Request,
  * (alreadyConnected=false) and when a returning connected user re-opens their
  * access link (alreadyConnected=true).
  */
-function connectorSetupPage(displayName: string, mcpUrl: string | null, alreadyConnected: boolean): string {
+export function connectorSetupPage(displayName: string, mcpUrl: string | null, alreadyConnected: boolean): string {
   const e = escapeHtml;
   const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
     chatgpt: {
