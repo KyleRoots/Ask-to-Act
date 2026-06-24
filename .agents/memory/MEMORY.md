@@ -32,3 +32,4 @@
 - [Drizzle raw timestamp format](drizzle-raw-timestamp-serialization.md) — bulk raw-SQL writes to a `timestamp` (no tz) column must serialize Date as toISOString→ T→space, drop Z, cast ::timestamp, else reads drift hours vs drizzle.
 - [helmet CSP default-merge trap](helmet-csp-script-src-attr.md) — custom helmet CSP still merges defaults; `script-src-attr 'none'` stays unless overridden & silently blocks inline onclick/onsubmit even with script-src 'unsafe-inline'.
 - [Stripe prod empty-schema startup ERROR](stripe-prod-empty-schema.md) — empty `stripe` schema (0 tables) + 42P01 = esbuild bundling hides runMigrations' import.meta.url ./migrations dir; DROP+redeploy does NOT fix; fix = copy migrations beside bundle in build.mjs.
+- [Firm lifecycle status](firm-lifecycle-status.md) — manual suspend/archive (separate from Stripe); runtime cutoff lives in requireBullhornFirm (fronts /mcp + /v1), fail-closed; archived also hidden from default firm list.

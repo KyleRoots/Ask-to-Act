@@ -29,6 +29,20 @@
       "when": 1782333116347,
       "tag": "0003_past_excalibur",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782339255998,
+      "tag": "0004_shallow_roulette",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782339655756,
+      "tag": "0005_eager_polaris",
+      "breakpoints": true
     }
   ]
 }

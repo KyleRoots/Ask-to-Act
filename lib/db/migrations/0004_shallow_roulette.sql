@@ -1,0 +1,1 @@
+ALTER TABLE "firms" ADD COLUMN "status" text DEFAULT 'active' NOT NULL;

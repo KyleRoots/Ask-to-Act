@@ -54,10 +54,13 @@ async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+export type FirmStatus = "active" | "suspended" | "archived";
+
 export type FirmRow = {
   id: string;
   name: string;
   subscriptionStatus: string;
+  status: FirmStatus;
   enrolledSeats: number;
   seatLimit: number | null;
   logoUrl: string | null;
@@ -69,6 +72,7 @@ export type FirmDetail = {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   subscriptionStatus: string;
+  status: FirmStatus;
   seatLimit: number | null;
   enrolledSeats: number;
   seatsRemaining: number | "unlimited";
@@ -129,8 +133,16 @@ export type InviteResult = {
 };
 
 export const api = {
-  listFirms: () =>
-    apiFetch<{ data: FirmRow[] }>("/firms").then((r) => r.data),
+  listFirms: (includeArchived = false) =>
+    apiFetch<{ data: FirmRow[] }>(
+      `/firms${includeArchived ? "?includeArchived=1" : ""}`,
+    ).then((r) => r.data),
+
+  updateFirmStatus: (firmId: string, status: FirmStatus) =>
+    apiFetch<{ id: string; status: FirmStatus }>(`/firms/${firmId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
 
   createFirm: (body: { name: string; seatLimit?: number }) =>
     apiFetch<{

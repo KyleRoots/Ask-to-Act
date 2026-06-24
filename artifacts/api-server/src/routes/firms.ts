@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
-import { db, firmsTable, usersTable, seatActivityTable } from "@workspace/db";
-import { eq, and, count, sql } from "drizzle-orm";
+import { db, firmsTable, usersTable, seatActivityTable, FIRM_STATUSES, type FirmStatus } from "@workspace/db";
+import { eq, and, count, sql, ne } from "drizzle-orm";
 import { buildFirmUsageDetail } from "../lib/usage-report.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
@@ -159,6 +159,7 @@ router.get("/firms/:id", bearerAuth, requireService, async (req: Request, res: R
     stripeCustomerId: firm.stripeCustomerId,
     stripeSubscriptionId: firm.stripeSubscriptionId,
     subscriptionStatus,
+    status: firm.status,
     seatLimit: firm.seatLimit,
     logoUrl: firm.logoUrl ?? null,
     enrolledSeats: userCount,
@@ -169,11 +170,55 @@ router.get("/firms/:id", bearerAuth, requireService, async (req: Request, res: R
 });
 
 /**
+ * PATCH /api/firms/:id
+ * Admin-only. Updates a firm's lifecycle status.
+ * Body: { status: "active" | "suspended" | "archived" }
+ *  - "suspended" instantly revokes the firm's AI-tool access (reversible).
+ *  - "archived"  also hides the firm from the default firm list (reversible).
+ *  - "active"    restores normal access.
+ */
+router.patch("/firms/:id", bearerAuth, requireService, async (req: Request, res: Response) => {
+  const { id } = req.params as { id: string };
+  const { status } = req.body as { status?: string };
+
+  if (!status || !FIRM_STATUSES.includes(status as FirmStatus)) {
+    res.status(400).json({
+      error: `status must be one of: ${FIRM_STATUSES.join(", ")}`,
+    });
+    return;
+  }
+
+  const [firm] = await db
+    .select({ id: firmsTable.id })
+    .from(firmsTable)
+    .where(eq(firmsTable.id, id));
+
+  if (!firm) {
+    res.status(404).json({ error: "Firm not found" });
+    return;
+  }
+
+  await db
+    .update(firmsTable)
+    .set({ status, updatedAt: new Date() })
+    .where(eq(firmsTable.id, id));
+
+  logger.info({ firmId: id, status }, "Firm status updated");
+  res.json({ id, status });
+});
+
+/**
  * GET /api/firms
  * Admin-only. List all firms.
  */
-router.get("/firms", bearerAuth, requireService, async (_req: Request, res: Response) => {
-  const firms = await db.select().from(firmsTable);
+router.get("/firms", bearerAuth, requireService, async (req: Request, res: Response) => {
+  // Archived firms are hidden from the default list; pass ?includeArchived=1
+  // to show them (e.g. so an admin can unarchive one).
+  const includeArchived = req.query["includeArchived"] === "1";
+  const firms = await db
+    .select()
+    .from(firmsTable)
+    .where(includeArchived ? undefined : ne(firmsTable.status, "archived"));
 
   // Single aggregate query instead of one count per firm (avoids N+1).
   const counts = await db
@@ -186,6 +231,7 @@ router.get("/firms", bearerAuth, requireService, async (_req: Request, res: Resp
     id: f.id,
     name: f.name,
     subscriptionStatus: f.subscriptionStatus ?? "none",
+    status: f.status,
     enrolledSeats: countByFirm.get(f.id) ?? 0,
     seatLimit: f.seatLimit,
     logoUrl: f.logoUrl ?? null,

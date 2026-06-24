@@ -1,6 +1,6 @@
 import { type Request, type Response, type NextFunction } from "express";
 import { timingSafeEqual } from "node:crypto";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, firmsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { getBullhornFirmId } from "../lib/bullhorn-auth.js";
@@ -153,6 +153,28 @@ export async function requireBullhornFirm(req: Request, res: Response, next: Nex
       res.status(403).json({
         error:
           "Forbidden: your account is not authorized to access this Bullhorn workspace.",
+      });
+      return;
+    }
+
+    // Lifecycle gate: a suspended or archived firm has had its access revoked,
+    // so none of its users may use the AI tools — even if already enrolled.
+    // Fail closed: if the firm row is missing (data drift / orphaned user) or
+    // is not active, deny access rather than letting the request through.
+    const [firm] = await db
+      .select({ status: firmsTable.status })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, callerFirmId))
+      .limit(1);
+
+    if (!firm || firm.status !== "active") {
+      logger.warn(
+        { callerFirmId, status: firm?.status ?? "missing", userId: req.caller.userId },
+        "requireBullhornFirm: caller's firm is missing or not active",
+      );
+      res.status(403).json({
+        error:
+          "Forbidden: your firm's AskToAct access has been suspended. Please contact your administrator.",
       });
       return;
     }

@@ -52,7 +52,7 @@ vi.mock("@clerk/express", () => ({
 const { default: app } = await import("../app.js");
 const request = (await import("supertest")).default;
 const { db, firmsTable, usersTable } = await import("@workspace/db");
-const { inArray } = await import("drizzle-orm");
+const { inArray, eq } = await import("drizzle-orm");
 
 // ---------------------------------------------------------------------------
 // Test fixtures. All ids are namespaced so cleanup never touches real data.
@@ -212,5 +212,161 @@ describe("requireBullhornFirm — no firmId bound", () => {
       .get(PROBE)
       .set("Authorization", `Bearer ${SERVICE_TOKEN}`);
     expect(res.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// requireBullhornFirm: firm lifecycle status gate (suspend / archive)
+//
+// Even a correctly-bound, correct-firm user must be cut off from the live AI
+// tool path once their firm is suspended or archived. Reactivating restores it.
+// ---------------------------------------------------------------------------
+describe("requireBullhornFirm — firm lifecycle status", () => {
+  afterAll(async () => {
+    // Restore Firm A to active so it can never leak a suspended state into
+    // other suites that share these fixtures.
+    await db
+      .update(firmsTable)
+      .set({ status: "active" })
+      .where(eq(firmsTable.id, FIRM_A));
+  });
+
+  it("returns 403 for a correct-firm user when the firm is suspended", async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "suspended" })
+      .where(eq(firmsTable.id, FIRM_A));
+
+    const res = await request(app)
+      .get(PROBE)
+      .set("Authorization", `Bearer ${PREFIX}-key-user-a`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/suspended/i);
+  });
+
+  it("returns 403 for a correct-firm user when the firm is archived", async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "archived" })
+      .where(eq(firmsTable.id, FIRM_A));
+
+    const res = await request(app)
+      .get(PROBE)
+      .set("Authorization", `Bearer ${PREFIX}-key-user-a`);
+    expect(res.status).toBe(403);
+  });
+
+  it("restores access (200) once the firm is reactivated", async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "active" })
+      .where(eq(firmsTable.id, FIRM_A));
+
+    const res = await request(app)
+      .get(PROBE)
+      .set("Authorization", `Bearer ${PREFIX}-key-user-a`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("reports");
+  });
+
+  it("still returns 200 for the service token even when the firm is suspended", async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "suspended" })
+      .where(eq(firmsTable.id, FIRM_A));
+
+    const res = await request(app)
+      .get(PROBE)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`);
+    expect(res.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PATCH /api/firms/:id — service-only status mutation + validation
+// ---------------------------------------------------------------------------
+describe("PATCH /api/firms/:id", () => {
+  afterAll(async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "active" })
+      .where(eq(firmsTable.id, FIRM_A));
+  });
+
+  it("returns 401 with no credentials", async () => {
+    const res = await request(app)
+      .patch(`/api/firms/${FIRM_A}`)
+      .send({ status: "suspended" });
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 for a non-service user API key", async () => {
+    const res = await request(app)
+      .patch(`/api/firms/${FIRM_A}`)
+      .set("Authorization", `Bearer ${PREFIX}-key-user-a`)
+      .send({ status: "suspended" });
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 for an invalid status value", async () => {
+    const res = await request(app)
+      .patch(`/api/firms/${FIRM_A}`)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ status: "deleted" });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for an unknown firm", async () => {
+    const res = await request(app)
+      .patch(`/api/firms/${PREFIX}-does-not-exist`)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ status: "suspended" });
+    expect(res.status).toBe(404);
+  });
+
+  it("updates the status with the service token", async () => {
+    const res = await request(app)
+      .patch(`/api/firms/${FIRM_A}`)
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ status: "archived" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("archived");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/firms — archived firms hidden by default
+// ---------------------------------------------------------------------------
+describe("GET /api/firms — archived filtering", () => {
+  beforeAll(async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "archived" })
+      .where(eq(firmsTable.id, FIRM_B));
+  });
+
+  afterAll(async () => {
+    await db
+      .update(firmsTable)
+      .set({ status: "active" })
+      .where(eq(firmsTable.id, FIRM_B));
+  });
+
+  it("hides archived firms by default", async () => {
+    const res = await request(app)
+      .get("/api/firms")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`);
+    expect(res.status).toBe(200);
+    const ids = res.body.data.map((f: { id: string }) => f.id);
+    expect(ids).not.toContain(FIRM_B);
+  });
+
+  it("includes archived firms when ?includeArchived=1", async () => {
+    const res = await request(app)
+      .get("/api/firms?includeArchived=1")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`);
+    expect(res.status).toBe(200);
+    const ids = res.body.data.map((f: { id: string }) => f.id);
+    expect(ids).toContain(FIRM_B);
   });
 });

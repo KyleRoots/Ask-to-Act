@@ -1,0 +1,1 @@
+ALTER TABLE "firms" ADD CONSTRAINT "firms_status_check" CHECK ("firms"."status" IN ('active', 'suspended', 'archived'));

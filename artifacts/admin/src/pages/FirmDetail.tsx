@@ -16,6 +16,8 @@ function StatusBadge({ status }: { status: string }) {
     trialing: { background: "rgba(79,70,229,.12)", color: "#818CF8", border: "1px solid rgba(129,140,248,.25)" },
     past_due: { background: "rgba(245,158,11,.12)", color: "#FCD34D", border: "1px solid rgba(252,211,77,.25)" },
     canceled: { background: "rgba(239,68,68,.12)", color: "#FCA5A5", border: "1px solid rgba(252,165,165,.25)" },
+    suspended: { background: "rgba(245,158,11,.12)", color: "#FCD34D", border: "1px solid rgba(252,211,77,.25)" },
+    archived: { background: "rgba(148,163,184,.08)", color: "#94A3B8", border: "1px solid rgba(148,163,184,.25)" },
     none: { background: "rgba(148,163,184,.08)", color: "#6B7A99", border: "1px solid rgba(107,122,153,.2)" },
   };
   const s = styles[status] ?? styles.none;
@@ -445,6 +447,23 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const statusMutation = useMutation({
+    mutationFn: (status: "active" | "suspended" | "archived") =>
+      api.updateFirmStatus(firmId, status),
+    onSuccess: (_data, status) => {
+      queryClient.invalidateQueries({ queryKey: ["firm", firmId] });
+      queryClient.invalidateQueries({ queryKey: ["firms"] });
+      const label =
+        status === "active"
+          ? "reactivated"
+          : status === "suspended"
+            ? "suspended"
+            : "archived";
+      toast({ title: `Firm ${label} ✓` });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   const checkoutMutation = useMutation({
     mutationFn: () => api.generateCheckout(firmId),
     onSuccess: (data) => {
@@ -652,11 +671,68 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
               </h1>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <StatusBadge status={firm.subscriptionStatus} />
+                {firm.status !== "active" && <StatusBadge status={firm.status} />}
                 <span className="text-xs" style={{ color: "#3A4460" }}>
                   Since{" "}
                   {new Date(firm.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
                 </span>
               </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+              {firm.status === "suspended" || firm.status === "archived" ? (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Reactivate ${firm.name}? This restores AI-tool access for its users.`)) {
+                      statusMutation.mutate("active");
+                    }
+                  }}
+                  disabled={statusMutation.isPending}
+                  className="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  style={{ background: "rgba(16,185,129,.12)", color: "#34D399", border: "1px solid rgba(52,211,153,.25)" }}
+                >
+                  Reactivate
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Suspend ${firm.name}? This immediately cuts off AI-tool access for all its users. You can reactivate later.`)) {
+                      statusMutation.mutate("suspended");
+                    }
+                  }}
+                  disabled={statusMutation.isPending}
+                  className="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  style={{ background: "rgba(245,158,11,.12)", color: "#FCD34D", border: "1px solid rgba(252,211,77,.25)" }}
+                >
+                  Suspend
+                </button>
+              )}
+              {firm.status === "archived" ? (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Unarchive ${firm.name}? It will reappear in the active firm list (still suspended until reactivated).`)) {
+                      statusMutation.mutate("suspended");
+                    }
+                  }}
+                  disabled={statusMutation.isPending}
+                  className="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+                >
+                  Unarchive
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Archive ${firm.name}? It will be hidden from the active firm list and its users lose AI-tool access. Fully reversible.`)) {
+                      statusMutation.mutate("archived");
+                    }
+                  }}
+                  disabled={statusMutation.isPending}
+                  className="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+                >
+                  Archive
+                </button>
+              )}
             </div>
           </div>
 

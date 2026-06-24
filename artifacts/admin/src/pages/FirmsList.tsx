@@ -48,6 +48,8 @@ function StatusBadge({ status }: { status: string }) {
     trialing: { background: "rgba(79,70,229,.12)", color: "#818CF8", border: "1px solid rgba(129,140,248,.25)" },
     past_due: { background: "rgba(245,158,11,.12)", color: "#FCD34D", border: "1px solid rgba(252,211,77,.25)" },
     canceled: { background: "rgba(239,68,68,.12)", color: "#FCA5A5", border: "1px solid rgba(252,165,165,.25)" },
+    suspended: { background: "rgba(245,158,11,.12)", color: "#FCD34D", border: "1px solid rgba(252,211,77,.25)" },
+    archived: { background: "rgba(148,163,184,.08)", color: "#94A3B8", border: "1px solid rgba(148,163,184,.25)" },
     none: { background: "rgba(148,163,184,.08)", color: "#6B7A99", border: "1px solid rgba(107,122,153,.2)" },
   };
   const s = styles[status] ?? styles.none;
@@ -161,13 +163,14 @@ function CreateFirmModal({
 
 export default function FirmsList() {
   const [showCreate, setShowCreate] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [checkoutResult, setCheckoutResult] = useState<{ url: string | null; message: string } | null>(null);
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
 
   const { data: firms, isLoading, error } = useQuery({
-    queryKey: ["firms"],
-    queryFn: api.listFirms,
+    queryKey: ["firms", { showArchived }],
+    queryFn: () => api.listFirms(showArchived),
   });
 
   function handleCreated(checkoutUrl: string | null, message: string) {
@@ -280,17 +283,32 @@ export default function FirmsList() {
               {firms ? `${firms.length} registered` : "Loading…"}
             </p>
           </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.97] shrink-0"
-            style={{
-              background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
-              boxShadow: "0 4px 14px rgba(79,70,229,0.35)",
-            }}
-          >
-            <span className="hidden sm:inline">+ New Firm</span>
-            <span className="sm:hidden">+ New</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowArchived((v) => !v)}
+              className="text-sm px-3 py-2.5 rounded-xl transition-colors"
+              style={
+                showArchived
+                  ? { color: "#E2E8F0", border: "1px solid rgba(255,255,255,.15)" }
+                  : { color: "#6B7A99", border: `1px solid ${BORDER}` }
+              }
+              onMouseEnter={GHOST_HOVER.enter}
+              onMouseLeave={(e) => GHOST_HOVER.leave(e, showArchived ? "#E2E8F0" : "#6B7A99")}
+            >
+              {showArchived ? "Hide archived" : "Show archived"}
+            </button>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.97]"
+              style={{
+                background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
+                boxShadow: "0 4px 14px rgba(79,70,229,0.35)",
+              }}
+            >
+              <span className="hidden sm:inline">+ New Firm</span>
+              <span className="sm:hidden">+ New</span>
+            </button>
+          </div>
         </div>
 
         {isLoading && <p className="text-sm py-4" style={{ color: "#3A4460" }}>Loading…</p>}
@@ -323,7 +341,10 @@ export default function FirmsList() {
                     <FirmAvatar name={firm.name} logoUrl={firm.logoUrl} size="md" />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-white truncate">{firm.name}</p>
-                      <StatusBadge status={firm.subscriptionStatus} />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <StatusBadge status={firm.subscriptionStatus} />
+                        {firm.status !== "active" && <StatusBadge status={firm.status} />}
+                      </div>
                     </div>
                     <span className="text-xs" style={{ color: "#3A4460" }}>→</span>
                   </div>
@@ -385,7 +406,10 @@ export default function FirmsList() {
                           </div>
                         </td>
                         <td className="px-5 py-4">
-                          <StatusBadge status={firm.subscriptionStatus} />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <StatusBadge status={firm.subscriptionStatus} />
+                            {firm.status !== "active" && <StatusBadge status={firm.status} />}
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-white font-mono">{firm.enrolledSeats}</td>
                         <td className="px-5 py-4 font-mono" style={{ color: "#6B7A99" }}>
