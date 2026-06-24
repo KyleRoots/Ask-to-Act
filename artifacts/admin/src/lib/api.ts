@@ -200,6 +200,16 @@ export const api = {
       method: "POST",
     }),
 
+  resetUser: (userId: string) =>
+    apiFetch<{
+      id: string;
+      name: string | null;
+      email: string | null;
+      apiKey: string;
+      enrollUrl: string;
+      message: string;
+    }>(`/users/${userId}/reset`, { method: "POST" }),
+
   uploadLogo: (firmId: string, logoData: string) =>
     apiFetch<{ ok: boolean; message: string }>(`/firms/${firmId}/logo`, {
       method: "POST",

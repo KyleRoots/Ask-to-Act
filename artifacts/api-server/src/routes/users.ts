@@ -297,6 +297,71 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
 });
 
 /**
+ * POST /api/users/:id/reset
+ * Admin-only: resets a user to a brand-new, un-onboarded state so the full
+ * onboarding flow can be re-tested as if they were signing up for the first
+ * time. Clears the Bullhorn connection (refresh/REST tokens + session), drops
+ * the cached in-memory session, ROTATES the API key (so the connector URL is
+ * freshly issued like a new signup), and generates a new one-time enrollment
+ * link. Identity is preserved (name, email, firm, role). Returns the new apiKey
+ * (shown once) and enrollUrl. Does NOT auto-send email — the admin controls
+ * delivery; use POST /api/users/:id/invite to email the link instead.
+ */
+router.post("/users/:id/reset", bearerAuth, requireService, async (req: Request, res: Response) => {
+  const id = String(req.params["id"]);
+  try {
+    const [user] = await db
+      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const apiKey = randomBytes(32).toString("hex");
+    const enrollToken = randomBytes(32).toString("hex");
+    const enrollTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    invalidateUserSession(id);
+
+    await db
+      .update(usersTable)
+      .set({
+        apiKey,
+        refreshToken: null,
+        bhRestToken: null,
+        restUrl: null,
+        tokenExpiresAt: null,
+        sessionExpiresAt: null,
+        enrollToken,
+        enrollTokenExpiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(usersTable.id, id));
+
+    logger.info({ userId: id }, "User reset to first-time onboarding state");
+
+    res.json({
+      id,
+      name: user.name,
+      email: user.email,
+      apiKey,
+      enrollUrl: `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}`,
+      message:
+        "User reset to a first-time state. Their Bullhorn connection and previous API key " +
+        "are revoked. Open enrollUrl in a browser to walk through onboarding exactly as the " +
+        "user would. The enrollment link expires in 7 days.",
+    });
+  } catch (err) {
+    logger.error({ err, userId: id }, "Failed to reset user");
+    res.status(500).json({ error: "Failed to reset user" });
+  }
+});
+
+/**
  * Shared connector-setup page rendered both after a fresh Bullhorn connection
  * (alreadyConnected=false) and when a returning connected user re-opens their
  * access link (alreadyConnected=true).

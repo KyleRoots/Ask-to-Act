@@ -544,6 +544,20 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     onError: (err: Error) => toast({ title: "Failed to remove user", description: err.message, variant: "destructive" }),
   });
 
+  const resetUserMutation = useMutation({
+    mutationFn: (userId: string) => api.resetUser(userId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+      queryClient.invalidateQueries({ queryKey: ["firm", firmId] });
+      navigator.clipboard?.writeText(data.enrollUrl).catch(() => {});
+      toast({
+        title: "User reset to first-time state ✓",
+        description: "Fresh enrollment link copied to clipboard. Open it to retest onboarding.",
+      });
+    },
+    onError: (err: Error) => toast({ title: "Reset failed", description: err.message, variant: "destructive" }),
+  });
+
   function handleLogoFile(file: File) {
     if (!file.type.startsWith("image/")) {
       toast({ title: "Please select an image file", variant: "destructive" });
@@ -1135,6 +1149,19 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                             </button>
                             <button
                               onClick={() => {
+                                if (window.confirm(`Reset ${u.name ?? u.email} to a first-time state? This revokes their Bullhorn connection and API key and issues a fresh enrollment link so you can retest onboarding from scratch. Their account, firm, and role are kept.`)) {
+                                  resetUserMutation.mutate(u.id);
+                                }
+                              }}
+                              disabled={resetUserMutation.isPending}
+                              className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
+                              style={{ background: "rgba(245,158,11,.1)", color: "#FBBF24", border: "1px solid rgba(251,191,36,.25)" }}
+                              title="Revoke connection + API key and issue a fresh enrollment link to retest onboarding"
+                            >
+                              ↺ Reset onboarding
+                            </button>
+                            <button
+                              onClick={() => {
                                 if (window.confirm(`Remove ${u.name ?? u.email} and revoke all access? This cannot be undone.`)) {
                                   deleteUserMutation.mutate(u.id);
                                 }
@@ -1292,6 +1319,21 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                     onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(139,92,246,.1)"; }}
                                   >
                                     {u.role === "admin" ? "Make recruiter" : "Make admin"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (window.confirm(`Reset ${u.name ?? u.email} to a first-time state? This revokes their Bullhorn connection and API key and issues a fresh enrollment link so you can retest onboarding from scratch. Their account, firm, and role are kept.`)) {
+                                        resetUserMutation.mutate(u.id);
+                                      }
+                                    }}
+                                    disabled={resetUserMutation.isPending}
+                                    className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60 whitespace-nowrap"
+                                    style={{ background: "rgba(245,158,11,.1)", color: "#FBBF24", border: "1px solid rgba(251,191,36,.25)" }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(245,158,11,.2)"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(245,158,11,.1)"; }}
+                                    title="Revoke connection + API key and issue a fresh enrollment link to retest onboarding"
+                                  >
+                                    ↺ Reset onboarding
                                   </button>
                                   <button
                                     onClick={() => {
