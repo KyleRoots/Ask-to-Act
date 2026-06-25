@@ -1,6 +1,7 @@
 import { getSession, invalidateSession } from "./bullhorn-auth.js";
 import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
+import { classifySubmissionStage } from "./submission-status.js";
 // pdf-parse and mammoth are loaded via dynamic import inside the extraction
 // helper — avoids CJS/ESM default-export interop issues at module startup.
 
@@ -817,7 +818,37 @@ export async function listSubmissionsForJob(args: {
     args.start ?? 0,
     "-dateAdded",
   );
-  return enrichWithProfileUrls("JobSubmission", result);
+  return tagSubmissionStages(await enrichWithProfileUrls("JobSubmission", result));
+}
+
+/**
+ * Tag each JobSubmission row with a derived `stage` ("response" | "submission")
+ * so the AI never conflates inbound applicants (the Bullhorn "Response" bucket)
+ * with recruiter-actioned submissions. Returns the same envelope, enriched.
+ */
+function tagSubmissionStages(json: unknown): unknown {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return json;
+  const obj = json as Record<string, unknown>;
+  const rows = Array.isArray(obj.data) ? (obj.data as Array<Record<string, unknown>>) : [];
+  let responses = 0;
+  let submissions = 0;
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const status = typeof row.status === "string" ? row.status : undefined;
+    const stage = classifySubmissionStage(status);
+    row.stage = stage;
+    if (stage === "response") responses++;
+    else submissions++;
+  }
+  obj.stageSummary = {
+    responses,
+    submissions,
+    note:
+      "`stage` distinguishes inbound applicants ('response': New Lead / Online Applicant) " +
+      "from recruiter-actioned submissions ('submission': Internally Submitted, Client " +
+      "Submission, and later pipeline stages). Only 'submission' rows are real submissions.",
+  };
+  return json;
 }
 
 export async function listPlacements(args: {

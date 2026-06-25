@@ -46,6 +46,7 @@ type Match = {
   status: string;
   isLocal: boolean;
   alreadySubmitted: boolean;
+  alreadyApplied: boolean;
 };
 type Result = {
   job: { skillsMatchedAgainst: string[]; location: string };
@@ -114,12 +115,13 @@ describe("matchCandidatesForJob", () => {
   it("excludes someone ALREADY SUBMITTED by candidate ID, not by name", async () => {
     // Two different people share the name "Ivan Novikov": id 10 is submitted,
     // id 11 is NOT. Name-based matching would wrongly exclude both; ID-based
-    // matching must exclude only id 10.
+    // matching must exclude only id 10. The submission must be a TRUE submission
+    // status (Client Submission) — a mere "New Lead" applicant would NOT exclude.
     mockState.pool = [
       candidate(10, "Ivan Novikov", "Online Applicant"),
       candidate(11, "Ivan Novikov", "Online Applicant"),
     ];
-    mockState.submissions = [{ id: 999, candidate: { id: 10 }, status: "New Lead" }];
+    mockState.submissions = [{ id: 999, candidate: { id: 10 }, status: "Client Submission" }];
 
     const r = (await matchCandidatesForJob({ jobId: 35233 })) as Result;
     const ids = r.matches.map((m) => m.candidateId);
@@ -127,9 +129,24 @@ describe("matchCandidatesForJob", () => {
     expect(ids).not.toContain(10);
   });
 
+  it("does NOT exclude inbound applicants (Response bucket) — shows them flagged alreadyApplied", async () => {
+    // Bullhorn stores applicants ("New Lead" / "Online Applicant") and real
+    // submissions as the same JobSubmission object. A mere applicant is NOT a
+    // submission: candidate 20 applied (New Lead) — they must still appear, just
+    // flagged alreadyApplied, never excluded as "already submitted".
+    mockState.pool = [candidate(20, "Applied Only", "Online Applicant")];
+    mockState.submissions = [{ id: 999, candidate: { id: 20 }, status: "New Lead" }];
+
+    const r = (await matchCandidatesForJob({ jobId: 35233 })) as Result;
+    const m = r.matches.find((x) => x.candidateId === 20);
+    expect(m).toBeDefined();
+    expect(m?.alreadySubmitted).toBe(false);
+    expect((m as unknown as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
+  });
+
   it("can include already-submitted candidates when asked, flagging them", async () => {
     mockState.pool = [candidate(10, "Ivan Novikov", "Online Applicant")];
-    mockState.submissions = [{ id: 999, candidate: { id: 10 }, status: "New Lead" }];
+    mockState.submissions = [{ id: 999, candidate: { id: 10 }, status: "Client Submission" }];
 
     const r = (await matchCandidatesForJob({
       jobId: 35233,
@@ -159,7 +176,7 @@ describe("matchCandidatesForJob", () => {
     ];
     const subs: unknown[] = [];
     for (let i = 0; i < 250; i++) {
-      subs.push({ id: i, candidate: { id: i === 230 ? 500 : 9000 + i }, status: "New Lead" });
+      subs.push({ id: i, candidate: { id: i === 230 ? 500 : 9000 + i }, status: "Client Submission" });
     }
     mockState.submissions = subs;
 

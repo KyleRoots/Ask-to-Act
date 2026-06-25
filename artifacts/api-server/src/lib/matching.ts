@@ -26,6 +26,7 @@ import { toConcepts, type Concept } from "./search-taxonomy.js";
 import { isLocalMatch as isLocalMatchShared, structuredConceptHits as structuredConceptHitsShared } from "./search-ranking.js";
 import { verifyConcepts } from "./search-verify.js";
 import { deriveExperience } from "./candidate-experience.js";
+import { isTrueSubmission } from "./submission-status.js";
 
 export interface MatchCandidatesArgs {
   jobId: number;
@@ -72,13 +73,26 @@ interface CandidateRecord {
 }
 
 /**
- * Collect the candidate IDs of everyone ALREADY SUBMITTED to a job, paginating
- * exhaustively. A job with more submissions than a single page would otherwise
- * yield an incomplete set and re-introduce the "shown as not submitted when they
- * actually are" trust bug. Matched by candidate ID only — never by name.
+ * Collect, for a job, the candidate IDs of everyone in its JobSubmission pile,
+ * SPLIT by pipeline stage — paginating exhaustively. A job with more rows than a
+ * single page would otherwise yield an incomplete set and re-introduce the
+ * "shown as not submitted when they actually are" trust bug. Matched by
+ * candidate ID only — never by name.
+ *
+ * Bullhorn stores inbound applicants (the "Response" bucket: New Lead / Online
+ * Applicant) and recruiter-actioned submissions as the same JobSubmission
+ * object, separated only by status. We must NOT treat a mere applicant as
+ * "already submitted":
+ *   - `submitted` = true submissions (Internally Submitted, Client Submission,
+ *     and later stages) → excluded from matches by default.
+ *   - `applied`   = inbound applicants (Response bucket) → still shown as
+ *     matches, just flagged `alreadyApplied`.
  */
-async function fetchAllSubmittedCandidateIds(jobId: number): Promise<Set<number>> {
-  const ids = new Set<number>();
+async function fetchJobPipelineCandidateIds(
+  jobId: number,
+): Promise<{ submitted: Set<number>; applied: Set<number> }> {
+  const submitted = new Set<number>();
+  const applied = new Set<number>();
   const PAGE = 200;
   const MAX_PAGES = 50; // safety ceiling: 10k submissions
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -91,11 +105,14 @@ async function fetchAllSubmittedCandidateIds(jobId: number): Promise<Set<number>
     const rows = asArray(res);
     for (const s of rows) {
       const cid = (s as { candidate?: { id?: number } }).candidate?.id;
-      if (typeof cid === "number") ids.add(cid);
+      if (typeof cid !== "number") continue;
+      const status = str((s as { status?: unknown }).status);
+      if (isTrueSubmission(status)) submitted.add(cid);
+      else applied.add(cid);
     }
     if (rows.length < PAGE) break;
   }
-  return ids;
+  return { submitted, applied };
 }
 
 function fullName(c: CandidateRecord): string {
@@ -194,25 +211,30 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   );
   if (niceToHave.length > 0) keywords.push(niceToHave);
 
-  const [searchRes, submittedIds] = await Promise.all([
+  const [searchRes, pipeline] = await Promise.all([
     searchCandidates({
       query: args.includeInactive ? undefined : "NOT status:Archive",
       keywords,
       count: poolSize,
       fields: "id,firstName,lastName,name,status,occupation,skillSet,address",
     }),
-    // 3. Build the set of candidates ALREADY SUBMITTED TO THIS JOB — by candidate ID,
+    // 3. Build the candidate-ID sets for THIS JOB's pipeline — by candidate ID,
     //    never by name (the trust fix). Paginate exhaustively: a job with >200
-    //    submissions would otherwise yield an incomplete set and re-introduce the
-    //    "shown as not submitted when they are" bug at scale.
-    fetchAllSubmittedCandidateIds(args.jobId),
+    //    rows would otherwise yield an incomplete set and re-introduce the
+    //    "shown as not submitted when they are" bug at scale. Split into true
+    //    SUBMISSIONS (excluded by default) vs inbound APPLICANTS / Response
+    //    bucket (shown, just flagged).
+    fetchJobPipelineCandidateIds(args.jobId),
   ]);
+  const submittedIds = pipeline.submitted;
+  const appliedIds = pipeline.applied;
 
   const pool = asArray(searchRes) as CandidateRecord[];
 
   // 4. Filter the pool deterministically.
   const markers = activeExclusionMarkers(args);
   const excludedSummary = { placed: 0, inactive: 0, doNotContact: 0, alreadySubmitted: 0, outOfArea: 0 };
+  let alreadyAppliedShown = 0;
   const kept: CandidateRecord[] = [];
 
   for (const c of pool) {
@@ -233,6 +255,9 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       excludedSummary.outOfArea++;
       continue;
     }
+    // Inbound applicants (Response bucket) are NOT excluded — they are shown,
+    // just flagged `alreadyApplied` so the recruiter knows they're in the pile.
+    if (appliedIds.has(c.id)) alreadyAppliedShown++;
     kept.push(c);
   }
 
@@ -282,6 +307,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       location: [str(c.address?.city), str(c.address?.state)].filter(Boolean).join(", ") || "Unknown",
       isLocal: s.local,
       alreadySubmitted: submittedIds.has(c.id),
+      alreadyApplied: appliedIds.has(c.id),
       matchedSkills: s.hits,
       resumeConfirmed: v?.matchedConcepts ?? [],
       resumeMissing: v?.missingConcepts ?? mustHave,
@@ -323,11 +349,13 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     totals: {
       candidatesScanned: pool.length,
       excluded: excludedSummary,
+      alreadyAppliedShown,
       matchesReturned: matches.length,
     },
     matches,
     notes: [
       "Submission status is matched by candidate ID (not name), so it is verifiable — open each bullhornUrl to confirm.",
+      "`alreadySubmitted` means a TRUE submission (Internally Submitted, Client Submission, or later) — these are excluded by default. `alreadyApplied` means the person is only in the job's inbound applicant / Response bucket (New Lead / Online Applicant); they are NOT a submission and are still shown as matches. Never describe an applicant as 'submitted'.",
       "Security clearance is NOT a structured field in Bullhorn; it lives in résumé text. Treat any clearance as UNVERIFIED until confirmed via get_candidate_resume (VERIFY mode) and remember clearances can lapse.",
       "matchedSkills come from structured fields; resumeEvidence quotes are the citable proof. Do not claim a skill without evidence.",
     ],
