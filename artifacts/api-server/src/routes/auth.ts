@@ -6,7 +6,9 @@ import {
   completeUserEnrollment,
   connectHeadless,
   isConnected,
+  firmContext,
 } from "../lib/bullhorn-auth.js";
+import { countEntity } from "../lib/bullhorn-client.js";
 import { rememberState, consumeState, userIdFromState, peekFirmId } from "../lib/oauth-state.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { logger } from "../lib/logger.js";
@@ -27,6 +29,17 @@ const router: IRouter = Router();
 router.get("/auth/bullhorn/login", bearerAuth, requireService, async (req: Request, res: Response) => {
   try {
     const firmId = typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined;
+    if (!firmId) {
+      res
+        .status(400)
+        .send(
+          page(
+            "Missing firm",
+            "A firmId is required to start the Bullhorn connection. Each firm connects its own Bullhorn workspace — open this link from the New Organization wizard.",
+          ),
+        );
+      return;
+    }
     const state = randomBytes(16).toString("hex");
     rememberState(state, firmId);
     const url = await getAuthorizeUrl(state);
@@ -43,6 +56,36 @@ router.get("/auth/bullhorn/login", bearerAuth, requireService, async (req: Reque
       );
   }
 });
+
+/**
+ * GET /auth/bullhorn/login-url?firmId=X
+ * JSON variant of /auth/bullhorn/login for the admin New Organization wizard.
+ * Returns the Bullhorn authorize URL so the SPA — which holds the service bearer
+ * token — can fetch it with the Authorization header and then window.open() the
+ * returned URL. A plain anchor or window.open() can't attach the bearer header
+ * that the redirect route requires, so the wizard uses this instead.
+ */
+router.get(
+  "/auth/bullhorn/login-url",
+  bearerAuth,
+  requireService,
+  async (req: Request, res: Response) => {
+    const firmId = typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined;
+    if (!firmId) {
+      res.status(400).json({ error: "firmId query parameter is required." });
+      return;
+    }
+    try {
+      const state = randomBytes(16).toString("hex");
+      rememberState(state, firmId);
+      const url = await getAuthorizeUrl(state);
+      res.json({ url });
+    } catch (err) {
+      logger.error({ err, firmId }, "Bullhorn login-url build failed");
+      res.status(500).json({ error: "Could not build the Bullhorn authorization link." });
+    }
+  },
+);
 
 /**
  * Shared OAuth callback for both the service-account flow and per-user
@@ -138,6 +181,19 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
     return;
   }
 
+  if (!firmId) {
+    logger.warn("Bullhorn service callback missing firmId in state");
+    res
+      .status(400)
+      .send(
+        page(
+          "Missing firm",
+          "This Bullhorn connection link was not tied to a firm. Please restart the connection from the New Organization wizard.",
+        ),
+      );
+    return;
+  }
+
   try {
     await completeAuthorization(code, firmId);
     res.send(
@@ -159,15 +215,25 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/auth/bullhorn/status", bearerAuth, async (_req: Request, res: Response) => {
-  try {
-    const connected = await isConnected();
-    res.json({ connected });
-  } catch (err) {
-    logger.error({ err }, "Bullhorn status check failed");
-    res.status(500).json({ error: "Could not determine connection status" });
-  }
-});
+router.get(
+  "/auth/bullhorn/status",
+  bearerAuth,
+  requireService,
+  async (req: Request, res: Response) => {
+    const firmId = typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined;
+    if (!firmId) {
+      res.status(400).json({ error: "firmId query parameter is required." });
+      return;
+    }
+    try {
+      const connected = await isConnected(firmId);
+      res.json({ connected });
+    } catch (err) {
+      logger.error({ err, firmId }, "Bullhorn status check failed");
+      res.status(500).json({ error: "Could not determine connection status" });
+    }
+  },
+);
 
 /**
  * POST /auth/bullhorn/connect
@@ -179,10 +245,14 @@ router.post(
   bearerAuth,
   requireService,
   async (req: Request, res: Response) => {
+    const firmId =
+      (typeof req.body?.firmId === "string" ? req.body.firmId : undefined) ??
+      (typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined);
+    if (!firmId) {
+      res.status(400).json({ connected: false, error: "firmId is required." });
+      return;
+    }
     try {
-      const firmId =
-        (typeof req.body?.firmId === "string" ? req.body.firmId : undefined) ??
-        (typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined);
       const { restUrl } = await connectHeadless(firmId);
       logger.info({ restUrl, firmId }, "Bullhorn: headless connect succeeded");
       res.json({ connected: true, restUrl });
@@ -191,6 +261,43 @@ router.post(
       res
         .status(502)
         .json({ connected: false, error: (err as Error).message });
+    }
+  },
+);
+
+/**
+ * POST /auth/bullhorn/verify?firmId=X
+ * Admin-only. Lightweight end-to-end check that the firm's Bullhorn connection
+ * can actually read data: runs a single count within the firm's context and
+ * returns pass/fail. Never cached (count_entity has its own cache; this is a
+ * connectivity probe, so a small count is acceptable).
+ */
+router.post(
+  "/auth/bullhorn/verify",
+  bearerAuth,
+  requireService,
+  async (req: Request, res: Response) => {
+    const firmId =
+      (typeof req.body?.firmId === "string" ? req.body.firmId : undefined) ??
+      (typeof req.query["firmId"] === "string" ? req.query["firmId"] : undefined);
+    if (!firmId) {
+      res.status(400).json({ ok: false, error: "firmId is required." });
+      return;
+    }
+    if (!(await isConnected(firmId))) {
+      res.status(409).json({ ok: false, error: "Firm's Bullhorn connection is not active." });
+      return;
+    }
+    try {
+      const result = (await firmContext.run({ firmId }, () =>
+        countEntity({ entityType: "Candidate" }),
+      )) as { total?: number };
+      logger.info({ firmId, total: result.total }, "Bullhorn verify succeeded");
+      res.json({ ok: true, entity: "Candidate", total: result.total ?? 0 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ firmId, err }, "Bullhorn verify failed");
+      res.status(502).json({ ok: false, error: msg });
     }
   },
 );

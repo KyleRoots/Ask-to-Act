@@ -1,6 +1,7 @@
 import { db, bullhornTokensTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "./logger.js";
 
 // ── At-rest token encryption (AES-256-GCM) ────────────────────────────────
@@ -72,8 +73,6 @@ function decryptToken(stored: string): string {
 const BULLHORN_LOGIN_INFO_URL =
   "https://rest.bullhornstaffing.com/rest-services/loginInfo";
 
-const CONNECTION_ID = "default";
-
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -122,8 +121,39 @@ export class BullhornNotAuthorizedError extends Error {
   }
 }
 
-let session: Session | null = null;
-let authInProgress: Promise<Session> | null = null;
+/**
+ * Request-scoped firm context. The MCP route (and any service flow that knows
+ * the firm) wraps work in firmContext.run({ firmId }) so the deep Bullhorn read
+ * path — getSession() and the read cache — resolves the right tenant WITHOUT
+ * threading firmId through every client function. getSession(firmId?) prefers an
+ * explicit firmId and otherwise reads this context; with NEITHER set it FAILS
+ * CLOSED (throws) rather than silently using a shared connection. This is the
+ * core tenant-isolation guarantee.
+ */
+export const firmContext = new AsyncLocalStorage<{ firmId: string }>();
+
+/** The firmId for the current operation: explicit arg first, then ALS context. */
+function currentFirmId(explicit?: string): string {
+  const firmId = explicit ?? firmContext.getStore()?.firmId;
+  if (!firmId) {
+    throw new Error(
+      "No Bullhorn firm context: getSession requires a firmId (passed explicitly " +
+        "or set via firmContext.run). This guards against cross-tenant data access.",
+    );
+  }
+  return firmId;
+}
+
+/** The ALS firm context id if present (used to scope read cache keys), else null. */
+export function currentFirmContextId(): string | null {
+  return firmContext.getStore()?.firmId ?? null;
+}
+
+// Per-firm service sessions. Each customer firm has its own Bullhorn connection,
+// so live sessions and in-flight (re)auth promises are keyed by firmId and never
+// shared across tenants.
+const sessions = new Map<string, Session>();
+const authInProgress = new Map<string, Promise<Session>>();
 let endpoints: Endpoints | null = null;
 
 // Headless direct-login circuit breaker. After a failed direct login we refuse
@@ -140,29 +170,129 @@ function getEnv(key: string): string {
   return val;
 }
 
-async function loadRefreshToken(): Promise<string | null> {
-  const rows = await db
-    .select()
-    .from(bullhornTokensTable)
-    .where(eq(bullhornTokensTable.id, CONNECTION_ID))
-    .limit(1);
-  const stored = rows[0]?.refreshToken ?? null;
-  return stored ? decryptToken(stored) : null;
+interface FirmTokenRow {
+  refreshToken: string | null;
+  oauthUrl: string | null;
+  restUrl: string | null;
+  loginUrl: string | null;
+  authMode: string;
 }
 
-async function saveRefreshToken(refreshToken: string, firmId?: string): Promise<void> {
-  const toStore = encryptToken(refreshToken);
-  const baseValues = { id: CONNECTION_ID, refreshToken: toStore, updatedAt: new Date() };
-  const values = firmId ? { ...baseValues, firmId } : baseValues;
-  const updateSet: Record<string, unknown> = { refreshToken: toStore, updatedAt: new Date() };
-  if (firmId) updateSet["firmId"] = firmId;
+/** Loads a firm's stored connection row (decrypting the refresh token). */
+async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
+  const rows = await db
+    .select({
+      refreshToken: bullhornTokensTable.refreshToken,
+      oauthUrl: bullhornTokensTable.oauthUrl,
+      restUrl: bullhornTokensTable.restUrl,
+      loginUrl: bullhornTokensTable.loginUrl,
+      authMode: bullhornTokensTable.authMode,
+    })
+    .from(bullhornTokensTable)
+    .where(eq(bullhornTokensTable.firmId, firmId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    refreshToken: row.refreshToken ? decryptToken(row.refreshToken) : null,
+    oauthUrl: row.oauthUrl ?? null,
+    restUrl: row.restUrl ?? null,
+    loginUrl: row.loginUrl ?? null,
+    authMode: row.authMode ?? "oauth",
+  };
+}
+
+/**
+ * Returns a firm's auth_mode ("service" | "oauth"), or null if the firm has no
+ * Bullhorn token row. The "service" firm (Myticas) is the env-credential
+ * headless account whose custom-field config is managed by the platform — it
+ * intentionally has NO firm_config row and must stay byte-identical, so callers
+ * use this to refuse discovery writes against it.
+ */
+export async function getFirmAuthMode(firmId: string): Promise<string | null> {
+  const rows = await db
+    .select({ authMode: bullhornTokensTable.authMode })
+    .from(bullhornTokensTable)
+    .where(eq(bullhornTokensTable.firmId, firmId))
+    .limit(1);
+  return rows[0]?.authMode ?? null;
+}
+
+/**
+ * Updates ONLY the rotating refresh token for a firm (the hot path on every
+ * session refresh). The row already exists, so this is a plain UPDATE keyed by
+ * firmId — it never creates a row or changes auth_mode/endpoints.
+ */
+async function saveRotatedRefreshToken(firmId: string, refreshToken: string): Promise<void> {
+  await db
+    .update(bullhornTokensTable)
+    .set({ refreshToken: encryptToken(refreshToken), updatedAt: new Date() })
+    .where(eq(bullhornTokensTable.firmId, firmId));
+}
+
+interface FirmConnectionFields {
+  refreshToken: string;
+  oauthUrl: string;
+  restUrl: string;
+  loginUrl: string | null;
+  authMode: "service" | "oauth";
+}
+
+/**
+ * Upserts a firm's full connection material after a successful authorization or
+ * headless login — refresh token PLUS the firm's own OAuth/REST/login endpoints,
+ * so future refreshes use the firm's own swimlane and never another tenant's.
+ * Conflict is on firm_id; the legacy "default" row keeps its id. auth_mode is
+ * NOT overwritten on conflict, so a "service" firm stays service across reconnects.
+ */
+async function saveFirmConnection(firmId: string, fields: FirmConnectionFields): Promise<void> {
+  const now = new Date();
+  const enc = encryptToken(fields.refreshToken);
   await db
     .insert(bullhornTokensTable)
-    .values(values)
+    .values({
+      id: firmId,
+      firmId,
+      refreshToken: enc,
+      oauthUrl: fields.oauthUrl,
+      restUrl: fields.restUrl,
+      loginUrl: fields.loginUrl,
+      authMode: fields.authMode,
+      connectedAt: now,
+      updatedAt: now,
+    })
     .onConflictDoUpdate({
-      target: bullhornTokensTable.id,
-      set: updateSet,
+      target: bullhornTokensTable.firmId,
+      set: {
+        refreshToken: enc,
+        oauthUrl: fields.oauthUrl,
+        restUrl: fields.restUrl,
+        loginUrl: fields.loginUrl,
+        connectedAt: now,
+        updatedAt: now,
+      },
     });
+}
+
+/** Derives a firm's REST /login endpoint from its authenticated restUrl. */
+function deriveLoginUrl(restUrl: string): string | null {
+  const marker = "/rest-services/";
+  const i = restUrl.indexOf(marker);
+  if (i < 0) return null;
+  return restUrl.slice(0, i + marker.length) + "login";
+}
+
+/**
+ * Resolves the OAuth/login endpoints for a firm. Prefers the firm's own stored
+ * endpoints (captured at connect time) so we never reuse one tenant's swimlane
+ * for another; falls back to the global region-discovered endpoints only when a
+ * firm has none stored yet (e.g. the service firm before its first capture).
+ */
+async function resolveFirmEndpoints(row: FirmTokenRow | null): Promise<Endpoints> {
+  if (row?.oauthUrl && row?.loginUrl) {
+    return { oauthUrl: row.oauthUrl, loginUrl: row.loginUrl };
+  }
+  return discoverEndpoints();
 }
 
 async function discoverEndpoints(): Promise<Endpoints> {
@@ -486,37 +616,51 @@ function buildSession(tokens: TokenResponse, loginData: LoginResponse, sessionEx
  * so future sessions can be created headlessly. Called by the OAuth callback.
  */
 export async function completeAuthorization(code: string, firmId?: string): Promise<void> {
-  const { oauthUrl, loginUrl } = await discoverEndpoints();
-  const tokens = await exchangeCodeForToken(oauthUrl, code);
-  const loginData = await login(tokens.access_token, loginUrl);
+  const fid = currentFirmId(firmId);
+  const existing = await loadTokenRow(fid);
+  const ep = await resolveFirmEndpoints(existing);
+  const tokens = await exchangeCodeForToken(ep.oauthUrl, code);
+  const loginData = await login(tokens.access_token, ep.loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
-  session = buildSession(tokens, loginData, sessionExpiresAt);
-  await saveRefreshToken(tokens.refresh_token, firmId);
-  logger.info({ restUrl: session.restUrl, firmId }, "Bullhorn: authorization complete, session established");
+  const s = buildSession(tokens, loginData, sessionExpiresAt);
+  sessions.set(fid, s);
+  await saveFirmConnection(fid, {
+    refreshToken: tokens.refresh_token,
+    oauthUrl: ep.oauthUrl,
+    restUrl: loginData.restUrl,
+    loginUrl: deriveLoginUrl(loginData.restUrl) ?? ep.loginUrl,
+    // Preserve a service firm's mode across reconnects; new firms are oauth.
+    authMode: existing?.authMode === "service" ? "service" : "oauth",
+  });
+  logger.info({ restUrl: s.restUrl, firmId: fid }, "Bullhorn: authorization complete, session established");
 }
 
 /**
- * Builds a fresh session from a stored refresh token, rotating and persisting
- * the new refresh token Bullhorn returns.
+ * Builds a fresh session for a firm from its stored refresh token, rotating and
+ * persisting the new refresh token Bullhorn returns. Uses the firm's OWN stored
+ * endpoints so a refresh never touches another tenant's swimlane.
  */
-async function sessionFromRefreshToken(refreshToken: string): Promise<Session> {
-  const { oauthUrl, loginUrl } = await discoverEndpoints();
-  const tokens = await fetchTokenWithRefresh(oauthUrl, refreshToken);
-  const loginData = await login(tokens.access_token, loginUrl);
+async function sessionFromRefreshToken(
+  firmId: string,
+  refreshToken: string,
+  ep: Endpoints,
+): Promise<Session> {
+  const tokens = await fetchTokenWithRefresh(ep.oauthUrl, refreshToken);
+  const loginData = await login(tokens.access_token, ep.loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
   const s = buildSession(tokens, loginData, sessionExpiresAt);
-  await saveRefreshToken(tokens.refresh_token);
+  await saveRotatedRefreshToken(firmId, tokens.refresh_token);
   return s;
 }
 
 /**
- * Headless ("direct") login: gets an authorization code by sending credentials
- * straight to /authorize, then runs the standard token + REST-login exchange and
- * persists the rotating refresh token. No browser, no consent screen. Guarded by
- * a cooldown so a wrong password cannot be retried fast enough to lock the API
- * user.
+ * Headless ("direct") login for the SERVICE firm only: gets an authorization
+ * code by sending the env-var credentials straight to /authorize, then runs the
+ * standard token + REST-login exchange and persists the firm's connection. No
+ * browser, no consent screen. Guarded by a cooldown so a wrong password cannot
+ * be retried fast enough to lock the API user.
  */
-async function directLogin(firmId?: string): Promise<Session> {
+async function directLogin(firmId: string): Promise<Session> {
   const now = Date.now();
   if (now < directLoginBlockedUntil) {
     const secs = Math.ceil((directLoginBlockedUntil - now) / 1000);
@@ -533,13 +677,19 @@ async function directLogin(firmId?: string): Promise<Session> {
     const loginData = await login(tokens.access_token, loginUrl);
     const sessionExpiresAt = await resolveSessionExpiry(loginData);
     const s = buildSession(tokens, loginData, sessionExpiresAt);
-    await saveRefreshToken(tokens.refresh_token, firmId);
+    await saveFirmConnection(firmId, {
+      refreshToken: tokens.refresh_token,
+      oauthUrl,
+      restUrl: loginData.restUrl,
+      loginUrl: deriveLoginUrl(loginData.restUrl) ?? loginUrl,
+      authMode: "service",
+    });
     logger.info({ restUrl: s.restUrl, firmId }, "Bullhorn: headless direct login complete");
     return s;
   } catch (err) {
     directLoginBlockedUntil = Date.now() + DIRECT_LOGIN_COOLDOWN_MS;
     logger.error(
-      { err },
+      { err, firmId },
       "Bullhorn: headless direct login failed; cooling down to protect against account lockout",
     );
     throw err;
@@ -548,109 +698,138 @@ async function directLogin(firmId?: string): Promise<Session> {
 
 /**
  * Establishes a session via headless direct login and caches it. Used by the
- * /api/auth/bullhorn/connect endpoint to bootstrap the connection with no
- * browser interaction. Single-flighted so concurrent callers share one attempt.
+ * /api/auth/bullhorn/connect endpoint to bootstrap the SERVICE firm's connection
+ * with no browser interaction. Single-flighted per firm so concurrent callers
+ * share one attempt.
  */
 export async function connectHeadless(firmId?: string): Promise<{ restUrl: string }> {
-  if (authInProgress) {
-    const existing = await authInProgress;
+  const fid = currentFirmId(firmId);
+  const inProgress = authInProgress.get(fid);
+  if (inProgress) {
+    const existing = await inProgress;
     return { restUrl: existing.restUrl };
   }
-  authInProgress = directLogin(firmId)
+  const work = directLogin(fid)
     .then((s) => {
-      session = s;
-      logger.info({ restUrl: s.restUrl, firmId }, "Bullhorn: session established (headless)");
+      sessions.set(fid, s);
+      logger.info({ restUrl: s.restUrl, firmId: fid }, "Bullhorn: session established (headless)");
       return s;
     })
     .finally(() => {
-      authInProgress = null;
+      authInProgress.delete(fid);
     });
-  const s = await authInProgress;
+  authInProgress.set(fid, work);
+  const s = await work;
   return { restUrl: s.restUrl };
 }
 
-/**
- * Returns the firmId bound to the shared Bullhorn token row, or null if none
- * has been configured. Used by requireBullhornFirm to enforce tenant isolation.
- */
-export async function getBullhornFirmId(): Promise<string | null> {
+/** True if the given firm has a Bullhorn service connection (token row exists). */
+export async function isFirmConnected(firmId: string): Promise<boolean> {
   const rows = await db
-    .select({ firmId: bullhornTokensTable.firmId })
+    .select({ id: bullhornTokensTable.id })
     .from(bullhornTokensTable)
-    .where(eq(bullhornTokensTable.id, CONNECTION_ID))
+    .where(eq(bullhornTokensTable.firmId, firmId))
     .limit(1);
-  return rows[0]?.firmId ?? null;
+  return rows.length > 0;
 }
 
-async function reauthenticate(): Promise<Session> {
+async function reauthenticate(firmId: string): Promise<Session> {
   // The DB row is the source of truth: every refresh rotates and re-persists
   // the token, so the stored value is at least as fresh as anything held in
   // memory. Prefer it, falling back to the in-memory token only if the DB has
   // none (e.g. immediately after authorization before the first reload).
-  const stored = await loadRefreshToken();
-  const refreshToken = stored ?? session?.refreshToken ?? null;
+  const row = await loadTokenRow(firmId);
+  const refreshToken = row?.refreshToken ?? sessions.get(firmId)?.refreshToken ?? null;
+  const ep = await resolveFirmEndpoints(row);
   if (refreshToken) {
     try {
-      logger.info("Bullhorn: establishing session from refresh token");
-      return await sessionFromRefreshToken(refreshToken);
+      logger.info({ firmId }, "Bullhorn: establishing session from refresh token");
+      return await sessionFromRefreshToken(firmId, refreshToken, ep);
     } catch (err) {
-      logger.warn(
-        { err },
-        "Bullhorn: refresh token failed; falling back to headless direct login",
+      // Only the env-credential service firm can self-heal via headless login;
+      // customer (oauth) firms must re-authorize interactively.
+      if (row?.authMode === "service") {
+        logger.warn(
+          { firmId, err },
+          "Bullhorn: refresh token failed; falling back to headless direct login (service firm)",
+        );
+        return directLogin(firmId);
+      }
+      logger.error(
+        { firmId, err },
+        "Bullhorn: refresh token failed for oauth firm; re-authorization required",
       );
+      throw new BullhornNotAuthorizedError();
     }
   }
-  logger.info("Bullhorn: no usable refresh token; performing headless direct login");
-  return directLogin();
+  if (row?.authMode === "service") {
+    logger.info({ firmId }, "Bullhorn: no usable refresh token; performing headless direct login (service firm)");
+    return directLogin(firmId);
+  }
+  throw new BullhornNotAuthorizedError();
 }
 
-export async function getSession(): Promise<Session> {
-  if (authInProgress) {
-    return authInProgress;
+export async function getSession(firmId?: string): Promise<Session> {
+  const fid = currentFirmId(firmId);
+
+  const inProgress = authInProgress.get(fid);
+  if (inProgress) {
+    return inProgress;
   }
 
-  if (session) {
-    const tokenExpired = Date.now() >= session.tokenExpiresAt;
-    const sessionExpired = Date.now() >= session.sessionExpiresAt;
+  const cached = sessions.get(fid);
+  if (cached) {
+    const tokenExpired = Date.now() >= cached.tokenExpiresAt;
+    const sessionExpired = Date.now() >= cached.sessionExpiresAt;
 
     if (!tokenExpired && !sessionExpired) {
-      return session;
+      return cached;
     }
 
     if (sessionExpired && !tokenExpired) {
-      logger.info("Bullhorn: BhRestToken session expired, re-validating via ping");
-      const stillValid = await pingSession(session);
+      logger.info({ firmId: fid }, "Bullhorn: BhRestToken session expired, re-validating via ping");
+      const stillValid = await pingSession(cached);
       if (stillValid) {
-        session.sessionExpiresAt = Date.now() + 10 * 60 * 1000;
-        return session;
+        cached.sessionExpiresAt = Date.now() + 10 * 60 * 1000;
+        return cached;
       }
     }
   }
 
-  logger.info("Bullhorn: session invalid or missing, (re)authenticating");
-  authInProgress = reauthenticate()
+  logger.info({ firmId: fid }, "Bullhorn: session invalid or missing, (re)authenticating");
+  const work = reauthenticate(fid)
     .then((s) => {
-      session = s;
-      logger.info({ restUrl: s.restUrl }, "Bullhorn: session established");
+      sessions.set(fid, s);
+      logger.info({ firmId: fid, restUrl: s.restUrl }, "Bullhorn: session established");
       return s;
     })
     .finally(() => {
-      authInProgress = null;
+      authInProgress.delete(fid);
     });
-  return authInProgress;
+  authInProgress.set(fid, work);
+  return work;
 }
 
-export async function invalidateSession(): Promise<void> {
-  session = null;
-  authInProgress = null;
+/**
+ * Drops a firm's in-memory session (forces re-auth on next call). Tolerant of a
+ * missing firm context because it runs inside error-handling paths where
+ * throwing would mask the original error; with no firmId it is a no-op.
+ */
+export async function invalidateSession(firmId?: string): Promise<void> {
+  const fid = firmId ?? firmContext.getStore()?.firmId;
+  if (!fid) return;
+  sessions.delete(fid);
+  authInProgress.delete(fid);
 }
 
-/** Returns true if a refresh token is persisted (i.e. Bullhorn is connected). */
-export async function isConnected(): Promise<boolean> {
-  if (session) {
+/** Returns true if a refresh token is persisted for the firm (i.e. connected). */
+export async function isConnected(firmId?: string): Promise<boolean> {
+  const fid = currentFirmId(firmId);
+  if (sessions.has(fid)) {
     return true;
   }
-  return (await loadRefreshToken()) !== null;
+  const row = await loadTokenRow(fid);
+  return !!row?.refreshToken;
 }
 
 // ── Per-user Bullhorn auth ─────────────────────────────────────────────────

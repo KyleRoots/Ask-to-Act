@@ -132,6 +132,30 @@ export type InviteResult = {
   message: string;
 };
 
+export type BullhornStatus = { connected: boolean };
+
+export type DiscoverySummary = {
+  firmId: string;
+  entitiesDiscovered: string[];
+  entitiesFailed: { entity: string; error: string }[];
+  internalDepartment: Record<string, string>;
+  missingInternalDepartment: string[];
+};
+
+export type FirmFieldMap = {
+  semantics: { internalDepartment: Record<string, string> };
+  missing: { internalDepartment: string[] };
+  [key: string]: unknown;
+};
+
+export type FirmConfigResult = {
+  firmId: string;
+  discovered: boolean;
+  fieldMap: FirmFieldMap | null;
+};
+
+export type VerifyResult = { ok: boolean; entity?: string; total?: number };
+
 export const api = {
   listFirms: (includeArchived = false) =>
     apiFetch<{ data: FirmRow[] }>(
@@ -231,4 +255,28 @@ export const api = {
     apiFetch<{ checkoutUrl: string; message: string }>(`/firms/${firmId}/checkout`, {
       method: "POST",
     }),
+
+  bullhornStatus: (firmId: string) =>
+    apiFetch<BullhornStatus>(
+      `/auth/bullhorn/status?firmId=${encodeURIComponent(firmId)}`,
+    ),
+
+  bullhornLoginUrl: (firmId: string) =>
+    apiFetch<{ url: string }>(
+      `/auth/bullhorn/login-url?firmId=${encodeURIComponent(firmId)}`,
+    ),
+
+  discoverConfig: (firmId: string) =>
+    apiFetch<DiscoverySummary>(`/firms/${firmId}/discover-config`, {
+      method: "POST",
+    }),
+
+  getFirmConfig: (firmId: string) =>
+    apiFetch<FirmConfigResult>(`/firms/${firmId}/config`),
+
+  verifyConnection: (firmId: string) =>
+    apiFetch<VerifyResult>(
+      `/auth/bullhorn/verify?firmId=${encodeURIComponent(firmId)}`,
+      { method: "POST" },
+    ),
 };

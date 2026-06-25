@@ -61,7 +61,7 @@ import {
   uploadFileToRecord,
   createCandidateFromResume,
 } from "./bullhorn-client.js";
-import { getUserSession } from "./bullhorn-auth.js";
+import { getUserSession, currentFirmContextId } from "./bullhorn-auth.js";
 import { sendSupportEmail } from "./emailService.js";
 import type { CallerIdentity } from "../middlewares/bearer-auth.js";
 import { trackSeatActivity, trackToolUsage } from "./seat-activity.js";
@@ -162,7 +162,9 @@ async function runTool(
   args: Record<string, unknown>,
   fn: () => Promise<unknown>,
 ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
-  const key = `${toolName}:${stableKey(args)}`;
+  // Scope the cache by firm so one tenant's cached tool result can never be
+  // served to another. Falls back to "no-firm" for firm-independent tools.
+  const key = `${currentFirmContextId() ?? "no-firm"}:${toolName}:${stableKey(args)}`;
   const cached = responseCache.get(key);
   if (cached !== undefined) {
     logger.info({ tool: toolName, cache: "hit" }, "MCP tool cache hit");

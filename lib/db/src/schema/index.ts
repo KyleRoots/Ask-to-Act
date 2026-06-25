@@ -19,6 +19,7 @@
 
 export * from "./bullhorn-tokens";
 export * from "./firms";
+export * from "./firm-config";
 export * from "./users";
 export * from "./seat-activity";
 export * from "./tool-usage";

@@ -1,6 +1,6 @@
 import { Router, type IRouter, Request, Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { bearerAuth, requireBullhornFirm } from "../middlewares/bearer-auth.js";
+import { bearerAuth, requireBullhornFirm, attachFirmContext } from "../middlewares/bearer-auth.js";
 import { createMcpServer } from "../lib/mcp-server.js";
 import { logger } from "../lib/logger.js";
 
@@ -27,12 +27,18 @@ async function handleMcpRequest(req: Request, res: Response, body?: unknown) {
   }
 }
 
-router.post("/mcp", bearerAuth, requireBullhornFirm, (req, res) => handleMcpRequest(req, res, req.body));
-router.get("/mcp", bearerAuth, requireBullhornFirm, (req, res) => handleMcpRequest(req, res));
-
-router.post("/mcp/:token", bearerAuth, requireBullhornFirm, (req, res) =>
+router.post("/mcp", bearerAuth, requireBullhornFirm, attachFirmContext, (req, res) =>
   handleMcpRequest(req, res, req.body),
 );
-router.get("/mcp/:token", bearerAuth, requireBullhornFirm, (req, res) => handleMcpRequest(req, res));
+router.get("/mcp", bearerAuth, requireBullhornFirm, attachFirmContext, (req, res) =>
+  handleMcpRequest(req, res),
+);
+
+router.post("/mcp/:token", bearerAuth, requireBullhornFirm, attachFirmContext, (req, res) =>
+  handleMcpRequest(req, res, req.body),
+);
+router.get("/mcp/:token", bearerAuth, requireBullhornFirm, attachFirmContext, (req, res) =>
+  handleMcpRequest(req, res),
+);
 
 export default router;

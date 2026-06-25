@@ -643,15 +643,27 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
           <div className="w-px h-4 shrink-0" style={{ background: BORDER }} />
           <LogoWordmark size={24} />
         </div>
-        <button
-          onClick={() => { clearToken(); navigate("/login"); }}
-          className="text-sm px-3 py-1.5 rounded-lg transition-colors"
-          style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate(`/firms/${firmId}/setup`)}
+            className="text-sm px-3 py-1.5 rounded-lg transition-colors"
+            style={{ color: "#818CF8", border: "1px solid rgba(129,140,248,.3)" }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#A5B4FC"; e.currentTarget.style.borderColor = "rgba(129,140,248,.55)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#818CF8"; e.currentTarget.style.borderColor = "rgba(129,140,248,.3)"; }}
+          >
+            <span className="hidden sm:inline">Bullhorn setup</span>
+            <span className="sm:hidden">Setup</span>
+          </button>
+          <button
+            onClick={() => { clearToken(); navigate("/login"); }}
+            className="text-sm px-3 py-1.5 rounded-lg transition-colors"
+            style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "#6B7A99"; e.currentTarget.style.borderColor = BORDER; }}
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       {isLoading && (

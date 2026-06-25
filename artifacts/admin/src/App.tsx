@@ -5,6 +5,7 @@ import { getToken } from "@/lib/api";
 import Login from "@/pages/Login";
 import FirmsList from "@/pages/FirmsList";
 import FirmDetail from "@/pages/FirmDetail";
+import NewOrganizationWizard from "@/pages/NewOrganizationWizard";
 import { useEffect } from "react";
 
 const queryClient = new QueryClient({
@@ -23,6 +24,18 @@ function AppRoutes() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/firms/new">
+        <AuthGuard>
+          <NewOrganizationWizard />
+        </AuthGuard>
+      </Route>
+      <Route path="/firms/:id/setup">
+        {(params: { id: string }) => (
+          <AuthGuard>
+            <NewOrganizationWizard firmId={params.id} />
+          </AuthGuard>
+        )}
+      </Route>
       <Route path="/firms/:id">
         {(params: { id: string }) => (
           <AuthGuard>

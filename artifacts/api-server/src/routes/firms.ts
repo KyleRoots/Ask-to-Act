@@ -7,6 +7,8 @@ import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
+import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
+import { isFirmConnected, getFirmAuthMode } from "../lib/bullhorn-auth.js";
 
 const router: IRouter = Router();
 
@@ -608,6 +610,84 @@ router.post(
       pilotNote: note ?? "Manually activated — no Stripe subscription",
       message: `Firm '${firm.name}' is now active. You can add users via POST /api/users with firmId=${id}.`,
     });
+  },
+);
+
+/**
+ * POST /api/firms/:id/discover-config
+ * Admin-only. Reads the firm's own Bullhorn instance and persists its
+ * custom-field config (e.g. which API field is "Internal Department" per
+ * entity). Requires the firm's Bullhorn connection to be live.
+ */
+router.post(
+  "/firms/:id/discover-config",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    if ((await getFirmAuthMode(id)) === "service") {
+      res.status(409).json({
+        error:
+          "This firm uses the built-in service configuration. Its custom-field mapping is managed by the platform and cannot be re-discovered.",
+      });
+      return;
+    }
+
+    if (!(await isFirmConnected(id))) {
+      res.status(409).json({
+        error: "Firm's Bullhorn connection is not active. Connect Bullhorn before discovering config.",
+      });
+      return;
+    }
+
+    try {
+      const summary = await discoverFirmConfig(id);
+      logger.info(
+        { firmId: id, discovered: summary.entitiesDiscovered.length, failed: summary.entitiesFailed.length },
+        "Firm config discovered",
+      );
+      res.json(summary);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ firmId: id, err }, "Firm config discovery failed");
+      res.status(502).json({ error: `Config discovery failed: ${msg}` });
+    }
+  },
+);
+
+/**
+ * GET /api/firms/:id/config
+ * Admin-only. Returns the firm's persisted custom-field config (or null if it
+ * has not been discovered yet).
+ */
+router.get(
+  "/firms/:id/config",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    const fieldMap = await getFirmFieldMap(id);
+    res.json({ firmId: id, discovered: fieldMap != null, fieldMap });
   },
 );
 

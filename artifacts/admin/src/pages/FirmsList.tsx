@@ -299,13 +299,22 @@ export default function FirmsList() {
             </button>
             <button
               onClick={() => setShowCreate(true)}
+              className="text-sm px-3 py-2.5 rounded-xl transition-colors"
+              style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+              onMouseEnter={GHOST_HOVER.enter}
+              onMouseLeave={(e) => GHOST_HOVER.leave(e)}
+            >
+              Quick add
+            </button>
+            <button
+              onClick={() => navigate("/firms/new")}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.97]"
               style={{
                 background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
                 boxShadow: "0 4px 14px rgba(79,70,229,0.35)",
               }}
             >
-              <span className="hidden sm:inline">+ New Firm</span>
+              <span className="hidden sm:inline">+ New Organization</span>
               <span className="sm:hidden">+ New</span>
             </button>
           </div>

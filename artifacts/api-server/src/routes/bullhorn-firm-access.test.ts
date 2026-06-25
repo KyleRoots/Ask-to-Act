@@ -9,23 +9,25 @@ import {
 } from "vitest";
 
 // ---------------------------------------------------------------------------
-// getBullhornFirmId mock.
+// isFirmConnected mock.
 //
-// requireBullhornFirm calls getBullhornFirmId() to find out which firm the
-// shared Bullhorn token is bound to. We intercept the module so each test can
-// control the return value without touching the database.
+// requireBullhornFirm calls isFirmConnected(firmId) to check whether THE
+// CALLER'S firm has its own Bullhorn workspace connected (a token row exists).
+// We intercept the module so each test can control which firms are "connected"
+// without touching the database.
 //
-// The mutable `bhState` is read on every call; set it before each test.
+// The mutable `bhState.connectedFirmIds` is read on every call; set it before
+// each test.
 // ---------------------------------------------------------------------------
 const bhState = vi.hoisted(() => ({
-  boundFirmId: null as string | null,
+  connectedFirmIds: new Set<string>(),
 }));
 
 vi.mock("../lib/bullhorn-auth.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../lib/bullhorn-auth.js")>();
   return {
     ...original,
-    getBullhornFirmId: async () => bhState.boundFirmId,
+    isFirmConnected: async (firmId: string) => bhState.connectedFirmIds.has(firmId),
   };
 });
 
@@ -125,8 +127,8 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  // Default: Bullhorn token is bound to Firm A.
-  bhState.boundFirmId = FIRM_A;
+  // Default: Firm A has its own Bullhorn workspace connected; Firm B does not.
+  bhState.connectedFirmIds = new Set([FIRM_A]);
 });
 
 // ---------------------------------------------------------------------------
@@ -163,9 +165,9 @@ describe("requireBullhornFirm — service token", () => {
 // ---------------------------------------------------------------------------
 // requireBullhornFirm: correct-firm user is permitted
 // ---------------------------------------------------------------------------
-describe("requireBullhornFirm — correct-firm user", () => {
-  it("returns 200 when the caller's firmId matches the Bullhorn-bound firmId", async () => {
-    // bhState.boundFirmId = FIRM_A (set in beforeEach); USER_A.firmId = FIRM_A
+describe("requireBullhornFirm — connected-firm user", () => {
+  it("returns 200 when the caller's firm has its own Bullhorn connection", async () => {
+    // FIRM_A connected (set in beforeEach); USER_A.firmId = FIRM_A
     const res = await request(app)
       .get(PROBE)
       .set("Authorization", `Bearer ${PREFIX}-key-user-a`);
@@ -177,35 +179,35 @@ describe("requireBullhornFirm — correct-firm user", () => {
 // ---------------------------------------------------------------------------
 // requireBullhornFirm: wrong-firm user is blocked
 // ---------------------------------------------------------------------------
-describe("requireBullhornFirm — wrong-firm user", () => {
-  it("returns 403 when the caller's firmId does not match the Bullhorn-bound firmId", async () => {
-    // USER_B.firmId = FIRM_B, but boundFirmId = FIRM_A → mismatch
+describe("requireBullhornFirm — unconnected-firm user", () => {
+  it("returns 403 when the caller's own firm has no Bullhorn connection", async () => {
+    // USER_B.firmId = FIRM_B, which is NOT in connectedFirmIds → not connected
     const res = await request(app)
       .get(PROBE)
       .set("Authorization", `Bearer ${PREFIX}-key-user-b`);
     expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/not authorized/i);
+    expect(res.body.error).toMatch(/not connected/i);
   });
 });
 
 // ---------------------------------------------------------------------------
 // requireBullhornFirm: Bullhorn token has no firmId bound
 // ---------------------------------------------------------------------------
-describe("requireBullhornFirm — no firmId bound", () => {
+describe("requireBullhornFirm — no firm connected", () => {
   beforeEach(() => {
-    // Override: simulate an unbound (legacy / not-yet-configured) connection.
-    bhState.boundFirmId = null;
+    // Override: simulate a deployment where no firm has connected Bullhorn yet.
+    bhState.connectedFirmIds = new Set();
   });
 
-  it("returns 403 for any user caller when no firmId is bound", async () => {
+  it("returns 403 for any user caller when their firm is not connected", async () => {
     const res = await request(app)
       .get(PROBE)
       .set("Authorization", `Bearer ${PREFIX}-key-user-a`);
     expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/not yet bound|re-authoris/i);
+    expect(res.body.error).toMatch(/not connected|complete Bullhorn setup/i);
   });
 
-  it("still returns 200 for the service token even when no firmId is bound", async () => {
+  it("still returns 200 for the service token even when no firm is connected", async () => {
     // Service callers are the administrators who set up the connection;
     // they must not be blocked by an unbound token.
     const res = await request(app)

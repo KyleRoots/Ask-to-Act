@@ -1,4 +1,5 @@
-import { getSession, invalidateSession } from "./bullhorn-auth.js";
+import { getSession, invalidateSession, currentFirmContextId } from "./bullhorn-auth.js";
+import { resolveDeptField } from "./firm-config.js";
 import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
 import { classifySubmissionStage } from "./submission-status.js";
@@ -67,7 +68,9 @@ async function bullhornFetch(
   rlRetries = RATE_LIMIT_RETRIES,
 ): Promise<unknown> {
   // Cache key excludes the rotating BhRestToken; same path+params => same read.
-  const cacheKey = `fetch:${path}:${JSON.stringify(
+  // Prefixed with the firm context so one tenant's cached read can never be
+  // served to another.
+  const cacheKey = `${currentFirmContextId() ?? "no-firm"}:fetch:${path}:${JSON.stringify(
     Object.entries(params).sort(([a], [b]) => a.localeCompare(b)),
   )}`;
   const cached = cacheGet<unknown>(cacheKey);
@@ -163,7 +166,9 @@ const UI_LINKABLE_ENTITIES = new Set<string>([
 
 // Cache the swimlane-derived host keyed by the restUrl it was derived from, so a
 // cluster migration/failover that changes restUrl on re-auth recomputes the host.
-let memoDerivedUiBase: { restUrl: string; base: string | null } | undefined;
+// Keyed by restUrl (a Map) so multiple firms on different swimlanes don't thrash
+// a single shared memo.
+const memoDerivedUiBase = new Map<string, string | null>();
 
 /**
  * Resolves the Bullhorn UI base URL used to build record deep links. Prefers an
@@ -181,7 +186,8 @@ async function resolveUiBaseUrl(): Promise<string | null> {
   } catch {
     return null;
   }
-  if (memoDerivedUiBase?.restUrl === restUrl) return memoDerivedUiBase.base;
+  const memo = memoDerivedUiBase.get(restUrl);
+  if (memo !== undefined) return memo;
   let base: string | null = null;
   try {
     const host = new URL(restUrl).hostname;
@@ -190,7 +196,7 @@ async function resolveUiBaseUrl(): Promise<string | null> {
   } catch {
     base = null;
   }
-  memoDerivedUiBase = { restUrl, base };
+  memoDerivedUiBase.set(restUrl, base);
   return base;
 }
 
@@ -414,7 +420,7 @@ async function searchEntity(
 
   // Cache the raw Bullhorn JSON (post-processing below mutates a fresh clone each
   // call, so cached entries stay pristine). Key excludes the rotating BhRestToken.
-  const cacheKey = `search:${entity}:${query}:${fields}:${count}:${start}`;
+  const cacheKey = `${currentFirmContextId() ?? "no-firm"}:search:${entity}:${query}:${fields}:${count}:${start}`;
   let raw = cacheGet<unknown>(cacheKey);
   if (raw === undefined) {
     const session = await getSession();
@@ -2214,7 +2220,21 @@ export async function countEntity(args: {
     };
   }
 
-  const groupBy = args.groupBy.trim();
+  let groupBy = args.groupBy.trim();
+  // Semantic alias: `internalDepartment` resolves to THIS firm's Internal
+  // Department field (Myticas -> correlatedCustomText1 on JobOrder/Placement,
+  // customText1 on Opportunity, etc.) so callers can group by department without
+  // knowing the per-firm opaque custom-field name.
+  if (groupBy === "internalDepartment") {
+    const resolved = await resolveDeptField(currentFirmContextId(), entry.canonical);
+    if (!resolved) {
+      throw new Error(
+        `No "Internal Department" field is configured for ${entry.canonical} on this firm. ` +
+          `Run config discovery, or pass the explicit custom field name as groupBy.`,
+      );
+    }
+    groupBy = resolved;
+  }
   if (!GROUP_FIELD_NAME_RE.test(groupBy)) {
     throw new Error(
       `Invalid groupBy field "${args.groupBy}". Use a single field name, e.g. "correlatedCustomText1".`,

@@ -16,6 +16,8 @@
  *   "otherOrUnmapped" so a new department never silently disappears.
  */
 import { countEntity, listPlacements, ACTIVE_OPPS_DEFINITION } from "./bullhorn-client.js";
+import { currentFirmContextId } from "./bullhorn-auth.js";
+import { resolveDeptField } from "./firm-config.js";
 
 /** Configured Internal Departments (office/branch) for this instance. */
 export const DEPARTMENTS = [
@@ -230,10 +232,14 @@ function resolveRange(args: { year?: number; startDate?: string; endDate?: strin
 /** 1. Staffing Scorecard — placements (by type), open jobs, active pipeline by department. */
 export async function staffingScorecard(args: { year?: number }): Promise<unknown> {
   const range = resolveRange({ year: args.year });
+  const firmId = currentFirmContextId();
+  // Resolve the per-firm Internal Department field (Myticas -> identical literals).
+  const jobDeptField = (await resolveDeptField(firmId, "JobOrder")) ?? "correlatedCustomText1";
+  const oppDeptField = (await resolveDeptField(firmId, "Opportunity")) ?? "customText1";
   const [placements, openJobs, opps] = await Promise.all([
     fetchAllPlacements({ dateAddedStart: range.startStr, dateAddedEnd: range.endStr }),
-    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, "correlatedCustomText1"),
-    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, "customText1"),
+    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, jobDeptField),
+    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, oppDeptField),
   ]);
 
   const agg: Record<
@@ -391,8 +397,9 @@ export async function placementsReport(args: {
 
 /** 3. Open Jobs / Demand Report — current open requisitions by department and employment type. */
 export async function openJobsReport(): Promise<unknown> {
+  const jobDeptField = (await resolveDeptField(currentFirmContextId(), "JobOrder")) ?? "correlatedCustomText1";
   const [byDept, byType] = await Promise.all([
-    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, "correlatedCustomText1"),
+    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, jobDeptField),
     groupedCount("JobOrder", OPEN_JOBS_QUERY, "employmentType", ["Contract", "Contract to Hire", "Direct Hire"]),
   ]);
   const rows = DEPARTMENTS.map((d) => ({ department: d, openJobs: byDept.byDept[d] })).sort(
@@ -415,8 +422,9 @@ export async function openJobsReport(): Promise<unknown> {
 
 /** 4. Sales Pipeline Report — active opportunities by department and stage. */
 export async function salesPipelineReport(): Promise<unknown> {
+  const oppDeptField = (await resolveDeptField(currentFirmContextId(), "Opportunity")) ?? "customText1";
   const [byDept, byStage] = await Promise.all([
-    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, "customText1"),
+    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, oppDeptField),
     groupedCount("Opportunity", ACTIVE_OPPS_QUERY, "status"),
   ]);
   const rows = DEPARTMENTS.map((d) => ({ department: d, activeOpportunities: byDept.byDept[d] })).sort(
