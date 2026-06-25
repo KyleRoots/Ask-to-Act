@@ -23,7 +23,7 @@ vi.mock("@clerk/express", () => ({
 }));
 
 const emailMock = vi.hoisted(() => ({
-  sendSupportEmail: vi.fn(async () => undefined),
+  sendSupportEmail: vi.fn(async (_arg: unknown) => undefined),
 }));
 
 vi.mock("../lib/emailService.js", () => ({

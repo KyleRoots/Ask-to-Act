@@ -3712,7 +3712,7 @@ export async function uploadFileToRecord(
 ): Promise<{ fileId: number; entityType: string; entityId: number }> {
   const entry = resolveEntity(args.entityType);
   const bytes = decodeFileBase64(args.fileContentBase64, "File");
-  const blob = new Blob([bytes], {
+  const blob = new Blob([new Uint8Array(bytes)], {
     type: args.contentType ?? "application/octet-stream",
   });
   const form = new FormData();
@@ -3755,7 +3755,7 @@ export async function createCandidateFromResume(
   // 1. Parse (non-persisting). Returns { candidate, skillList, ... }.
   // Bullhorn's parseToCandidate endpoint requires multipart/form-data — sending
   // raw binary with application/octet-stream returns a 500 "Bad File Uploaded".
-  const parseBlob = new Blob([bytes], {
+  const parseBlob = new Blob([new Uint8Array(bytes)], {
     type: args.contentType ?? "application/octet-stream",
   });
   const parseForm = new FormData();
