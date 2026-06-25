@@ -239,8 +239,45 @@ describe("Step 6 — POST /api/users (first admin)", () => {
     const res = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
-      .send({ name: "Ghost", firmId: `${PREFIX}-no-such-firm`, role: "recruiter" });
+      .send({
+        name: "Ghost",
+        email: `ghost.${PREFIX}@example.com`,
+        firmId: `${PREFIX}-no-such-firm`,
+        role: "recruiter",
+      });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects user creation with no email (Clerk identity bridge needs it)", async () => {
+    const res = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ name: `${PREFIX} NoEmail`, firmId: createdFirmId, role: "recruiter" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/email is required/i);
+  });
+
+  it("rejects user creation with a malformed email", async () => {
+    const res = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({ name: `${PREFIX} BadEmail`, email: "not-an-email", firmId: createdFirmId, role: "recruiter" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/valid email/i);
+  });
+
+  it("rejects a duplicate email with 409", async () => {
+    const res = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${SERVICE_TOKEN}`)
+      .send({
+        name: `${PREFIX} Dupe`,
+        email: `admin.${PREFIX}@example.com`,
+        firmId: createdFirmId,
+        role: "recruiter",
+      });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already exists/i);
   });
 });
 

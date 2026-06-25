@@ -90,13 +90,25 @@ function isAllowedOrigin(origin: string): boolean {
     return false;
   }
   if (hostname === "localhost" || hostname === "127.0.0.1") return true;
-  return (
-    hostname === "asktoact.ai" ||
-    hostname.endsWith(".asktoact.ai") ||
-    hostname.endsWith(".replit.dev") ||
-    hostname.endsWith(".replit.app") ||
-    hostname.endsWith(".repl.co")
-  );
+  // First-party production origins (custom domain in all its forms).
+  if (hostname === "asktoact.ai" || hostname.endsWith(".asktoact.ai")) {
+    return true;
+  }
+  // Replit-hosted origins (*.replit.dev / *.replit.app / *.repl.co) are trusted
+  // ONLY outside production. In production every first-party SPA (portal/admin)
+  // is served same-origin under connect.asktoact.ai via path routing, so no
+  // Replit origin is a legitimate cross-origin caller — and allowing the broad
+  // *.replit.app / *.repl.co would let ANY Replit-deployed app make credentialed
+  // cross-origin reads against a logged-in user. Extra prod origins, if ever
+  // needed, go through the ALLOWED_ORIGINS env allowlist above.
+  if (process.env.NODE_ENV !== "production") {
+    return (
+      hostname.endsWith(".replit.dev") ||
+      hostname.endsWith(".replit.app") ||
+      hostname.endsWith(".repl.co")
+    );
+  }
+  return false;
 }
 
 app.use(

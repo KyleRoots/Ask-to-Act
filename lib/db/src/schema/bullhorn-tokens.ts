@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { firmsTable } from "./firms";
 
 /**
  * Per-firm Bullhorn service connection. One row per customer firm, keyed by
@@ -22,7 +23,9 @@ export const bullhornTokensTable = pgTable(
   {
     id: text("id").primaryKey(),
     refreshToken: text("refresh_token").notNull(),
-    firmId: text("firm_id"),
+    firmId: text("firm_id").references(() => firmsTable.id, {
+      onDelete: "cascade",
+    }),
     oauthUrl: text("oauth_url"),
     restUrl: text("rest_url"),
     loginUrl: text("login_url"),

@@ -187,7 +187,7 @@ export const api = {
   listUsers: (firmId: string) =>
     apiFetch<{ data: UserRow[] }>(`/firms/${firmId}/users`).then((r) => r.data),
 
-  createUser: (body: { name: string; email?: string; firmId: string; role?: string }) =>
+  createUser: (body: { name: string; email: string; firmId: string; role?: string }) =>
     apiFetch<{
       id: string;
       name: string;

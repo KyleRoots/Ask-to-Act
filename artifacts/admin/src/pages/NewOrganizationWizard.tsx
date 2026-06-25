@@ -633,8 +633,10 @@ function AdminStep({
     onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
   const createMutation = useMutation({
-    mutationFn: () => api.createUser({ name: name.trim(), email: email.trim() || undefined, firmId, role: "admin" }),
+    mutationFn: () => api.createUser({ name: name.trim(), email: email.trim(), firmId, role: "admin" }),
     onSuccess: (data) => setCreated({ name: data.name, email: data.email, enrollUrl: data.enrollUrl }),
   });
 
@@ -695,7 +697,7 @@ function AdminStep({
       ) : (
         <form
           className="space-y-4 mb-6"
-          onSubmit={(e) => { e.preventDefault(); if (name.trim()) createMutation.mutate(); }}
+          onSubmit={(e) => { e.preventDefault(); if (name.trim() && emailValid) createMutation.mutate(); }}
         >
           <div>
             <Label>Admin name *</Label>
@@ -711,8 +713,8 @@ function AdminStep({
           </div>
           <div>
             <Label>
-              Email{" "}
-              <span style={{ color: "#3A4460", textTransform: "none", fontWeight: 400 }}>(sends an invite if provided)</span>
+              Email *{" "}
+              <span style={{ color: "#3A4460", textTransform: "none", fontWeight: 400 }}>(used to sign in; sends an invite)</span>
             </Label>
             <input
               type="email"
@@ -727,7 +729,7 @@ function AdminStep({
           </div>
           {createMutation.isError && <ErrorNote message={(createMutation.error as Error).message} />}
           <div className="flex justify-end">
-            <PrimaryButton type="submit" disabled={!name.trim() || createMutation.isPending}>
+            <PrimaryButton type="submit" disabled={!name.trim() || !emailValid || createMutation.isPending}>
               {createMutation.isPending ? "Creating…" : "Create admin"}
             </PrimaryButton>
           </div>

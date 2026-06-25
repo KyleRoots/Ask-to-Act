@@ -8,7 +8,7 @@ export const usersTable = pgTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    email: text("email").unique(),
+    email: text("email").notNull().unique(),
     apiKey: text("api_key").notNull().unique(),
     firmId: text("firm_id").references(() => firmsTable.id, { onDelete: "set null" }),
     role: text("role").notNull().default("recruiter"),

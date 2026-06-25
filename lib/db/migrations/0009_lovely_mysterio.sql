@@ -1,0 +1,3 @@
+ALTER TABLE "users" ALTER COLUMN "email" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "bullhorn_tokens" ADD CONSTRAINT "bullhorn_tokens_firm_id_firms_id_fk" FOREIGN KEY ("firm_id") REFERENCES "public"."firms"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "firm_config" ADD CONSTRAINT "firm_config_firm_id_firms_id_fk" FOREIGN KEY ("firm_id") REFERENCES "public"."firms"("id") ON DELETE cascade ON UPDATE no action;

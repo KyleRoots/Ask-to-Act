@@ -1,6 +1,7 @@
 import { pgTable, text, jsonb, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { firmsTable } from "./firms";
 
 /**
  * Per-firm Bullhorn custom-field configuration, discovered from that firm's own
@@ -25,7 +26,9 @@ import { z } from "zod/v4";
  * }
  */
 export const firmConfigTable = pgTable("firm_config", {
-  firmId: text("firm_id").primaryKey(),
+  firmId: text("firm_id")
+    .primaryKey()
+    .references(() => firmsTable.id, { onDelete: "cascade" }),
   fieldMap: jsonb("field_map").notNull(),
   discoveredAt: timestamp("discovered_at"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

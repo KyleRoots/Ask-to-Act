@@ -19,7 +19,9 @@ const router: IRouter = Router();
 /**
  * POST /api/users
  * Admin-only: creates a recruiter user and returns their API key (shown once).
- * Body: { name: string, email?: string }
+ * Body: { name: string, email: string }
+ * Email is required and must be unique — the Clerk identity bridge matches portal
+ * logins by email, so a user without one can never sign in.
  * After creation, the user enrolls their Bullhorn account at the returned enrollUrl.
  */
 router.post("/users", bearerAuth, requireService, async (req: Request, res: Response) => {
@@ -32,6 +34,25 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  if (!email || typeof email !== "string" || email.trim().length === 0) {
+    res.status(400).json({ error: "email is required" });
+    return;
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    res.status(400).json({ error: "email must be a valid email address" });
+    return;
+  }
+  const [existingEmail] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.email, normalizedEmail))
+    .limit(1);
+  if (existingEmail) {
+    res.status(409).json({ error: `A user with email '${normalizedEmail}' already exists` });
     return;
   }
 
@@ -81,7 +102,7 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
     await db.insert(usersTable).values({
       id,
       name: name.trim(),
-      email: email?.trim().toLowerCase() ?? null,
+      email: normalizedEmail,
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
@@ -92,7 +113,7 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
     res.status(201).json({
       id,
       name: name.trim(),
-      email: email?.trim().toLowerCase() ?? null,
+      email: normalizedEmail,
       apiKey,
       firmId: firmId ?? null,
       role: assignedRole,
@@ -103,6 +124,17 @@ router.post("/users", bearerAuth, requireService, async (req: Request, res: Resp
         "The enrollment link expires in 7 days; use POST /api/users/:id/invite to issue a new one.",
     });
   } catch (err) {
+    // Race-safe duplicate handling: two concurrent creates can both pass the
+    // pre-check above, so the DB unique constraint is the final arbiter.
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code?: string }).code === "23505"
+    ) {
+      res.status(409).json({ error: `A user with email '${normalizedEmail}' already exists` });
+      return;
+    }
     logger.error({ err }, "Failed to create user");
     res.status(500).json({ error: "Failed to create user" });
   }

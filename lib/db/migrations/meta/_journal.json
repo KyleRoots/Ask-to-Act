@@ -64,6 +64,13 @@
       "when": 1782410240581,
       "tag": "0008_old_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782411359728,
+      "tag": "0009_lovely_mysterio",
+      "breakpoints": true
     }
   ]
 }
