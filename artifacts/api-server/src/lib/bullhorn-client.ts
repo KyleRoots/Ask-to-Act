@@ -3313,6 +3313,136 @@ export async function createTask(
   return { taskId, subject: args.subject };
 }
 
+/**
+ * "Notify" specific Bullhorn users about something (e.g. a new sendout or
+ * placement) by assigning them a Task + optional reminder.
+ *
+ * WHY a Task: Bullhorn's in-app notification feed (the bell) is powered by a
+ * private internal API (`UserMessage` / `bhInternalApi`) that Bullhorn does NOT
+ * expose to ANY API integration — the live API returns 403 "feature not
+ * enabled". The genuine, supported way to push an actionable alert to specific
+ * users via the API is a Task on their list. The first user becomes the task
+ * owner and the rest are added as `secondaryOwners` (to-many association), so it
+ * lands on every named user's task list. We never silently fake the bell feed.
+ */
+export async function notifyUsers(
+  session: BullhornWriteSession,
+  args: {
+    userIds: number[];
+    message: string;
+    details?: string;
+    dueDate?: string;
+    reminderMinutesBefore?: number;
+    type?: string;
+    priority?: number;
+    candidateId?: number;
+    jobOrderId?: number;
+    clientContactId?: number;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{
+  taskId: number;
+  subject: string;
+  notifiedUsers: Array<{ id: number; name?: string }>;
+  secondaryOwnersAdded: number[];
+  warning?: string;
+  mechanism: string;
+}> {
+  const ids = Array.from(new Set(args.userIds)).filter(
+    (n) => Number.isInteger(n) && n > 0,
+  );
+  if (ids.length === 0) {
+    throw new BullhornFieldValidationError(
+      "notify_users requires at least one valid Bullhorn user ID in userIds.",
+    );
+  }
+
+  // Validate the targets are real, active users — fail loudly rather than
+  // silently assigning to a deleted/nonexistent user. Query the specific IDs
+  // (not a capped directory page) so this stays correct for large firms.
+  const lookup = await queryEntity(
+    "CorporateUser",
+    `id IN (${ids.join(",")}) AND isDeleted=false`,
+    "id,name",
+    ids.length,
+    0,
+    "id",
+  );
+  const rows = (lookup as { data?: Array<Record<string, unknown>> }).data ?? [];
+  const byId = new Map<number, Record<string, unknown>>();
+  for (const u of rows) {
+    if (typeof u.id === "number") byId.set(u.id, u);
+  }
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length > 0) {
+    throw new BullhornFieldValidationError(
+      `These userIds are not active Bullhorn users: ${missing.join(", ")}. ` +
+        `Use find_users to look up the correct IDs.`,
+    );
+  }
+  const notifiedUsers = ids.map((id) => ({
+    id,
+    name: (byId.get(id)?.name as string | undefined) ?? undefined,
+  }));
+
+  const [ownerId, ...secondaryIds] = ids;
+  const body = compact({
+    subject: args.message,
+    description: args.details,
+    dateBegin: args.dueDate ? toEpochMillis(args.dueDate, "dueDate") : Date.now(),
+    notificationMinutes:
+      typeof args.reminderMinutesBefore === "number"
+        ? args.reminderMinutesBefore
+        : undefined,
+    type: args.type,
+    priority: args.priority,
+    owner: assoc(ownerId),
+    candidate: assoc(args.candidateId),
+    jobOrder: assoc(args.jobOrderId),
+    clientContact: assoc(args.clientContactId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Task", body, { mode: "create" });
+  const taskId = await createEntityRecord(session, "Task", body);
+
+  // Additional recipients become secondaryOwners via the to-many association
+  // endpoint (bodyless POST), so the task appears on every named user's list.
+  // Non-atomic: the Task already exists, so on association failure we return a
+  // partial result (with taskId + a warning) rather than throwing and hiding
+  // the fact that the task was created.
+  let secondaryOwnersAdded: number[] = [];
+  let warning: string | undefined;
+  if (secondaryIds.length > 0) {
+    try {
+      await writeFetch(
+        session,
+        "POST",
+        `entity/Task/${taskId}/secondaryOwners/${secondaryIds.join(",")}`,
+        undefined,
+      );
+      secondaryOwnersAdded = secondaryIds;
+    } catch (err) {
+      warning =
+        `Task ${taskId} was created and assigned to user ${ownerId}, but adding the ` +
+        `additional recipients (${secondaryIds.join(", ")}) failed: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `Re-run notify_users for those users, or add them as secondary owners in Bullhorn.`;
+    }
+  }
+
+  return {
+    taskId,
+    subject: args.message,
+    notifiedUsers,
+    secondaryOwnersAdded,
+    ...(warning ? { warning } : {}),
+    mechanism:
+      "Bullhorn Task assigned to the named users (owner + secondaryOwners)" +
+      (typeof args.reminderMinutesBefore === "number" ? " with a reminder" : "") +
+      ". Bullhorn's in-app notification feed is not API-accessible; this Task is the supported alert mechanism.",
+  };
+}
+
 export async function createAppointment(
   session: BullhornWriteSession,
   args: {

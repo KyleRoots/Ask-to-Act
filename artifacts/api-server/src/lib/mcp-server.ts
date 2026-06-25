@@ -43,6 +43,7 @@ import {
   createContact,
   updateContact,
   createTask,
+  notifyUsers,
   createAppointment,
   createTearsheet,
   addCandidatesToTearsheet,
@@ -1326,6 +1327,34 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       runWriteTool("create_appointment", { subject }, async () => {
         const session = await resolveWriteSession();
         return createAppointment(session, { subject, dateBegin, dateEnd, location, type, description, ownerId, candidateId, jobOrderId, clientContactId, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "notify_users",
+    "WRITE: Notifies specific Bullhorn users about something (e.g. a new sendout, placement, or submission) by assigning them an actionable Task + optional reminder on their Bullhorn task list. " +
+      "IMPORTANT — Bullhorn's in-app notification feed (the bell icon) is powered by a private internal API that Bullhorn does NOT expose to ANY API integration, so it cannot be written to. This tool delivers the genuine, supported equivalent: a Task assigned to each named user (the first becomes owner, the rest secondaryOwners) so it appears on every recipient's task list, optionally with a reminder. Be transparent with the user that this creates a Bullhorn Task/reminder, NOT a bell notification. " +
+      "Provide the Bullhorn user IDs in `userIds` (use find_users to look them up). Put the alert text in `message`, reference the triggering record in the message/details, and link it via the optional candidate/job/contact IDs. ALWAYS confirm the recipients and message with the user first.",
+    {
+      userIds: z
+        .array(z.number().int().positive())
+        .min(1)
+        .describe("Bullhorn user IDs to notify (look up with find_users). The first is set as the task owner; the rest as secondaryOwners — all see it on their task list."),
+      message: z.string().min(1).describe("The notification text / task subject (e.g. 'New Sendout #789 created for Jane Doe \u2192 Acme Job #456')."),
+      details: z.string().optional().describe("Optional longer description/body for the task."),
+      dueDate: z.string().optional().describe("When the task is due / reminder anchor. 'YYYY-MM-DD' or ISO 8601 (UTC if no zone). Defaults to now (appears on their list immediately)."),
+      reminderMinutesBefore: z.number().int().nonnegative().optional().describe("Minutes before dueDate to fire a Bullhorn reminder (notificationMinutes)."),
+      type: z.string().optional().describe("Task type (see list_field_options(Task, type))."),
+      priority: z.number().int().optional().describe("Numeric priority (instance-specific)."),
+      candidateId: z.number().int().positive().optional().describe("Optional candidate to link the task to."),
+      jobOrderId: z.number().int().positive().optional().describe("Optional job order to link the task to."),
+      clientContactId: z.number().int().positive().optional().describe("Optional client contact to link the task to."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ userIds, message, details, dueDate, reminderMinutesBefore, type, priority, candidateId, jobOrderId, clientContactId, additionalFields }) =>
+      runWriteTool("notify_users", { userIds, message }, async () => {
+        const session = await resolveWriteSession();
+        return notifyUsers(session, { userIds, message, details, dueDate, reminderMinutesBefore, type, priority, candidateId, jobOrderId, clientContactId, additionalFields });
       }),
   );
 
