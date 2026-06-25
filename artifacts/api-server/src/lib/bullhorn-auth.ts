@@ -905,7 +905,12 @@ export async function getUserSession(userId: string): Promise<Session> {
   }
 
   const work = (async (): Promise<Session> => {
-    const { oauthUrl, loginUrl } = await discoverEndpoints();
+    // Use the firm's own stored endpoints (captured at connect time) so a user
+    // at a firm on a different Bullhorn data-center gets the right OAuth/login
+    // URLs, not Myticas's. Falls back to discoverEndpoints() only when no firm
+    // row exists (shouldn't happen for an enrolled user, but degrades safely).
+    const firmTokenRow = user.firmId ? await loadTokenRow(user.firmId) : null;
+    const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
     try {
       const tokens = await fetchTokenWithRefresh(oauthUrl, decryptToken(user.refreshToken!));
       const loginData = await login(tokens.access_token, loginUrl);
@@ -1009,7 +1014,17 @@ export async function enrollUserHeadless(
   bhUsername: string,
   bhPassword: string,
 ): Promise<void> {
-  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  // Look up the user's firm so we can use the firm's stored endpoints rather
+  // than the service-account's data-center (which may differ for a second tenant).
+  const userRows = await db
+    .select({ firmId: usersTable.firmId })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  const firmId = userRows[0]?.firmId ?? null;
+  const firmTokenRow = firmId ? await loadTokenRow(firmId) : null;
+  const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
+
   const code = await fetchAuthCodeHeadlessForUser(oauthUrl, bhUsername, bhPassword);
   const tokens = await exchangeCodeForToken(oauthUrl, code);
   const loginData = await login(tokens.access_token, loginUrl);
@@ -1024,7 +1039,17 @@ export async function enrollUserHeadless(
  * (kept for compatibility; headless enrollment is now preferred via enrollUserHeadless).
  */
 export async function completeUserEnrollment(userId: string, code: string): Promise<void> {
-  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  // Use the user's firm's stored endpoints so a second tenant on a different
+  // Bullhorn data-center gets the correct token exchange and login URLs.
+  const userRows = await db
+    .select({ firmId: usersTable.firmId })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  const firmId = userRows[0]?.firmId ?? null;
+  const firmTokenRow = firmId ? await loadTokenRow(firmId) : null;
+  const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
+
   const tokens = await exchangeCodeForToken(oauthUrl, code);
   const loginData = await login(tokens.access_token, loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
