@@ -37,3 +37,4 @@
 - [Firm lifecycle status](firm-lifecycle-status.md) — manual suspend/archive (separate from Stripe); runtime cutoff lives in requireBullhornFirm (fronts /mcp + /v1), fail-closed; archived also hidden from default firm list.
 - [Onboarding enrolled signal](onboarding-state-signal.md) — user.refreshToken is the SOLE "onboarded" signal (enroll page + GET /api/users enrolled flag); any first-time reset must null it (+ invalidateUserSession, rotate apiKey for a fresh connector URL).
 - [Notify users = Task, not bell](bullhorn-notify-users.md) — bell feed (UserMessage/bhInternalApi) is 403-closed to ALL integrations; alert users via Task owner+secondaryOwners (bodyless to-many assoc) + notificationMinutes; never fake the bell.
+- [Bullhorn record deep links](bullhorn-record-deeplinks.md) — bullhornUrl already injected per record (enrichWithProfileUrls); links don't RENDER unless MCP server `instructions` tell the AI to hyperlink it. Data presence ≠ clickable.

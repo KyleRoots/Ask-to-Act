@@ -194,11 +194,29 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
   return out;
 }
 
+// Read by the AI client at connect time (MCP `initialize` → server `instructions`).
+// Every linkable Bullhorn record returned by a tool already carries a `bullhornUrl`
+// deep link; without this guidance clients render the raw Bullhorn ID as plain text
+// instead of a clickable link. Keep it short and presentation-focused.
+const SERVER_INSTRUCTIONS = [
+  "AskToAct connects you to this firm's Bullhorn ATS (read and write tools).",
+  "",
+  "PRESENTING RECORDS — always make Bullhorn records clickable:",
+  "- Every linkable record in a tool result includes a `bullhornUrl` field: a deep link that opens that exact record in Bullhorn.",
+  "- When you show records to the user, hyperlink each record using Markdown — link the record's name or its Bullhorn ID to its `bullhornUrl`.",
+  '  Examples: `[Acme Corp](<bullhornUrl>)` or `[53861](<bullhornUrl>)`.',
+  "- In a table, make the Company / Candidate / Job / Contact / Bullhorn ID cell itself the link. Do not add a separate raw-URL column and do not print the raw URL as plain text.",
+  "- If a record has no `bullhornUrl`, show it without a link (do not invent one).",
+].join("\n");
+
 export function createMcpServer(caller?: CallerIdentity): McpServer {
-  const server = new McpServer({
-    name: "bullhorn-mcp",
-    version: "1.0.0",
-  });
+  const server = new McpServer(
+    {
+      name: "bullhorn-mcp",
+      version: "1.0.0",
+    },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   const READ_ONLY_ANNOTATIONS: ToolAnnotations = {
     readOnlyHint: true,
