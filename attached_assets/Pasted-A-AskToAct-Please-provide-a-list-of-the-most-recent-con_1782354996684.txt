@@ -1,0 +1,121 @@
+A
+AskToAct
+ Please provide a list of the most recent contact records added in the last 60 days.
+
+I’ll pull ClientContact records added from April 25, 2026 through today, sorted newest first, and show the returned page with Bullhorn links.
+
+Looked for available tools
+Called tool
+
+Bullhorn has 1,204 ClientContact records added in the last 60 days, from April 25, 2026 to June 24, 2026. Here are the 50 most recent records returned, sorted newest first.
+
+Added	Contact	Company	Title	Status	Owner	Department
+Jun 24	Joseph Arboleras	FANUC America	Director, Software & Validation	New Contact	Jasmine Harvey	
+Jun 24	Joseph Baldiga	FANUC America	National Account Manager, CNC Education & Workforce Development	New Contact	Jasmine Harvey	
+Jun 24	Default Contact 10083003 Canada Inc.	10083003 Canada Inc.		Archive	Nick Theodossiou	
+Jun 24	Default Contact Coveo	Coveo		Archive	Anita Barker	
+Jun 24	Elizabeth Grassel	Path Robotics	HR Business Partner Talent Acquisition Lead	New Contact	Jasmine Harvey	
+Jun 24	Roshan Talagala	Agile One - Jacobs Engineering		Active	Tarra Dziuman	STS-STSI
+Jun 24	Andrew Shumaker	Magna Seating	Assistant General Manager	Active	Keith Browne	STS-STSI
+Jun 24	Derek McClean	Cognex	Regional Sales Manager	New Contact	Jasmine Harvey	
+Jun 24	Allan Gao	Cognex	Senior Manager, Operation	New Contact	Jasmine Harvey	
+Jun 24	Patrick McMahon	Cognex	Senior Manager, Recruitment	New Contact	Jasmine Harvey	
+Jun 24	Michael Moed	Cognex	Senior Director, Engineering, Platform Software	New Contact	Jasmine Harvey	
+Jun 24	Michael Bowdoin	Cognex	Vice President, Operations	New Contact	Jasmine Harvey	
+Jun 24	Paul Klinker	Cognex	Vice President, Sales (Americas)	New Contact	Jasmine Harvey	
+Jun 24	Mike Wescott	Gentherm Inc.	Test Engineer	Active	Keith Browne	STS-STSI
+Jun 23	Accounts Payable Revere	Revere Plastics Systems, LLC	Accounts Payable	Active	Keith Browne	STS-STSI
+Jun 23	Andrew Childs	Cognex	Senior Manager, Cloud Solutions Architecture	New Contact	Jasmine Harvey	
+Jun 23	Chris Lambach	Cognex	Sight Director, Software Engineering	New Contact	Jasmine Harvey	
+Jun 23	Dwayne Nielsen	Convergix Automation Solutions	Director, Operations, Digital Services	New Contact	Jasmine Harvey	
+Jun 23	Mark Fulmer	Convergix Automation Solutions	Director, Operations	New Contact	Jasmine Harvey	
+Jun 23	German Guerrero	Convergix Automation Solutions	Director, Business Development	New Contact	Jasmine Harvey	
+Jun 23	Kristen Goodemoot	Revere Plastics Systems, LLC	Sr. Director of Human Resources	Active	Keith Browne	STS-STSI
+Jun 22	Srikar Reddy	S2 global solutions		New Lead	Dean Theodossiou	MYT-Chicago
+Jun 22	Default Contact S2 global solutions	S2 global solutions		Archive	Dean Theodossiou	
+Jun 22	Michelle Helton	Agile One - Jacobs Engineering		Active	Rachel Mann	STS-STSI
+Jun 22	Accounts Payable Veza	Veza Manufacturing		Active	Veronica Connolly	STS-STSI
+Jun 22	Tracy Raven Engineering	Raven Engineering		Active	Veronica Connolly	STS-STSI
+Jun 22	Michele VanBiesbrouck	Magna Seating		Active	Veronica Connolly	STS-STSI
+Jun 22	Jan Beska	Gentherm Inc.		Active	Veronica Connolly	STS-STSI
+Jun 22	Accounts Payable Gentherm	Gentherm Inc.		Active	Veronica Connolly	STS-STSI
+Jun 22	Accounts Payable DP Brown	DP Brown Technologies Group		Active	Veronica Connolly	STS-STSI
+Jun 22	Jessica Reichel-Hassall	Purolator Inc.		Active	Nick Theodossiou	MYT-Ottawa
+Jun 22	Default Contact 17021721 CANADA INC.	17021721 CANADA INC.		Archive	Nick Theodossiou	
+Jun 22	Default Contact ADK Integrated services Inc.	ADK Integrated services Inc.		Archive	Nick Theodossiou	
+Jun 22	Default Contact BDO Colombia	BDO Colombia		Archive	Nick Theodossiou	
+Jun 22	Eric Byers	Piaggio Fast Forward	Strategy & Quality Senior Manager, Operations	New Contact	Lisa Keirsted	
+Jun 22	Jason Dion	Piaggio Fast Forward	Senior Manager, Software Quality Assurance Engineering	New Contact	Lisa Keirsted	
+Jun 22	Kevin Johnston	Piaggio Fast Forward	Director, Dealer Development	New Contact	Lisa Keirsted	
+Jun 22	Joshua Marsh	Piaggio Fast Forward	American Director, Sales (North)	New Contact	Lisa Keirsted	
+Jun 22	Olivia Hagedorn	Piaggio Fast Forward	Manager, Electrical Engineering	New Contact	Lisa Keirsted	
+Jun 22	Meredith Wilson	Piaggio Fast Forward	Vice President, Marketing	New Contact	Lisa Keirsted	
+Jun 22	Anthony Pizzurro	Piaggio Fast Forward	Software Engineering & Manager	New Contact	Lisa Keirsted	
+Jun 22	Aliza Merchant	Piaggio Fast Forward	Senior Manager, People & Culture	New Contact	Lisa Keirsted	
+Jun 22	Richard Cote	Piaggio Fast Forward	Program Manager, Engineering	New Contact	Lisa Keirsted	
+Jun 22	Hailey Sanidad	Piaggio Fast Forward	Manager, Mechanical Engineering	New Contact	Lisa Keirsted	
+Jun 22	Arthur LaVita	Piaggio Fast Forward	Senior Director of Software Engineering	New Contact	Lisa Keirsted	
+Jun 22	Jerry Ding	Piaggio Fast Forward	Senior Manager, Design	New Contact	Lisa Keirsted	
+Jun 22	Sean Collins	Piaggio Fast Forward	Director, Video	New Contact	Lisa Keirsted	
+Jun 22	Dillon Delaney	Piaggio Fast Forward	Manager, Supply Chain	New Contact	Lisa Keirsted	
+Jun 22	Derek McColl	Piaggio Fast Forward	Director, Robotics Engineering	New Contact	Lisa Keirsted	
+Jun 22	Agatha Alfonso	Piaggio Fast Forward	Director, Information Technology	New Contact	Lisa Keirsted	
+
+This is the first page of results. The total matching set is much larger, so I returned the newest 50 rather than all 1,204 records.
+
+If 1,204 ClientContact records were added in the last 60 days, who predominantly owns most of them?
+
+I’ll use an exact grouped count rather than inferring from the 50-record sample, since the sample would be misleading for “most.”
+
+Looked for available tools
+Called tool
+
+The direct owner grouping field was rejected by Bullhorn, so I’m checking the available ClientContact field names and will use the correct owner field or a safe paged fallback.
+
+Calling tool
+
+Jasmine Harvey predominantly owns the ClientContact records added in the last 60 days.
+
+She owns 691 of the 1,204 records, which is about 57.4% of the total.
+
+For context:
+
+Owner	Records	Share
+Jasmine Harvey	691	57.4%
+Lisa Keirsted	270	22.4%
+Nick Theodossiou	25	2.1%
+All other owners combined	218	18.1%
+
+So the clear answer is Jasmine Harvey owns the majority of the recently added ClientContact records.
+
+Please provide a list of company records added in the past 60 days, filtered by the owner with the most records.
+
+I’ll filter company records added in the same 60-day window by the top owner identified above, Jasmine Harvey, then return the newest matching company records.
+
+Looked for available tools
+Called tool
+
+The direct company-owner filter returned zero, which suggests company ownership may use a different field than contact ownership. I’m checking the ClientCorporation fields before giving the final list.
+
+Called tool
+Thought for 40s
+
+Filtered by the owner with the most recent ClientContact records, Jasmine Harvey, there are 14 company records added in the past 60 days.
+
+Added	Company	Status	Phone	Website	Department
+Jun 2	Hollister	Active Account	(800) 323-4060	www.hollister.com	MYT-Chicago
+Jun 1	Fuchs	Active Account	+49 62138020	www.fuchs.com	MYT-Chicago
+May 29	Fulcrum GT	Active Account	(312) 212-8499	www.fulcrumgt.com	MYT-Chicago
+May 28	Life Fitness / Hammer Strength	Active Account	(847) 288-3300	www.lifefitness.com	MYT-Chicago
+May 21	Scribd	Active Account	(415) 896-9890	www.scribd.com	MYT-Chicago
+May 21	Infinite Roar	Active Account		www.infiniteroar.com	MYT-Chicago
+May 12	Nerdio	Active Account	(888) 531-0626	www.getnerdio.com	MYT-Chicago
+May 1	Early Warning	Active Account	(480) 483-4610	www.earlywarning.com	MYT-Chicago
+May 1	8th Light	Active Account	(877) 407-4154	www.8thlight.com	MYT-Chicago
+May 1	Tokio Marine Highland	Active Account	(312) 736-2351	www.tokiomarinehighland.com	MYT-Chicago
+May 1	NetSfere	Active Account	(224) 764-3400	www.netsfere.com	MYT-Chicago
+Apr 30	BILT	Active Account	(800) 517-2458	www.biltapp.com	MYT-Chicago
+Apr 30	Voyage Advisory	Active Account	(312) 869-8000	www.voyageadvisory.com	MYT-Chicago
+Apr 27	Sloan	Active Account	(847) 671-4300	www.sloan.com	MYT-Chicago
+
+All 14 are owned by Jasmine Harvey and fall under MYT-Chicago.
