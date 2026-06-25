@@ -1,0 +1,29 @@
+Find candidates near Ottawa, Ontario with SAP BASIS or SAP Payroll experience, open to contract work
+
+I’ll search Bullhorn for non-archived candidates around Ottawa/Ontario with SAP BASIS or SAP Payroll terms, then verify contract openness from candidate fields or résumé wording where available.
+
+Looked for available tools
+Called tool
+
+The first pass returned a very broad Ontario/Canada pool, including many Toronto/Mississauga results. I’m tightening it to Ottawa and nearby cities, then checking contract evidence on the strongest matches.
+
+Called tool
+
+The candidate records I checked do not have a populated employmentPreference field, so “open to contract” has to be inferred from role wording, application context, or résumé language, not a clean Bullhorn field.
+
+Called tool
+Calling tool
+Thought for 2m 23s
+
+Found the strongest Ottawa-area SAP BASIS / SAP Payroll candidates in Bullhorn. Important note: the candidate records I checked do not have a populated employmentPreference field, so “open to contract work” is inferred from titles, résumé wording, consultant language, or application context.
+
+Candidate	Location	Status	SAP match	Contract / consultant signal	Fit
+Juan-Carlos García-Garavito	Orleans, ON	Online Applicant	SAP BASIS, SAP Solution Manager, SAP HANA, SAP BTP, S/4HANA	Résumé uses SAP Technical Architect / Consultant language	Strong
+Vipin Gogineni	Ottawa, ON	Active	Senior SAP Basis Consultant	Applied to SAP Basis Analyst in Ottawa. Résumé includes prior contract employee experience	Strong
+Matthew Perry	Ottawa, ON	New Lead	SAP Basis / NetWeaver Consultant	Consultant title, 20+ years SAP Basis / NetWeaver	Strong
+Narender Talwar	Ottawa, ON	New Lead	SAP HR Payroll, SAP HCM, SuccessFactors ECP, Payroll Control Center	Senior SAP HCM Payroll Consultant title	Strong payroll match
+Sergey Ignatov	Ottawa, ON	New Lead	SAP HCM, SAP Payroll implementation	SAP Consultant / SAP Integration Consultant title	Good payroll/HCM match
+
+I would prioritize Juan-Carlos García-Garavito, Vipin Gogineni, Matthew Perry, and Narender Talwar first.
+
+I did not include candidates where the SAP match was weak, the record was clearly not local to Ottawa, or the candidate was already marked Placed.

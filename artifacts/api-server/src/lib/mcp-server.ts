@@ -986,7 +986,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "recruiter_leaderboard",
-    "PRE-BUILT REPORT (one fast call). Recruiter activity leaderboard: recruiters ranked by CONFIRMED placements (Approved/Completed/Ended) over a period, each with their job-submission count for the same period. Note: this v1 lists only recruiters who made at least one confirmed placement (submissions are shown for those recruiters); recruiters who submitted but have no confirmed placement are not listed.",
+    "PRE-BUILT REPORT (one fast call). Recruiter SUBMISSION-TO-PLACEMENT CONVERSION leaderboard over a period. For each recruiter, conversionRate = confirmed placements (Approved/Completed/Ended) credited to the candidate they SUBMITTED (JobSubmission.sendingUser) ÷ their own submissions in the period. Attribution is by the SUBMITTER, not the placement owner — those are frequently different people on this instance, which previously produced impossible >100% rates. Rates are capped at 100% (cappedAt100 flags placements whose submission predates the period); recruiters with fewer than 10 submissions are flagged lowVolume and listed after the reliable rows so a 1/1=100% fluke never tops the board. v1 lists only recruiters whose submissions produced at least one confirmed placement; unattributedPlacements counts confirmed placements with no submission sender.",
     {
       startDate: z.string().optional().describe("Start date YYYY-MM-DD (default: start of current year)."),
       endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),

@@ -45,3 +45,18 @@ reports.ts helpers and these exact definitions rather than re-deriving filters.
 Default current-year reports cap the end at "today" (not next-year Jan 1) so a YTD
 figure can never include a future-dated record. Past explicit years span the full
 calendar year.
+
+## Recruiter leaderboard = submission-to-placement conversion (locked)
+- Attribute a confirmed placement to the recruiter who SUBMITTED the candidate
+  (`placement.jobSubmission.sendingUser`), NOT the placement owner. Owner==submitter
+  only ~24% of the time, so owner-based numerators over a sendingUser denominator
+  produce impossible >100% rates. sendingUser populates ~100% of placements.
+- Denominator = that same recruiter's JobSubmission count in the period. Numerator and
+  denominator MUST be the same identity (submitter) and the SAME time window.
+- **Boundary trap:** placements are fetched via the /query path (date string → midnight,
+  exclusive `< end`) while submissions are counted via Lucene epoch `[startMs TO endMs]`
+  (endMs=now). If you pass day-only end strings, "today" is dropped from placements but
+  kept in submissions → rates artificially low. Fix = pass the placement bounds as ISO
+  timestamps of range.startMs/endMs so both cover the identical instant.
+- Rate is capped 0–100% (`cappedAt100` flag = placement from a pre-period submission);
+  rows with <10 submissions get `lowVolume` and are ranked AFTER reliable rows.

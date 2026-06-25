@@ -1,0 +1,32 @@
+Find candidates with 8+ years of Java and Spring Boot, senior-level, located in or near Chicago, IL
+
+I’ll search Bullhorn for senior Java/Spring Boot candidates around Chicago or Illinois, then verify years and seniority from candidate titles/resume snippets where possible.
+
+Looked for available tools
+Called tool
+
+I found 592 matching Bullhorn candidates before years verification. I’m checking the strongest Chicago-area matches for resume evidence of 8+ years plus Java/Spring Boot.
+
+Called tool
+Called tool
+
+Found 265 Bullhorn candidates matching the stricter search: Java + Spring Boot + senior/lead/staff/architect + 8+ years language + Chicago/Illinois location, excluding archived records.
+
+Here are the strongest verified matches I checked against resume snippets:
+
+Candidate	Location	Current / Listed Title	Resume-stated experience	Java / Spring Boot evidence	Fit
+KADAR PEER	Chicago, IL	AWS Solution Architect / Senior Lead Software Engineer	15.5+ years	Java/J2EE, Spring Boot, microservices, AWS/Azure	Very strong
+NIKHIL BABU	Chicago, IL	Senior Java Spring Boot Developer / Technical Lead	11+ years	Java Spring Boot developer, microservices, CI/CD	Very strong
+Venkat Chinta	Chicago, IL	Sr Java Full Stack Developer	11+ years	Java 11/17, Spring Boot, Spring Cloud, WebFlux, microservices	Very strong
+Mohammed Uddin	Chicago, IL	Full Stack Senior Java Developer	13+ years	Java, Spring Boot, Hibernate/JPA, REST APIs	Very strong
+Trevor Niemi	Chicago, IL	Senior Lead Application Developer	15+ years	Java Spring Boot, REST APIs, event-driven architecture	Very strong
+Grace Taylor	Chicago, IL	Staff Java Engineer	14+ years	Java 8/11/17, Spring Boot, REST, AWS, Kubernetes	Very strong
+Rojan Shrestha	Chicago, IL	Sr. Software Engineer	8+ years	Java/J2EE, Spring Boot, Spring MVC, Hibernate, REST	Strong
+Anthony Skrzypczak	Chicago, IL	Senior Software Engineer	13+ years	Java, Spring Boot, microservices, Angular	Very strong
+Thomas Zhang	Chicago, IL	Senior Full Stack Engineer	12 years	Java, Spring Boot, TypeScript, SQL, REST services	Strong
+Shanaz Fatima	Chicago, IL	Lead Software Engineer / Senior Java Developer	10+ years	Java, Spring Boot, Angular, React	Strong
+Greeshman Reddy Billa	Chicago, IL	Sr. Software Developer	8 years	Java + Spring Boot microservices, REST APIs	Strong
+
+I would prioritize KADAR PEER, NIKHIL BABU, Venkat Chinta, Mohammed Uddin, Trevor Niemi, Grace Taylor, and Anthony Skrzypczak first.
+
+I filtered out a few otherwise relevant matches because their resume snippets showed under 8 years, including Shahista Tazeen at 7 years, Parth Patel at 7+ years, and Kamal Madala at 6+ years.

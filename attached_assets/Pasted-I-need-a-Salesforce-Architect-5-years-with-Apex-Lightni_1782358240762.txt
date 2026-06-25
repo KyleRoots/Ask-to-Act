@@ -1,0 +1,27 @@
+I need a Salesforce Architect, 5+ years, with Apex, Lightning, and integration experience — anywhere in the US, remote is fine
+
+I’ll search Bullhorn for US candidates with Salesforce Architect experience plus Apex, Lightning, and integration terms, then verify the strongest matches with résumé snippets for 5+ years and remote/US suitability.
+
+Looked for available tools
+Called tool
+
+The initial search found 135 US-based Salesforce Architect-style matches with the required technical terms. I’m verifying the top records for explicit years of experience, Apex, Lightning/LWC, and integration evidence.
+
+Called tool
+Thought for 2m 29s
+
+Found 135 US-based Bullhorn candidates matching the core search: Salesforce Architect / Solution Architect + Apex + Lightning/LWC + integration/API experience + 5+ years, excluding archived records.
+
+Here are the strongest verified matches from this pass:
+
+Candidate	Location	Status	Experience	Key match evidence	Fit
+Gowthem Vell	Chicago, IL	Online Applicant	10+ years	Senior Salesforce Solution Architect, Apex, LWC, REST/SOAP APIs, MuleSoft, enterprise integrations	Very strong
+Aiden Roy	NJ	Online Applicant	10 years	Salesforce Solution Architect, Apex, LWC, REST/SOAP APIs, MuleSoft, remote delivery experience	Very strong
+Shabana Khan	New York, NY	Online Applicant	15+ years	Lead Salesforce Architect, Apex, LWC, API integrations, multi-cloud Salesforce architecture	Very strong
+Andrew Hamza	Rochester, NY	Online Applicant	10+ years	Salesforce Technical Architect, Apex, Lightning Web Components, REST/SOAP APIs, MuleSoft, event-driven integrations	Very strong
+Mo Tayyab	Middletown, NJ	Online Applicant	10+ years	Salesforce Solution Architect, Apex, LWC, REST/SOAP APIs, system integrations	Very strong
+Salimah Rehamani	TX	Online Applicant	11+ years	Salesforce Technical Architect, Apex, LWC, REST/SOAP APIs, MuleSoft, SAP ERP integrations, remote role listed	Very strong
+Hariram Jagadeesan	US	Online Applicant	10+ years Salesforce / 14+ years IT	Salesforce Architect, Apex, LWC, REST/SOAP, MuleSoft, Informatica integration patterns	Very strong
+Hamzeh Sandhu	Mount Kisco, NY	New Lead	9+ years	Strong Apex, LWC, REST/SOAP APIs, MuleSoft, enterprise integrations, though titled Senior Salesforce Developer	Strong technical fit
+
+I would prioritize Gowthem Vell, Aiden Roy, Shabana Khan, Andrew Hamza, Mo Tayyab, Salimah Rehamani, and Hariram Jagadeesan first.

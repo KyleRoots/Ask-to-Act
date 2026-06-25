@@ -34,6 +34,16 @@ const OPEN_JOBS_QUERY = "isOpen:true AND NOT status:Archive AND isDeleted:false"
 const ACTIVE_OPPS_QUERY = ACTIVE_OPPS_DEFINITION;
 const CONFIRMED_PLACEMENT_STATUSES = new Set(["Approved", "Completed", "Ended"]);
 
+/** Below this many submissions, a conversion rate is statistically volatile and flagged lowVolume. */
+const MIN_SUBMISSIONS_FOR_RELIABLE_RATE = 10;
+
+/** Locked definition for the submission-to-placement conversion metric. */
+const CONVERSION_DEFINITION =
+  "Per SUBMITTING recruiter (JobSubmission.sendingUser — the person who actually submitted the candidate, NOT the placement owner): " +
+  "conversionRate = confirmed placements credited to their submissions ÷ their submissions in the period. " +
+  "Bounded 0–100% (capped — a placement whose submission predates the period can otherwise exceed 100%, flagged cappedAt100). " +
+  `Recruiters with fewer than ${MIN_SUBMISSIONS_FOR_RELIABLE_RATE} submissions are flagged lowVolume because a tiny denominator makes the rate unreliable.`;
+
 const DEPT_DEFINITIONS = {
   openJobs: "isOpen:true AND NOT status:Archive AND isDeleted:false (includes on-hold/filled/placed; Archived AND soft-deleted excluded)",
   placementsMade: "Placement status Approved, Completed, or Ended (excludes Canceled, Archive, and pending Submitted; Placement search already excludes soft-deleted, so no isDeleted filter)",
@@ -53,12 +63,15 @@ type CountResult = {
   groupsComplete?: boolean;
 };
 
+type Person = { id: number; name?: string; firstName?: string; lastName?: string };
+
 type PlacementRow = {
   id: number;
   status?: string;
   employmentType?: string;
   correlatedCustomText1?: string;
-  owner?: { id: number; name?: string; firstName?: string; lastName?: string };
+  owner?: Person;
+  jobSubmission?: { id: number; sendingUser?: Person };
 };
 
 /** Run `fn` over `items` with bounded concurrency (keeps us under the REST rate limit). */
@@ -140,8 +153,10 @@ async function groupedCount(
 async function fetchAllPlacements(opts: {
   dateAddedStart?: string;
   dateAddedEnd?: string;
+  fields?: string;
 }): Promise<PlacementRow[]> {
-  const fields = "id,status,employmentType,correlatedCustomText1,owner(id,name,firstName,lastName)";
+  const fields =
+    opts.fields ?? "id,status,employmentType,correlatedCustomText1,owner(id,name,firstName,lastName)";
   const pageSize = 500;
   const all: PlacementRow[] = [];
   for (let page = 0, start = 0; page < 40; page++, start += pageSize) {
@@ -458,52 +473,106 @@ export async function jobAgingReport(): Promise<unknown> {
   };
 }
 
-/** 6. Recruiter Activity / Leaderboard — placements (delivery) and submissions (activity) per recruiter. */
+/**
+ * 6. Recruiter Submission-to-Placement Conversion Leaderboard.
+ *
+ * Conversion is credited to the recruiter who SUBMITTED the candidate
+ * (JobSubmission.sendingUser), NOT the placement owner. Those two are frequently
+ * different people on this instance (a sourcer submits; an account manager owns the
+ * resulting placement), which previously produced impossible rates (e.g. 7 placements
+ * over 1 submission = 700%). Anchoring both numerator and denominator on the submitter
+ * keeps every rate bounded and meaningful.
+ */
 export async function recruiterLeaderboard(args: {
   startDate?: string;
   endDate?: string;
 }): Promise<unknown> {
   const range = resolveRange({ startDate: args.startDate, endDate: args.endDate, year: undefined });
-  const placements = await fetchAllPlacements({ dateAddedStart: range.startStr, dateAddedEnd: range.endStr });
+  // Numerator (placements) and denominator (submissions) MUST cover the exact same
+  // window or the rate is inconsistent. The submission count below uses the epoch
+  // instants [startMs, endMs]; mirror them here as ISO timestamps so the placement
+  // query resolves to the identical bounds (dateAdded >= startMs AND < endMs). Passing
+  // the day-only range.startStr/endStr would drop "today" from placements while keeping
+  // it in submissions (endMs = now), systematically depressing current-period rates.
+  const placements = await fetchAllPlacements({
+    dateAddedStart: new Date(range.startMs).toISOString(),
+    dateAddedEnd: new Date(range.endMs).toISOString(),
+    fields: "id,status,dateAdded,jobSubmission(id,sendingUser(id,name,firstName,lastName))",
+  });
 
+  // Numerator: confirmed placements credited to the submitting recruiter.
   const byRec = new Map<number, { id: number; name: string; placements: number }>();
+  let unattributedPlacements = 0;
   for (const p of placements) {
     if (!CONFIRMED_PLACEMENT_STATUSES.has(p.status ?? "")) continue;
-    const o = p.owner;
-    if (!o) continue;
-    const e = byRec.get(o.id) ?? { id: o.id, name: recruiterName(o), placements: 0 };
+    const sender = p.jobSubmission?.sendingUser;
+    if (!sender?.id) {
+      unattributedPlacements++;
+      continue;
+    }
+    const e = byRec.get(sender.id) ?? { id: sender.id, name: recruiterName(sender), placements: 0 };
     e.placements++;
-    byRec.set(o.id, e);
+    byRec.set(sender.id, e);
   }
+
+  // Denominator: each recruiter's own submissions in the period.
   const recs = [...byRec.values()];
   const submissions = await mapLimit(recs, 4, (r) =>
     countTotal("JobSubmission", `sendingUser.id:${r.id} AND dateAdded:[${range.startMs} TO ${range.endMs}]`),
   );
-  const rows = recs
-    .map((r, i) => ({ recruiter: r.name, placements: r.placements, submissions: submissions[i] }))
-    .sort((a, b) => b.placements - a.placements || b.submissions - a.submissions)
-    .map((r, i) => ({ rank: i + 1, ...r }));
+
+  const rows = recs.map((r, i) => {
+    const subs = submissions[i];
+    const rawRate = subs > 0 ? r.placements / subs : null;
+    const cappedAt100 = rawRate !== null && rawRate > 1;
+    const conversionRate = rawRate === null ? null : Number((Math.min(rawRate, 1) * 100).toFixed(1));
+    return {
+      recruiter: r.name,
+      submissions: subs,
+      placementsFromSubmissions: r.placements,
+      conversionRate,
+      lowVolume: subs < MIN_SUBMISSIONS_FOR_RELIABLE_RATE,
+      ...(cappedAt100 ? { cappedAt100: true } : {}),
+    };
+  });
+
+  // Trustworthy ordering: reliable denominators first (ranked by conversion, then
+  // volume); low-volume / no-submission recruiters listed after so a 1/1 = 100% fluke
+  // never tops the board.
+  rows.sort((a, b) => {
+    const aReliable = !a.lowVolume && a.conversionRate !== null;
+    const bReliable = !b.lowVolume && b.conversionRate !== null;
+    if (aReliable !== bReliable) return aReliable ? -1 : 1;
+    return (b.conversionRate ?? -1) - (a.conversionRate ?? -1) || b.submissions - a.submissions;
+  });
+  const ranked = rows.map((r, i) => ({ rank: i + 1, ...r }));
+  const leader = ranked.find((r) => !r.lowVolume && r.conversionRate !== null);
 
   return {
     report: "recruiter_leaderboard",
     period: range.label,
     generatedAt: new Date().toISOString(),
-    scope: "placement_owners",
-    columns: ["rank", "recruiter", "placements", "submissions"],
-    rows,
+    scope: "submitting_recruiter",
+    columns: ["rank", "recruiter", "submissions", "placementsFromSubmissions", "conversionRate", "lowVolume"],
+    rows: ranked,
     totals: {
-      recruiters: rows.length,
-      placements: rows.reduce((a, r) => a + r.placements, 0),
-      submissions: rows.reduce((a, r) => a + r.submissions, 0),
+      recruiters: ranked.length,
+      submissions: ranked.reduce((a, r) => a + r.submissions, 0),
+      placementsFromSubmissions: ranked.reduce((a, r) => a + r.placementsFromSubmissions, 0),
+      unattributedPlacements,
     },
-    definitions: { placementsMade: DEPT_DEFINITIONS.placementsMade },
+    definitions: { conversionRate: CONVERSION_DEFINITION, placementsMade: DEPT_DEFINITIONS.placementsMade },
     notes: [
-      "Ranked by confirmed placements in the period.",
-      "Submission counts are shown for these placement owners only (v1 scope) — recruiters with submissions but no confirmed placements are not listed.",
+      "Conversion credits the recruiter who SUBMITTED the candidate (JobSubmission.sendingUser), NOT the placement owner — they differ often on this instance, which previously caused impossible >100% rates.",
+      `Reliable rows are listed first; lowVolume = fewer than ${MIN_SUBMISSIONS_FOR_RELIABLE_RATE} submissions (rate is volatile and should not be ranked at face value).`,
+      "conversionRate is capped at 100%; a placement whose submission predates the period can otherwise exceed it (flagged cappedAt100).",
+      "v1 lists only recruiters whose submissions produced at least one confirmed placement in the period; unattributedPlacements counts confirmed placements with no submission sender.",
     ],
-    summary: rows.length
-      ? `${rows[0].recruiter} leads with ${rows[0].placements} placements in ${range.label}.`
-      : `No confirmed placements in ${range.label}.`,
+    summary: leader
+      ? `${leader.recruiter} leads with a ${leader.conversionRate}% submission-to-placement conversion (${leader.placementsFromSubmissions}/${leader.submissions}) in ${range.label}.`
+      : ranked.length
+        ? `No recruiter met the ${MIN_SUBMISSIONS_FOR_RELIABLE_RATE}-submission reliability threshold in ${range.label}; only low-volume rows available.`
+        : `No confirmed placements in ${range.label}.`,
   };
 }
 
@@ -546,8 +615,9 @@ export const REPORTS_CATALOG = [
   },
   {
     name: "recruiter_leaderboard",
-    title: "Recruiter Activity / Leaderboard",
-    description: "Recruiters ranked by confirmed placements over a period, with their submission activity.",
+    title: "Recruiter Submission-to-Placement Conversion",
+    description:
+      "Recruiters ranked by submission-to-placement conversion over a period. Conversion credits the recruiter who SUBMITTED the candidate (not the placement owner), so rates are trustworthy and bounded 0–100%; low-volume recruiters (<10 submissions) are flagged and ranked below reliable ones.",
     parameters: {
       startDate: "optional YYYY-MM-DD (default: start of current year)",
       endDate: "optional YYYY-MM-DD inclusive (default: today)",

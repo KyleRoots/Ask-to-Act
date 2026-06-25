@@ -1,0 +1,29 @@
+List candidates with a TS/SCI clearance and electrical or I&C design experience (AutoCAD/Revit) within commuting distance of Houston, TX
+
+I’ll search Houston-metro candidates for TS/SCI language plus electrical/I&C design and AutoCAD or Revit, then verify the strongest matches from résumé snippets before listing them.
+
+Looked for available tools
+Called tool
+
+Only two records matched the strict search, and one is outside a normal Houston commute. I’m opening the Houston match first to confirm whether the clearance/design details are real and usable.
+
+Called tool
+
+The two strict matches do not confirm TS/SCI. They show Top Secret language, but not SCI. I’m doing one broader TS/SCI-only pass around Houston to avoid missing someone whose CAD terms are phrased differently.
+
+Called tool
+Called tool
+Thought for 2m 30s
+
+I found no fully verified candidates who match all requirements at once:
+
+TS/SCI clearance + electrical or I&C design + AutoCAD/Revit + commuting distance of Houston, TX.
+
+Closest near matches:
+
+Candidate	Location	Match	Gap / concern
+Cynthia Patino	Houston, TX	Senior Electrical Designer, AutoCAD, Revit, instrumentation, Houston-based	Résumé mentions work on a “top secret” government shipbuilding/surveillance project, but does not confirm TS/SCI clearance. Candidate title also includes “BEWARE,” so review the Bullhorn record carefully before outreach.
+Amos Gregory	Houston, TX	Houston-based, résumé mentions TS/SCI and AutoCAD/Visio project drawings	Clearance is listed as inactive TS/SCI with CI polygraph. Experience appears more systems/telecom engineering than electrical or I&C design.
+Raymond Vivian	Fort Worth, TX	Active DoD Top Secret, electrical/electronics design, instrumentation, controls, AutoCAD	Not TS/SCI, no Revit found, and Fort Worth is not commuting distance from Houston.
+
+Best practical takeaway: Cynthia Patino is the closest technical/location fit, but the clearance requirement is not verified as TS/SCI. Amos Gregory is the closest TS/SCI/location fit, but the clearance is inactive and the design fit is weaker.
