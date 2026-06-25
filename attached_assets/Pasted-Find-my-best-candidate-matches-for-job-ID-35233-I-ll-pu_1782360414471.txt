@@ -1,0 +1,31 @@
+Find my best candidate matches for job ID 35233
+
+I’ll pull job 35233 first so I can base the search on the actual requirements, then I’ll shortlist candidates and verify the best matches against résumé evidence.
+
+Looked for available tools
+Called tool
+
+Job 35233 is a Python Test Developer contract role for Telesat in Ottawa, focused on Python test automation, Pytest/Slash-style frameworks, and ability to attain Enhanced Reliability clearance. I’m searching for Python QA/test automation profiles now.
+
+Looked for available tools
+Called tool
+Called tool
+
+I found several strong Ottawa/Ontario profiles. Ivan Novikov, Durga Bhavani Nula, and Navneet Arora are already on the job’s submission list; I’m checking whether the other shortlisted matches have also been submitted.
+
+Called tool
+Thought for 4m 6s
+
+Best verified matches for Python Test Developer, job 35233:
+
+Rank	Candidate	Location	Current status	Submission status for job 35233	Why they match
+1	Ivan Novikov	Ottawa, ON	Online Applicant	Already submitted, New Lead	Strongest match. Senior SDET / QA Automation Engineer with 9+ years, Python, Pytest, Slash, Selenium, REST/SOAP API testing, performance testing, CI/CD, telecom/cloud background.
+2	Amer Abdulkader	Ottawa, ON	Online Applicant	Not submitted yet	Very strong local match. 6+ years in QA/test automation, Python, Robot Framework, Pytest, Selenium, Slash, Jenkins, Docker, Ansible, embedded/web/cloud testing.
+3	Saba Pedram	Ottawa, ON	Online Applicant	Already submitted, New Lead	Strong Ottawa match. 8+ years in test automation, Python, pytest, Selenium, Robot Framework, API/performance/unit/regression testing, Linux, Docker, Kubernetes, OpenShift, Jenkins.
+4	Durga Bhavani Nula	Toronto, ON	Online Applicant	Already submitted, New Lead	Strong technical match. 8 years with Python development, automation framework development, QA, Pytest/unit test, Robot Framework. Also lists current Python Automation Engineer experience at Telesat.
+5	Sergei Berezov	Toronto, ON	Online Applicant	Not submitted to this job	Strong QA automation/SDET profile. QA Automation Engineer/SDET from 2017 to 2025, Python, Pytest, Selenium, CI/CD, automated smoke/regression/functional test suites.
+6	Sowjanya A	Toronto, ON	Online Applicant	Not submitted to this job	Solid backup. 7+ years SDET/QA automation, Python, PyTest, Robot Framework, Selenium, Playwright, Appium, API/mobile/web testing, Jenkins/Azure DevOps/GitHub Actions.
+
+Best next action: prioritize Ivan Novikov, Amer Abdulkader, and Saba Pedram first because they are Ottawa-based and closely match Python, Pytest, Slash/test automation, and the 5+ year requirement.
+
+I did not find résumé evidence explicitly confirming Enhanced Reliability clearance for these candidates, so that should be screened during outreach.
