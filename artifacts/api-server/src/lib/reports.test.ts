@@ -6,10 +6,28 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // submission's sendingUser) via listPlacements, and counts each recruiter's
 // submissions via countEntity. We feed controlled fixtures and assert that
 // conversion is credited to the SUBMITTER, bounded, and ordered sensibly.
+//
+// A second suite tests resolveDeptNames (private helper) through openJobsReport:
+//   (a) null firmId / no config row → Myticas hardcoded DEPARTMENTS fallback
+//   (b) config row present + live dept groups returned → per-firm source
+//   (c) config row present + empty groupBy response → falls back to DEPARTMENTS
 // ---------------------------------------------------------------------------
 const mockState = vi.hoisted(() => ({
   placements: [] as unknown[],
   submissionCounts: {} as Record<number, number>,
+  // --- dept-resolution state ---
+  firmId: null as string | null,
+  firmFieldMap: null as Record<string, unknown> | null,
+  deptGroups: [] as Array<{ value: string; count: number | null }>,
+}));
+
+vi.mock("./bullhorn-auth.js", () => ({
+  currentFirmContextId: vi.fn(() => mockState.firmId),
+}));
+
+vi.mock("./firm-config.js", () => ({
+  resolveDeptField: vi.fn(async () => "correlatedCustomText1"),
+  getFirmFieldMap: vi.fn(async () => mockState.firmFieldMap),
 }));
 
 vi.mock("./bullhorn-client.js", () => ({
@@ -19,14 +37,29 @@ vi.mock("./bullhorn-client.js", () => ({
     if ((args.start ?? 0) > 0) return { data: [] };
     return { data: mockState.placements };
   }),
-  countEntity: vi.fn(async (args: { query?: string }) => {
-    const m = /sendingUser\.id:(\d+)/.exec(args.query ?? "");
-    const id = m ? Number(m[1]) : -1;
-    return { total: mockState.submissionCounts[id] ?? 0 };
-  }),
+  countEntity: vi.fn(
+    async (args: { query?: string; groupBy?: string; groupValues?: string[] }) => {
+      // Discovery call: groupBy present, no groupValues → return live dept groups.
+      if (args.groupBy && !args.groupValues) {
+        return {
+          total: mockState.deptGroups.length,
+          groups: mockState.deptGroups,
+          groupsComplete: true,
+        };
+      }
+      // Breakdown call: groupBy + groupValues present → return zeros (not under test here).
+      if (args.groupBy && args.groupValues) {
+        return { total: 0, groups: [], groupsComplete: true };
+      }
+      // Submission count query (recruiterLeaderboard).
+      const m = /sendingUser\.id:(\d+)/.exec(args.query ?? "");
+      const id = m ? Number(m[1]) : -1;
+      return { total: mockState.submissionCounts[id] ?? 0 };
+    },
+  ),
 }));
 
-const { recruiterLeaderboard } = await import("./reports.js");
+const { recruiterLeaderboard, openJobsReport, DEPARTMENTS } = await import("./reports.js");
 
 type Row = {
   rank: number;
@@ -52,7 +85,14 @@ function confirmedPlacement(senderId: number | null, ownerId: number, name: stri
 beforeEach(() => {
   mockState.placements = [];
   mockState.submissionCounts = {};
+  mockState.firmId = null;
+  mockState.firmFieldMap = null;
+  mockState.deptGroups = [];
 });
+
+// ---------------------------------------------------------------------------
+// recruiterLeaderboard — conversion attribution
+// ---------------------------------------------------------------------------
 
 describe("recruiterLeaderboard conversion attribution", () => {
   it("credits the submitter (not the placement owner) and bounds the rate", async () => {
@@ -136,5 +176,84 @@ describe("recruiterLeaderboard conversion attribution", () => {
     expect(dan.conversionRate).toBe(100);
     expect(dan.cappedAt100).toBe(true);
     expect(dan.lowVolume).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveDeptNames — per-firm department resolution (tested via openJobsReport)
+//
+// The three critical branches:
+//   (a) No config row (getFirmFieldMap returns null OR firmId is null)
+//       → source = "configured", departments = DEPARTMENTS (Myticas hardcoded list)
+//   (b) Config row present + Bullhorn returns non-empty groupBy groups
+//       → source = "per-firm", departments = sorted live values
+//   (c) Config row present + Bullhorn returns empty group list
+//       → source = "configured", departments = DEPARTMENTS (safe fallback)
+// ---------------------------------------------------------------------------
+
+describe("resolveDeptNames department resolution (via openJobsReport)", () => {
+  it("(a) falls back to hardcoded DEPARTMENTS when getFirmFieldMap returns null (Myticas path)", async () => {
+    // firmId is set so the code enters the if-branch, but getFirmFieldMap returns null
+    // → should skip live discovery and use DEPARTMENTS.
+    mockState.firmId = "firm-myticas";
+    mockState.firmFieldMap = null;
+    mockState.deptGroups = []; // irrelevant — discovery is skipped
+
+    const result = (await openJobsReport()) as {
+      departmentsSource: string;
+      rows: Array<{ department: string }>;
+    };
+
+    expect(result.departmentsSource).toBe("configured");
+    // Every hardcoded department must appear as a row.
+    const rowDepts = result.rows.map((r) => r.department);
+    for (const dept of DEPARTMENTS) {
+      expect(rowDepts).toContain(dept);
+    }
+  });
+
+  it("(b) uses live Bullhorn groups when config row is present and groupBy returns values", async () => {
+    mockState.firmId = "firm-acme";
+    // Non-null map signals "this firm has been discovered".
+    mockState.firmFieldMap = { version: 1, entities: {}, semantics: { internalDepartment: {} }, missing: {} };
+    mockState.deptGroups = [
+      { value: "ACME-East", count: 5 },
+      { value: "ACME-West", count: 3 },
+      { value: "ACME-North", count: 0 },
+    ];
+
+    const result = (await openJobsReport()) as {
+      departmentsSource: string;
+      rows: Array<{ department: string }>;
+    };
+
+    expect(result.departmentsSource).toBe("per-firm");
+    const rowDepts = result.rows.map((r) => r.department);
+    // All three live dept values must be present.
+    expect(rowDepts).toContain("ACME-East");
+    expect(rowDepts).toContain("ACME-West");
+    expect(rowDepts).toContain("ACME-North");
+    // Hardcoded Myticas depts must NOT appear (wrong firm).
+    for (const dept of DEPARTMENTS) {
+      expect(rowDepts).not.toContain(dept);
+    }
+  });
+
+  it("(c) falls back to DEPARTMENTS when config row exists but groupBy returns no groups", async () => {
+    mockState.firmId = "firm-beta";
+    mockState.firmFieldMap = { version: 1, entities: {}, semantics: { internalDepartment: {} }, missing: {} };
+    // Empty group list — Bullhorn returned nothing usable.
+    mockState.deptGroups = [];
+
+    const result = (await openJobsReport()) as {
+      departmentsSource: string;
+      rows: Array<{ department: string }>;
+    };
+
+    expect(result.departmentsSource).toBe("configured");
+    const rowDepts = result.rows.map((r) => r.department);
+    for (const dept of DEPARTMENTS) {
+      expect(rowDepts).toContain(dept);
+    }
   });
 });
