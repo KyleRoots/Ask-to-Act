@@ -1,0 +1,46 @@
+A
+AskToAct
+ Find me matches for our Python Test Developer role in Ottawa
+
+I’ll look up the Ottawa Python Test Developer job first, then use the job details to search Bullhorn candidates by matching skills, testing background, Python, and Ottawa/location fit.
+
+Called tool
+
+I found one active Ottawa role: Job 35233, Python Test Developer, contract with Telesat. I’m pulling the job record now so the candidate search is based on the actual requirements instead of just the title.
+
+Called tool
+
+The job lookup worked, but the full-description pull was blocked by the connector safety layer. I’ll continue with safer, narrower fields and then search candidates against the known role, client, location, and core title requirements.
+
+Called tool
+Looked for available tools
+Called tool
+Called tool
+Called tool
+Calling tool
+Thought for 6m 15s
+
+Found the active role:
+
+Job 35233. Python Test Developer
+Client: Telesat
+Office: MYT-Ottawa
+Status: Accepting Candidates
+Type: Contract
+Open job in Bullhorn
+
+Candidate matches from the Ontario Python + QA/testing search sample
+Candidate	Location	Current title	Visible match signals
+Vasav Trivedi	Toronto, ON	QA Analyst	Python, Selenium WebDriver, Cucumber, TestNG, Cypress, Playwright, REST Assured, Postman, SQL, Jenkins
+Safia Moosvi	Toronto, ON	QA Analyst	Python, Selenium, Playwright, Cypress, Postman, SOAP UI, LoadRunner, JMeter, Jenkins, Azure DevOps
+Sai Bandaru	Oshawa, ON	Senior QA Analyst / QA Lead	Selenium WebDriver/Grid, Playwright, Cypress, Appium, TestNG, JUnit, API testing, Python
+Ashima Rajwanshi	Mississauga, ON	QA Engineer	Automation testing, Selenium WebDriver, TestNG, JUnit, Postman, RestAssured, JMeter, Python
+Supriya Periyambra	Toronto, ON	QA Tester	Robot Framework using Python, API testing, SQL testing, regression, integration, UAT, Azure DevOps
+ASHOK MUTHUPANDIAN	Toronto, ON	Senior QA Coordinator	Selenium with Python, Pytest, Page Object Model, ETL testing, BDD automation, SQL, Azure DevOps
+ANVI PANDYA	Waterloo, ON	QA Automation Tester	Selenium WebDriver, JUnit, TestNG, Cucumber, Rest Assured, Postman, Python, SQL
+imran ali	Toronto, ON	QA Automation Engineer	Selenium, Cucumber, REST Assured, Python, Pytest, Jenkins, Playwright, Postman, JMeter
+Already attached to Job 35233
+
+I also found existing submissions already tied to this job. Recent examples include ADILKUMAR PATEL, Jacqueline Kelly, Can Sahin, Aaron Cassell, and DHRUV PATEL.
+
+A few deeper candidate/resume lookup calls were blocked by the connector safety layer, so this shortlist is based on searchable Bullhorn fields returned successfully: title, status, location, and skill set.
