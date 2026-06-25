@@ -42,9 +42,16 @@ import {
   updateCompany,
   createContact,
   updateContact,
+  updateCandidate,
+  createLead,
+  updateLead,
+  createOpportunity,
+  updateOpportunity,
   createTask,
+  updateTask,
   notifyUsers,
   createAppointment,
+  updateAppointment,
   createTearsheet,
   addCandidatesToTearsheet,
   removeCandidatesFromTearsheet,
@@ -1145,8 +1152,22 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   // tracking. These are MCP-connector only — NOT in the public OpenAPI door.
   // -------------------------------------------------------------------------
 
+  // Value shape accepted for write `fields` / `additionalFields`: scalars plus
+  // null (to clear a field) and Bullhorn association references — a single
+  // { id } for TO_ONE (e.g. owner) or an array of { id } for TO_MANY (e.g.
+  // assignedTo / assignedUsers). Unknown field NAMES are still rejected by
+  // validateWriteFields before submission.
+  const writeFieldValueSchema = z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.object({ id: z.number().int().positive() }),
+    z.array(z.object({ id: z.number().int().positive() })),
+  ]);
+
   const additionalFieldsSchema = z
-    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .record(z.string(), writeFieldValueSchema)
     .optional()
     .describe(
       "Optional extra fields keyed by their exact Bullhorn API field name (use describe_entity to find names; list_field_options for picklist values). " +
@@ -1199,7 +1220,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     {
       jobOrderId: z.number().int().positive().describe("Bullhorn JobOrder ID to update."),
       fields: z
-        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .record(z.string(), writeFieldValueSchema)
         .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Covered', numOpenings: 2 })."),
     },
     async ({ jobOrderId, fields }) =>
@@ -1233,7 +1254,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     {
       companyId: z.number().int().positive().describe("Bullhorn ClientCorporation ID to update."),
       fields: z
-        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .record(z.string(), writeFieldValueSchema)
         .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { phone: '...', status: 'Active Account' })."),
     },
     async ({ companyId, fields }) =>
@@ -1271,13 +1292,162 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     {
       contactId: z.number().int().positive().describe("Bullhorn ClientContact ID to update."),
       fields: z
-        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .record(z.string(), writeFieldValueSchema)
         .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', status: 'Active' })."),
     },
     async ({ contactId, fields }) =>
       runWriteTool("update_contact", { contactId }, async () => {
         const session = await resolveWriteSession();
         return updateContact(session, contactId, fields);
+      }),
+  );
+
+  writeTool(
+    "update_candidate",
+    "WRITE: Updates fields on an existing Candidate in Bullhorn, as YOU (contact info, owner, custom fields, status, etc.). " +
+      "Provide only the fields to change in `fields` (exact Bullhorn field names). A `status` value is validated against the live picklist. " +
+      "For a quick status-only change, update_candidate_status also works. ALWAYS confirm with the user first.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn Candidate ID to update."),
+      fields: z
+        .record(z.string(), writeFieldValueSchema)
+        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', phone: '...', status: 'Active' })."),
+    },
+    async ({ candidateId, fields }) =>
+      runWriteTool("update_candidate", { candidateId }, async () => {
+        const session = await resolveWriteSession();
+        return updateCandidate(session, candidateId, fields);
+      }),
+  );
+
+  writeTool(
+    "create_lead",
+    "WRITE: Creates a Lead (a sales/BD prospect) in Bullhorn, as YOU. owner and assignedTo default to you. " +
+      "This firm may REQUIRE certain fields (e.g. status, leadSource, comments, and a custom field like customText1) — " +
+      "call describe_entity('Lead') and list_field_options(Lead, status) / list_field_options(Lead, leadSource) to discover required " +
+      "fields and valid values, and pass any extras via additionalFields. ALWAYS confirm details with the user first.",
+    {
+      firstName: z.string().optional().describe("Lead's first name."),
+      lastName: z.string().optional().describe("Lead's last name."),
+      companyName: z.string().optional().describe("Prospect company name (free text)."),
+      email: z.string().email().optional().describe("Lead email address."),
+      phone: z.string().optional().describe("Lead phone number."),
+      comments: z.string().optional().describe("Notes/comments (often required by the firm)."),
+      status: z.string().optional().describe("Lead status (see list_field_options(Lead, status))."),
+      leadSource: z.string().optional().describe("Lead source (see list_field_options(Lead, leadSource))."),
+      clientCorporationId: z.number().int().positive().optional().describe("Optional existing company to associate."),
+      assignedToUserIds: z
+        .array(z.number().int().positive())
+        .optional()
+        .describe("Bullhorn user IDs assigned to the lead. Defaults to you."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ firstName, lastName, companyName, email, phone, comments, status, leadSource, clientCorporationId, assignedToUserIds, additionalFields }) =>
+      runWriteTool("create_lead", { lastName, companyName }, async () => {
+        const session = await resolveWriteSession();
+        return createLead(session, { firstName, lastName, companyName, email, phone, comments, status, leadSource, clientCorporationId, assignedToUserIds, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_lead",
+    "WRITE: Updates fields on an existing Lead in Bullhorn, as YOU. Provide only the fields to change in `fields` (exact Bullhorn field names). " +
+      "A `status` value is validated against the live picklist. ALWAYS confirm with the user first.",
+    {
+      leadId: z.number().int().positive().describe("Bullhorn Lead ID to update."),
+      fields: z
+        .record(z.string(), writeFieldValueSchema)
+        .describe("Fields to change, keyed by exact Bullhorn field name."),
+    },
+    async ({ leadId, fields }) =>
+      runWriteTool("update_lead", { leadId }, async () => {
+        const session = await resolveWriteSession();
+        return updateLead(session, leadId, fields);
+      }),
+  );
+
+  writeTool(
+    "create_opportunity",
+    "WRITE: Creates an Opportunity (a sales deal) in Bullhorn, as YOU. Requires a title, the clientCorporationId (company) and " +
+      "clientContactId (the contact). owner defaults to you. This firm may REQUIRE status, type and/or a custom field (e.g. customText1) — " +
+      "call describe_entity('Opportunity') and list_field_options(Opportunity, status) / list_field_options(Opportunity, type) to discover " +
+      "required fields and valid values; pass extras via additionalFields. ALWAYS confirm with the user first.",
+    {
+      title: z.string().min(1).describe("Opportunity title."),
+      clientCorporationId: z.number().int().positive().describe("Bullhorn ClientCorporation (company) ID."),
+      clientContactId: z.number().int().positive().describe("Bullhorn ClientContact ID (the decision-maker)."),
+      status: z.string().optional().describe("Opportunity status (see list_field_options(Opportunity, status))."),
+      type: z.string().optional().describe("Opportunity type (see list_field_options(Opportunity, type))."),
+      assignedToUserIds: z
+        .array(z.number().int().positive())
+        .optional()
+        .describe("Bullhorn user IDs assigned to the opportunity."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ title, clientCorporationId, clientContactId, status, type, assignedToUserIds, additionalFields }) =>
+      runWriteTool("create_opportunity", { title }, async () => {
+        const session = await resolveWriteSession();
+        return createOpportunity(session, { title, clientCorporationId, clientContactId, status, type, assignedToUserIds, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_opportunity",
+    "WRITE: Updates fields on an existing Opportunity in Bullhorn, as YOU. Provide only the fields to change in `fields` (exact Bullhorn field names). " +
+      "A `status` value is validated against the live picklist. ALWAYS confirm with the user first.",
+    {
+      opportunityId: z.number().int().positive().describe("Bullhorn Opportunity ID to update."),
+      fields: z
+        .record(z.string(), writeFieldValueSchema)
+        .describe("Fields to change, keyed by exact Bullhorn field name."),
+    },
+    async ({ opportunityId, fields }) =>
+      runWriteTool("update_opportunity", { opportunityId }, async () => {
+        const session = await resolveWriteSession();
+        return updateOpportunity(session, opportunityId, fields);
+      }),
+  );
+
+  writeTool(
+    "update_task",
+    "WRITE: Updates an existing Task in Bullhorn, as YOU — reschedule (dateBegin/dateEnd), change subject/type/priority, adjust the reminder, " +
+      "or mark it complete (isCompleted=true). Dates accept 'YYYY-MM-DD' or ISO 8601. ALWAYS confirm with the user first.",
+    {
+      taskId: z.number().int().positive().describe("Bullhorn Task ID to update."),
+      subject: z.string().optional().describe("New subject/title."),
+      dateBegin: z.string().optional().describe("New start/due date. 'YYYY-MM-DD' or ISO 8601."),
+      dateEnd: z.string().optional().describe("New end date. 'YYYY-MM-DD' or ISO 8601."),
+      type: z.string().optional().describe("Task type (see list_field_options(Task, type))."),
+      priority: z.number().int().optional().describe("Numeric priority."),
+      isCompleted: z.boolean().optional().describe("Set true to mark the task complete."),
+      notificationMinutes: z.number().int().nonnegative().optional().describe("Minutes before dateBegin to fire a reminder."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ taskId, subject, dateBegin, dateEnd, type, priority, isCompleted, notificationMinutes, additionalFields }) =>
+      runWriteTool("update_task", { taskId }, async () => {
+        const session = await resolveWriteSession();
+        return updateTask(session, taskId, { subject, dateBegin, dateEnd, type, priority, isCompleted, notificationMinutes, additionalFields });
+      }),
+  );
+
+  writeTool(
+    "update_appointment",
+    "WRITE: Updates an existing Appointment/meeting in Bullhorn, as YOU — reschedule (dateBegin/dateEnd), change subject/location/type/description. " +
+      "Dates accept 'YYYY-MM-DD' or ISO 8601. ALWAYS confirm with the user first.",
+    {
+      appointmentId: z.number().int().positive().describe("Bullhorn Appointment ID to update."),
+      subject: z.string().optional().describe("New subject/title."),
+      dateBegin: z.string().optional().describe("New start. 'YYYY-MM-DD' or ISO 8601."),
+      dateEnd: z.string().optional().describe("New end. 'YYYY-MM-DD' or ISO 8601."),
+      location: z.string().optional().describe("New location."),
+      type: z.string().optional().describe("Appointment type (see list_field_options(Appointment, type))."),
+      description: z.string().optional().describe("Notes/agenda."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ appointmentId, subject, dateBegin, dateEnd, location, type, description, additionalFields }) =>
+      runWriteTool("update_appointment", { appointmentId }, async () => {
+        const session = await resolveWriteSession();
+        return updateAppointment(session, appointmentId, { subject, dateBegin, dateEnd, location, type, description, additionalFields });
       }),
   );
 
@@ -1429,7 +1599,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     {
       placementId: z.number().int().positive().describe("Bullhorn Placement ID to update."),
       fields: z
-        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .record(z.string(), writeFieldValueSchema)
         .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Completed', payRate: 65 })."),
     },
     async ({ placementId, fields }) =>
@@ -1516,7 +1686,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fileContentBase64: z.string().min(1).describe("Base64-encoded résumé file bytes."),
       contentType: z.string().optional().describe("MIME type of the résumé (e.g. 'application/pdf')."),
       overrideFields: z
-        .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+        .record(z.string(), writeFieldValueSchema)
         .optional()
         .describe("Optional Candidate fields to set/override (exact Bullhorn names; use list_field_options for picklists like status)."),
     },

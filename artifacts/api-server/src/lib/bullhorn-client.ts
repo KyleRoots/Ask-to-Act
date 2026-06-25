@@ -2720,6 +2720,27 @@ export async function updateCandidateStatus(
 }
 
 /**
+ * Updates arbitrary fields on a Candidate (contact info, owner, status, custom
+ * fields, etc.). Validates a `status` value against the live picklist when
+ * present. Bullhorn enforces the session user's edit permissions on the record.
+ */
+export async function updateCandidate(
+  session: BullhornWriteSession,
+  candidateId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; candidateId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the candidate.");
+  }
+  if (typeof fields.status === "string") {
+    await assertPicklistValue("Candidate", "status", fields.status);
+  }
+  await validateWriteFields("Candidate", fields, { mode: "update" });
+  await updateEntityRecord(session, "Candidate", candidateId, fields);
+  return { updated: true, candidateId };
+}
+
+/**
  * Returns the Bullhorn internal integer user ID for the current session.
  * Calls /settings/userId — a lightweight endpoint that returns the session
  * owner's ID without fetching a full user record.
@@ -3276,6 +3297,192 @@ export async function updateContact(
   await validateWriteFields("ClientContact", fields, { mode: "update" });
   await updateEntityRecord(session, "ClientContact", contactId, fields);
   return { updated: true, contactId };
+}
+
+// ── Lead (sales prospect) create / update ─────────────────────────────────
+
+/**
+ * Creates a Lead (a sales/BD prospect). This instance flags several fields as
+ * required (e.g. status, leadSource, comments, and a custom field such as
+ * customText1, plus assignedTo); callers should use describe_entity("Lead") and
+ * list_field_options to discover required fields and valid picklist values for
+ * this firm. owner + assignedTo default to the calling user.
+ */
+export async function createLead(
+  session: BullhornWriteSession,
+  args: {
+    firstName?: string;
+    lastName?: string;
+    companyName?: string;
+    email?: string;
+    phone?: string;
+    comments?: string;
+    status?: string;
+    leadSource?: string;
+    clientCorporationId?: number;
+    assignedToUserIds?: number[];
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ leadId: number }> {
+  const ownerId = await getSessionUserId(session);
+  if (args.status) await assertPicklistValue("Lead", "status", args.status);
+  if (args.leadSource) await assertPicklistValue("Lead", "leadSource", args.leadSource);
+  const assignedIds =
+    args.assignedToUserIds && args.assignedToUserIds.length > 0
+      ? args.assignedToUserIds
+      : [ownerId];
+  const body = compact({
+    firstName: args.firstName,
+    lastName: args.lastName,
+    companyName: args.companyName,
+    email: args.email,
+    phone: args.phone,
+    comments: args.comments,
+    status: args.status,
+    leadSource: args.leadSource,
+    owner: assoc(ownerId),
+    assignedTo: assignedIds.map((id) => ({ id })),
+    clientCorporation: assoc(args.clientCorporationId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Lead", body, { mode: "create" });
+  const leadId = await createEntityRecord(session, "Lead", body);
+  return { leadId };
+}
+
+export async function updateLead(
+  session: BullhornWriteSession,
+  leadId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; leadId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the lead.");
+  }
+  if (typeof fields.status === "string") {
+    await assertPicklistValue("Lead", "status", fields.status);
+  }
+  await validateWriteFields("Lead", fields, { mode: "update" });
+  await updateEntityRecord(session, "Lead", leadId, fields);
+  return { updated: true, leadId };
+}
+
+// ── Opportunity (sales deal) create / update ──────────────────────────────
+
+/**
+ * Creates an Opportunity (a sales deal). Required: title, clientCorporationId,
+ * clientContactId, plus status/type and possibly a custom field (e.g.
+ * customText1) per firm config — callers should use describe_entity and
+ * list_field_options to discover required fields and valid values. owner
+ * defaults to the calling user.
+ */
+export async function createOpportunity(
+  session: BullhornWriteSession,
+  args: {
+    title: string;
+    clientCorporationId: number;
+    clientContactId: number;
+    status?: string;
+    type?: string;
+    assignedToUserIds?: number[];
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ opportunityId: number; title: string }> {
+  const ownerId = await getSessionUserId(session);
+  if (args.status) await assertPicklistValue("Opportunity", "status", args.status);
+  if (args.type) await assertPicklistValue("Opportunity", "type", args.type);
+  const body = compact({
+    title: args.title,
+    clientCorporation: assoc(args.clientCorporationId),
+    clientContact: assoc(args.clientContactId),
+    status: args.status,
+    type: args.type,
+    owner: assoc(ownerId),
+    assignedUsers: args.assignedToUserIds?.map((id) => ({ id })),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Opportunity", body, { mode: "create" });
+  const opportunityId = await createEntityRecord(session, "Opportunity", body);
+  return { opportunityId, title: args.title };
+}
+
+export async function updateOpportunity(
+  session: BullhornWriteSession,
+  opportunityId: number,
+  fields: Record<string, unknown>,
+): Promise<{ updated: true; opportunityId: number }> {
+  if (Object.keys(fields).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the opportunity.");
+  }
+  if (typeof fields.status === "string") {
+    await assertPicklistValue("Opportunity", "status", fields.status);
+  }
+  await validateWriteFields("Opportunity", fields, { mode: "update" });
+  await updateEntityRecord(session, "Opportunity", opportunityId, fields);
+  return { updated: true, opportunityId };
+}
+
+// ── Task / Appointment update ─────────────────────────────────────────────
+
+export async function updateTask(
+  session: BullhornWriteSession,
+  taskId: number,
+  args: {
+    subject?: string;
+    dateBegin?: string;
+    dateEnd?: string;
+    type?: string;
+    priority?: number;
+    isCompleted?: boolean;
+    notificationMinutes?: number;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ updated: true; taskId: number }> {
+  const body = compact({
+    subject: args.subject,
+    dateBegin: args.dateBegin ? toEpochMillis(args.dateBegin, "dateBegin") : undefined,
+    dateEnd: args.dateEnd ? toEpochMillis(args.dateEnd, "dateEnd") : undefined,
+    type: args.type,
+    priority: args.priority,
+    isCompleted: args.isCompleted,
+    notificationMinutes: args.notificationMinutes,
+    ...(args.additionalFields ?? {}),
+  });
+  if (Object.keys(body).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the task.");
+  }
+  await validateWriteFields("Task", body, { mode: "update" });
+  await updateEntityRecord(session, "Task", taskId, body);
+  return { updated: true, taskId };
+}
+
+export async function updateAppointment(
+  session: BullhornWriteSession,
+  appointmentId: number,
+  args: {
+    subject?: string;
+    dateBegin?: string;
+    dateEnd?: string;
+    location?: string;
+    type?: string;
+    description?: string;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{ updated: true; appointmentId: number }> {
+  const body = compact({
+    subject: args.subject,
+    dateBegin: args.dateBegin ? toEpochMillis(args.dateBegin, "dateBegin") : undefined,
+    dateEnd: args.dateEnd ? toEpochMillis(args.dateEnd, "dateEnd") : undefined,
+    location: args.location,
+    type: args.type,
+    description: args.description,
+    ...(args.additionalFields ?? {}),
+  });
+  if (Object.keys(body).length === 0) {
+    throw new BullhornFieldValidationError("No fields provided to update on the appointment.");
+  }
+  await validateWriteFields("Appointment", body, { mode: "update" });
+  await updateEntityRecord(session, "Appointment", appointmentId, body);
+  return { updated: true, appointmentId };
 }
 
 // ── Task / Appointment create ─────────────────────────────────────────────
