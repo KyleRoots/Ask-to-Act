@@ -57,6 +57,13 @@
       "when": 1782341000000,
       "tag": "0007_firm_config",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782410240581,
+      "tag": "0008_old_doomsday",
+      "breakpoints": true
     }
   ]
 }

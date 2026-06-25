@@ -63,9 +63,16 @@ try {
         await client.query(stmt);
       } catch (e: unknown) {
         const err = e as { code?: string; message?: string };
-        // Idempotency: skip if object already exists or constraint already present
-        if (err.code === "42P07" || err.code === "42710" || err.code === "42P16") {
-          // 42P07 = relation already exists, 42710 = duplicate_object, 42P16 = invalid_table_definition
+        // Idempotency: skip if the object already exists. This lets a migration
+        // that was auto-regenerated from a stale drizzle snapshot (re-adding
+        // schema that an earlier raw SQL migration already created) apply as a
+        // safe no-op instead of aborting the whole run.
+        if (
+          err.code === "42P07" || // relation already exists (CREATE TABLE)
+          err.code === "42710" || // duplicate_object (constraint/index already present)
+          err.code === "42701" || // duplicate_column (ADD COLUMN already exists)
+          err.code === "42P16"    // invalid_table_definition
+        ) {
           continue;
         }
         throw e;
