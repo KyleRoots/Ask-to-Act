@@ -164,6 +164,42 @@ const UI_LINKABLE_ENTITIES = new Set<string>([
   "Placement",
 ]);
 
+/**
+ * Guarantees the record `id` is fetched for linkable entities so a deep link can
+ * always be injected. enrichWithProfileUrls only adds `bullhornUrl` to records
+ * that carry a numeric `id`; when the AI supplies its own `fields` and omits
+ * `id`, Bullhorn returns no id and the link is silently dropped (the "links work
+ * most of the time but sometimes don't" symptom). For linkable entities we
+ * prepend `id` when the top-level field list doesn't already request it. A
+ * parentheses-aware scan ensures nested sub-selections like `owner(id,name)` are
+ * NOT mistaken for a top-level `id`. `*` (which already returns id) is left
+ * untouched. No-op for non-linkable entities.
+ */
+export function ensureLinkableIdField(entity: string, fields: string): string {
+  if (!UI_LINKABLE_ENTITIES.has(entity)) return fields;
+  const topLevel: string[] = [];
+  let depth = 0;
+  let token = "";
+  for (const ch of fields) {
+    if (ch === "(") {
+      depth++;
+      token += ch;
+    } else if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      token += ch;
+    } else if (ch === "," && depth === 0) {
+      topLevel.push(token);
+      token = "";
+    } else {
+      token += ch;
+    }
+  }
+  if (token) topLevel.push(token);
+  const names = topLevel.map((t) => t.trim().split("(")[0].trim().toLowerCase());
+  if (names.includes("*") || names.includes("id")) return fields;
+  return `id,${fields}`;
+}
+
 // Cache the swimlane-derived host keyed by the restUrl it was derived from, so a
 // cluster migration/failover that changes restUrl on re-auth recomputes the host.
 // Keyed by restUrl (a Map) so multiple firms on different swimlanes don't thrash
@@ -409,7 +445,7 @@ async function searchEntity(
   count: number,
   start: number,
 ): Promise<unknown> {
-  fields = sanitizeFields(fields);
+  fields = ensureLinkableIdField(entity, sanitizeFields(fields));
   // Enforce metric definitions on the SEARCH path too, so a freelanced raw
   // isOpen:true returns the correct universe of records (jobs exclude Archived;
   // opportunities exclude Closed-Won/Closed-Lost/Converted) — not just on count.
@@ -485,7 +521,7 @@ async function queryEntity(
   start: number,
   orderBy?: string,
 ): Promise<unknown> {
-  fields = sanitizeFields(fields);
+  fields = ensureLinkableIdField(entity, sanitizeFields(fields));
   const params: Record<string, string | number> = { where, fields, count, start };
   if (orderBy !== undefined && orderBy !== "") {
     params.orderBy = orderBy;
@@ -502,11 +538,12 @@ async function getEntity(
   id: number,
   fields: string,
 ): Promise<unknown> {
+  const resolvedFields = ensureLinkableIdField(entity, sanitizeFields(fields));
   return redactCandidateDescriptions(
     entity,
     await enrichWithProfileUrls(
       entity,
-      await bullhornFetch(`entity/${entity}/${id}`, { fields: sanitizeFields(fields) }),
+      await bullhornFetch(`entity/${entity}/${id}`, { fields: resolvedFields }),
     ),
   );
 }

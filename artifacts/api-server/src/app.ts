@@ -3,6 +3,8 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import { mcpLimiter } from "./middlewares/mcp-rate-limit";
+import { cspNonceMiddleware, nonceAttr } from "./lib/csp-nonce";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import {
@@ -20,24 +22,33 @@ app.set("trust proxy", 1);
 // Clerk FAPI proxy — must be before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
+// Per-request CSP nonce — MUST run before helmet so res.locals.cspNonce exists
+// when helmet builds the Content-Security-Policy header, and so the downstream
+// HTML builders (page(), connectorSetupPage(), legalPage(), landing) can read
+// the same nonce via nonceAttr().
+app.use(cspNonceMiddleware);
+
 // Security headers (helmet). Applied AFTER the Clerk FAPI proxy so Clerk's
 // proxied frontend-API responses are left untouched. This app serves only its
 // own self-contained HTML pages (landing, legal, enroll/connector/OAuth) plus
-// the JSON /api — it does NOT serve the portal/admin SPAs — so a tailored CSP
-// here is self-contained and low-risk. Inline <script>/<style> are permitted
-// because those pages rely on them and all dynamic content is already
-// HTML-escaped; tightening to per-request nonces is a future hardening step.
+// the JSON /api — it does NOT serve the portal/admin SPAs.
+//
+// CSP: inline <script>/<style> are allowed ONLY via a per-request nonce, so
+// 'unsafe-inline' is dropped from script-src, script-src-attr and style-src.
+// Inline event handlers were refactored to addEventListener so script-src-attr
+// is 'none'. style-src-attr keeps 'unsafe-inline' for a few benign inline
+// style="" attributes (CSS can't execute script; all dynamic content is escaped).
+const cspNonce = (_req: unknown, res: unknown): string =>
+  `'nonce-${(res as express.Response).locals.cspNonce}'`;
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        // helmet defaults to script-src-attr 'none', which would block the
-        // inline onclick/onsubmit handlers the connector-setup, enroll and
-        // OAuth pages rely on. Allow them explicitly (content is HTML-escaped).
-        scriptSrcAttr: ["'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'", cspNonce],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", cspNonce],
+        styleSrcAttr: ["'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
         fontSrc: ["'self'", "data:"],
         connectSrc: ["'self'"],
@@ -162,6 +173,11 @@ app.use(
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many requests, please try again later." },
+    // /api/mcp is governed by its own per-token limiter (mcpLimiter) below.
+    // Skipping it here is essential: MCP requests come from ChatGPT/Claude's
+    // shared egress IPs, so this IP-keyed global limiter would otherwise let one
+    // busy firm throttle every tenant at once.
+    skip: (req) => req.path.startsWith("/api/mcp"),
   }),
 );
 
@@ -172,6 +188,10 @@ app.use(
 // allow a generous 25mb — but ONLY here, to limit DoS attack surface. This
 // parser sets req._body, so the global parser below skips already-parsed
 // requests. Matches /api/mcp and /api/mcp/:token.
+// Per-token rate limit, registered BEFORE the 25mb parser so abusive requests
+// are rejected before any large body is read/allocated (DoS protection). Keyed
+// by bearer token, not the shared AI-vendor IP (see mcp-rate-limit.ts).
+app.use("/api/mcp", mcpLimiter);
 app.use("/api/mcp", express.json({ limit: "25mb" }));
 
 // Global body parsers for every other route. Kept small (1mb) since no other
@@ -202,7 +222,7 @@ app.get("/", (_req, res) => {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>AskToAct</title>
-  <style>
+  <style${nonceAttr()}>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0b1020;color:#e8ecf3;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
     main{max-width:480px;text-align:center}

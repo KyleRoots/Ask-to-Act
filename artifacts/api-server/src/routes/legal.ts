@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { nonceAttr } from "../lib/csp-nonce.js";
 
 const router: IRouter = Router();
 
@@ -21,7 +22,7 @@ function legalPage(opts: {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} | AskToAct</title>
 <meta name="description" content="${title} for AskToAct — the connector bridging your AI assistant to Bullhorn ATS.">
-<style>
+<style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#cbd5e1;margin:0;line-height:1.7}
 .wrap{max-width:760px;margin:0 auto;padding:48px 24px 96px}

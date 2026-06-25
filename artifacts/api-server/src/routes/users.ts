@@ -13,6 +13,7 @@ import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 import { escapeHtml, page } from "../lib/html.js";
+import { nonceAttr } from "../lib/csp-nonce.js";
 
 const router: IRouter = Router();
 
@@ -474,7 +475,7 @@ export function connectorSetupPage(displayName: string, mcpUrl: string | null, a
   const toolOrder = ["chatgpt", "claude", "gemini", "grok", "other"] as const;
 
   const toolTabsHtml = toolOrder.map((key) => `
-      <button class="tool-tab" data-tool="${key}" onclick="selectTool('${key}')">${toolSteps[key].label}</button>
+      <button class="tool-tab" data-tool="${key}">${toolSteps[key].label}</button>
     `).join("");
 
   const toolPanelsHtml = toolOrder.map((key) => {
@@ -495,7 +496,7 @@ export function connectorSetupPage(displayName: string, mcpUrl: string | null, a
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connected | AskToAct</title>
-<style>
+<style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
   display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
@@ -567,7 +568,7 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   ${mcpUrl ? `
   <p class="mcp-label">Your personal connector URL</p>
   <div class="mcp-box" id="mcp" title="Click to select all">${e(mcpUrl)}</div>
-  <button class="copy-btn" id="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy connector URL'},2000)})">Copy connector URL</button>
+  <button class="copy-btn" id="copy-btn">Copy connector URL</button>
   ` : ""}
   <div class="tool-section">
     <p class="tool-label">Which AI tool are you using?</p>
@@ -576,9 +577,9 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
     <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
   </div>
   <div class="help-row">
-    <button type="button" class="help-toggle" id="help-toggle" onclick="toggleHelp()">✉️ Ask for help with setup</button>
+    <button type="button" class="help-toggle" id="help-toggle">✉️ Ask for help with setup</button>
     <p class="help-sub" id="help-sub">Stuck on any step? Send our support team a message and we'll reply by email.</p>
-    <form class="help-form" id="help-form" onsubmit="return submitHelp(event)">
+    <form class="help-form" id="help-form">
       <input type="text" class="help-hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
       <div class="help-field">
         <label for="help-email">Your email (so we can reply)</label>
@@ -594,7 +595,7 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   </div>
 </div>
 </main>
-<script>
+<script${nonceAttr()}>
 function selectTool(key) {
   document.querySelectorAll('.tool-tab').forEach(function(t) {
     t.classList.toggle('active', t.dataset.tool === key);
@@ -656,6 +657,22 @@ function submitHelp(ev) {
     });
   return false;
 }
+// Wire DOM event handlers here — no inline on* attributes (CSP script-src-attr 'none').
+document.querySelectorAll('.tool-tab').forEach(function(t){
+  t.addEventListener('click', function(){ selectTool(t.dataset.tool); });
+});
+var copyBtn = document.getElementById('copy-btn');
+if (copyBtn) copyBtn.addEventListener('click', function(){
+  var self = this;
+  navigator.clipboard.writeText(document.getElementById('mcp').textContent.trim()).then(function(){
+    self.textContent = 'Copied!';
+    setTimeout(function(){ self.textContent = 'Copy connector URL'; }, 2000);
+  });
+});
+var helpToggle = document.getElementById('help-toggle');
+if (helpToggle) helpToggle.addEventListener('click', toggleHelp);
+var helpForm = document.getElementById('help-form');
+if (helpForm) helpForm.addEventListener('submit', submitHelp);
 </script>
 </body></html>`;
 }
@@ -673,7 +690,7 @@ function enrollForm(token: string, userName: string, firmName?: string | null, e
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect Bullhorn | ${e(userName)}</title>
-<style>
+<style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
   display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}

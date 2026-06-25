@@ -24,6 +24,21 @@ function getSlideIndex(pathname: string): number {
   return slides.findIndex((s) => s.position === position);
 }
 
+// Notify the embedding parent to advance the slide. The parent's origin is
+// derived from document.referrer (the embedder URL) rather than posting to "*",
+// so the message is never broadcast to an arbitrary cross-origin frame. If there
+// is no valid referrer (not embedded / referrer suppressed) we no-op.
+function postAdvanceSlide(): void {
+  if (typeof document === "undefined" || !document.referrer) return;
+  let targetOrigin: string;
+  try {
+    targetOrigin = new URL(document.referrer).origin;
+  } catch {
+    return;
+  }
+  window.parent.postMessage({ type: "advanceSlide" }, targetOrigin);
+}
+
 function SlideEditor() {
   const [location, navigate] = useLocation();
   const currentIndex = getSlideIndex(location);
@@ -72,7 +87,7 @@ function SlideEditor() {
       if (isInteractive(event.target)) return;
 
       if (navigationDisabledRef.current) {
-        window.parent.postMessage({ type: "advanceSlide" }, "*");
+        postAdvanceSlide();
         return;
       }
 
@@ -100,7 +115,7 @@ function SlideEditor() {
       touchHandledRef.current = true;
 
       if (navigationDisabledRef.current) {
-        window.parent.postMessage({ type: "advanceSlide" }, "*");
+        postAdvanceSlide();
         return;
       }
 

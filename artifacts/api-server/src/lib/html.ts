@@ -1,3 +1,5 @@
+import { nonceAttr } from "./csp-nonce.js";
+
 // Shared HTML helpers for the server-rendered pages (landing, enroll, connector
 // setup, OAuth status). Centralizes HTML escaping, the brand logo SVG, and the
 // standard status-page template so they don't drift across route modules.
@@ -16,5 +18,5 @@ export const brandLogo = `<svg width="32" height="32" viewBox="0 0 48 48" fill="
 export function page(title: string, message: string): string {
   const t = escapeHtml(title);
   const m = escapeHtml(message);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${t}</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}main{max-width:520px;padding:40px;text-align:center}.logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}.logo-text span{color:#38BDF8}h1{font-size:22px;margin:0 0 12px}p{font-size:15px;line-height:1.6;color:#aab4c5;margin:0}</style></head><body><main><div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div><h1>${t}</h1><p>${m}</p></main></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${t}</title><style${nonceAttr()}>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}main{max-width:520px;padding:40px;text-align:center}.logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}.logo-text span{color:#38BDF8}h1{font-size:22px;margin:0 0 12px}p{font-size:15px;line-height:1.6;color:#aab4c5;margin:0}</style></head><body><main><div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div><h1>${t}</h1><p>${m}</p></main></body></html>`;
 }

@@ -210,6 +210,7 @@ const SERVER_INSTRUCTIONS = [
   "- ALWAYS make the record itself clickable: render the record's NAME (candidate/contact/company name or job title) — or its Bullhorn ID — as a Markdown link to its `bullhornUrl`.",
   "  In a table, the NAME cell (or a Bullhorn ID cell) IS the link, e.g. `| [Joseph Arboleras](<bullhornUrl>) | FANUC America | ... |`.",
   "- Put the link ONLY on the record's own name/ID. Do NOT link email addresses or phone numbers — leave those as plain text.",
+  "- This applies to EVERY row even when an email/phone column is shown: the record NAME is still the link; the email stays plain text. Never let an email be the only link in a row.",
   "- Never add a separate raw-URL column and never print the raw bullhornUrl as text.",
   "- If a record has no `bullhornUrl`, show it without a link (never invent one).",
 ].join("\n");
@@ -220,7 +221,7 @@ const SERVER_INSTRUCTIONS = [
 // skipped the record deep link. Kept short; conditional so it's a no-op for tools
 // whose results carry no `bullhornUrl` (counts, describe, reports).
 const READ_PRESENTATION_SUFFIX =
-  " | Presentation: if a result record includes a `bullhornUrl`, make that record clickable — render its NAME (or Bullhorn ID) as a Markdown link to its bullhornUrl, e.g. [Acme Corp](url). Put the link ONLY on the record name/ID; never link email addresses or phone numbers.";
+  " | Presentation: if a result record includes a `bullhornUrl`, make that record clickable — render its NAME (or Bullhorn ID) as a Markdown link to its bullhornUrl, e.g. [Acme Corp](url). Do this for EVERY row, including rows that also show an email or phone — the name is the link, the email stays plain text. Put the link ONLY on the record name/ID; never link email addresses or phone numbers.";
 
 export function createMcpServer(caller?: CallerIdentity): McpServer {
   const server = new McpServer(
