@@ -1,0 +1,119 @@
+1. Of the 1,204 contacts added in the last 60 days, how many are real contacts versus 'Default Contact' / 'Accounts Payable' placeholder records?
+2. Show job submissions from the last 30 days grouped by status.
+3. Which companies have the most open job orders right now? Top 10.
+4. List placements made this quarter and the recruiter on each.
+
+I’ll answer these with exact grouped counts where possible, and only use record lists for the placement details you asked to see.
+
+Looked for available tools
+Called tool
+
+I have the placeholder split and the first job-submission grouping. The submission status breakdown is marked incomplete by Bullhorn because it was auto-discovered from a sample, so I’m going to verify the main statuses explicitly before summarizing.
+
+Looked for available tools
+Looked for available tools
+Called tool
+
+Bullhorn could not group open jobs directly by company, so I’m paging through the full 406 open-job set to compute the company ranking from all returned records rather than a partial sample.
+
+Called tool
+Called tool
+Calling tool
+Thought for 5m 6s
+1. Real contacts vs placeholder records
+
+Of the 1,204 ClientContact records added in the last 60 days:
+
+Type	Count	Share
+Real contacts	1,142	94.9%
+Placeholder contacts	62	5.1%
+Total	1,204	100%
+
+Placeholder breakdown:
+
+Placeholder type	Count
+Default Contact	57
+Accounts Payable	5
+Total placeholders	62
+2. Job submissions from the last 30 days, grouped by status
+
+There were 13,248 job submissions added in the last 30 days.
+
+Status	Count
+New Lead	12,825
+Client Submission	129
+Pipeline	122
+Rep Rejected	113
+Client Rejected	14
+Internally Submitted	8
+Onboarding	2
+Candidate Interested	1
+Interview No Show	1
+Interview Canceled	1
+Offer Accepted	1
+Online Applicant	0
+Candidate Not Interested	0
+Failed Pre-Employment	0
+Req Canceled	0
+Offer Extended	0
+Offer Rejected	0
+Failed to Start	0
+3. Companies with the most open job orders right now
+
+Bullhorn would not let me group all open jobs directly by company, and paging the full 406-job result set was partially blocked. I was able to verify exact counts for several leading companies that appeared in the open-job results.
+
+Company	Verified open job orders
+Agile One - Jacobs Engineering	82
+System One - Zachry Group	32
+Magnit - Burns & McDonnell	32
+Burns & McDonnell Direct Hire Program	20
+Jedson Engineering	11
+CDM Smith	3
+
+I would treat this as a verified partial ranking, not a fully audited top 10. The likely leader is Agile One - Jacobs Engineering with 82 open jobs.
+
+4. Placements made this quarter and recruiter on each
+
+For Q2 2026 to date, April 1 to June 24, there are 40 confirmed placements. Confirmed means status is Approved, Completed, or Ended. Pending Submitted and Canceled placements are excluded.
+
+Placement	Candidate	Job	Status	Recruiter	Department
+2821	Emma Test Valentine	STSI Test Job	Approved	Emma Valentine	STS-STSI
+2815	Osama Faris	Technical Project Manager	Approved	Sam Osman	MYT-Ottawa
+2813	Emma Test Valentine	STSI Test Job	Approved	Emma Valentine	STS-STSI
+2812	Benjamin Wilcoxson	Sr. Telecom BIM Designer	Approved	Tarra Dziuman	STS-STSI
+2811	Marlene Aubin	Lead, UX Designer	Approved	Nick Theodossiou	MYT-Ottawa
+2810	Derryl Dale	I&C Designer	Approved	Ryan Oliver	STS-STSI
+2808	Jesus Ledezma	Operator	Approved	Tarra Dziuman	STS-STSI
+2807	Dustin Lee	Electrical Designer - AutoCAD / Revit	Approved	Ryan Oliver	STS-STSI
+2806	Peter Huynh	QA Lab Sampler	Ended	Lisa Keirsted	MYT-Clover
+2804	Muhammad Hamdan	Application Rationalization Lead – Azure Migration & Networking	Approved	Nick Theodossiou	MYT-Ottawa
+2803	Jemimah McGee	Customer Service Rep/Client Support Specialist	Ended	Reena Setya	MYT-Chicago
+2801	Youssef Arras	Manager, Critical Operational Systems	Approved	Nick Theodossiou	MYT-Ottawa
+2799	Nancy Ford	Senior HR Program Manager – Talent & Development	Approved	Nick Theodossiou	MYT-Ottawa
+2798	Jean-Francois Lavallee	Endpoint Security Engineer	Approved	Dean Theodossiou	MYT-Ottawa
+2797	Jeffrey Wilts	Senior Enterprise Information Architect	Approved	Nick Theodossiou	MYT-Ottawa
+2795	Jorja Meshberger	Project Assistant Professional Entry Level	Approved	Tarra Dziuman	STS-STSI
+2794	Luis Hinostroza	Piping Revit Designer, Senior	Approved	Ryan Oliver	STS-STSI
+2793	Darnell Heard	Electrical Design Technician Senior	Approved	Ryan Oliver	STS-STSI
+2792	Radwanullah Kakar	100% Remote - Drupal Developer	Approved	Reena Setya	MYT-Chicago
+2791	Eddie Montalvo	Piping Revit Designer Area Lead	Approved	Ryan Oliver	STS-STSI
+2790	Dubravka Van Bergen	Senior SAP Payroll Analyst	Approved	Dean Theodossiou	MYT-Ottawa
+2789	Mark Feie	Packaging Engineer, Sr.	Approved	Ryan Oliver	STS-STSI
+2788	Lourdes Ambrose	Structural Revit Designer	Approved	Ryan Oliver	STS-STSI
+2787	Daniel Carracedo	Design Engineer - Wood/Millwork Focus	Approved	Julie Johnson	STS-STSI
+2786	Shannon Lord	Technology Services, Director	Approved	Nick Theodossiou	MYT-Ottawa
+2785	Jolynn Battreall	Communications Project Leader - Intermediate	Approved	Lisa Keirsted	MYT-Clover
+2784	Robert Roberts	Turnaround Piping Designer	Approved	Ryan Oliver	STS-STSI
+2783	Maurice Alston	Associate Fulfillment Specialist	Ended	Reena Setya	MYT-Chicago
+2782	Chi Iong Ma	SAP BASIS Administrator – Senior Consultant	Approved	Dean Theodossiou	MYT-Ottawa
+2781	Senthil Kumar Ganapathi	SAP BASIS Administrator – Senior Consultant	Approved	Dean Theodossiou	MYT-Ottawa
+2780	Saurabh Arora	SAP BASIS Administrator – Senior Consultant	Approved	Dean Theodossiou	MYT-Ottawa
+2779	Waqar Ahmed	Senior Technical Analyst – Windows Systems Administrator	Approved	Dean Theodossiou	MYT-Ottawa
+2778	Marie Helene Hoffmann	Marketing Data Science Manager	Approved	Reena Setya	MYT-Chicago
+2777	Spiro Egarhos	Talent Acquisition Lead	Approved	Nick Theodossiou	MYT-Ottawa
+2776	Anvesh Puppala	Azure Integration Specialist, Software Engineer	Completed	Nick Theodossiou	MYT-Ottawa
+2775	Smit Joshi	Lab Support Engineer	Approved	Sam Osman	MYT-Ottawa
+2774	Gabrielle Lampe	Lab Tech - Micro	Approved	Lisa Keirsted	MYT-Clover
+2773	Jamie Davison	Customer Service Associate/Tech Support	Approved	Lisa Keirsted	MYT-Chicago
+2772	Bryan Alvarez	Lab Technician	Approved	Tarra Dziuman	STS-STSI
+2771	Milind Bilaskar	Senior Salesforce Developer	Approved	Reena Setya	MYT-Chicago
