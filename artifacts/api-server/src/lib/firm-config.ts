@@ -61,6 +61,9 @@ export interface FirmFieldMap {
   entities: Record<string, EntityConfig>;
   semantics: { internalDepartment: Record<string, string> };
   missing: { internalDepartment: string[] };
+  /** Cached dept value lists per entity, populated at discovery time. Eliminates
+   *  the runtime groupBy round-trip in resolveDeptNames for non-Myticas firms. */
+  deptValues?: Record<string, string[]>;
 }
 
 // In-memory per-firm cache. Config changes only on (re)discovery, which
@@ -145,15 +148,21 @@ export interface DiscoverySummary {
  * per-entity failures (e.g. a disabled CRM entity) without aborting the whole
  * run. Invalidates the in-memory cache so the next read sees fresh config.
  */
+// Entities for which we cache live department values at discovery time.
+// These are the entities used by reports (resolveDeptNames). Caching them
+// here means reports pay zero extra Bullhorn round-trips for non-Myticas firms.
+const DEPT_VALUE_ENTITIES = ["JobOrder", "Placement", "Opportunity"] as const;
+
 export async function discoverFirmConfig(firmId: string): Promise<DiscoverySummary> {
   // Lazy import breaks the firm-config <-> bullhorn-client module cycle.
-  const { describeEntity } = await import("./bullhorn-client.js");
+  const { describeEntity, countEntity } = await import("./bullhorn-client.js");
 
   const entities: FirmFieldMap["entities"] = {};
   const internalDepartment: Record<string, string> = {};
   const missing: string[] = [];
   const discovered: string[] = [];
   const failed: { entity: string; error: string }[] = [];
+  const deptValues: Record<string, string[]> = {};
 
   await firmContext.run({ firmId }, async () => {
     for (const entity of DISCOVERY_ENTITIES) {
@@ -198,6 +207,36 @@ export async function discoverFirmConfig(firmId: string): Promise<DiscoverySumma
         );
       }
     }
+
+    // Fetch and cache live department VALUES for the report entities. Running
+    // this inside the same firmContext avoids a second auth-context setup and
+    // ensures the values are scoped to this firm's Bullhorn instance.
+    await Promise.all(
+      DEPT_VALUE_ENTITIES.map(async (entity) => {
+        const deptField = internalDepartment[entity];
+        if (!deptField) return; // no dept field discovered for this entity
+        try {
+          const r = (await countEntity({
+            entityType: entity,
+            query: "isDeleted:false",
+            groupBy: deptField,
+          })) as { groups?: Array<{ value: string; count: number | null }> };
+          const values = (r.groups ?? [])
+            .map((g) => g.value)
+            .filter((v): v is string => typeof v === "string" && v.length > 0)
+            .sort();
+          if (values.length > 0) {
+            deptValues[entity] = values;
+            logger.debug({ firmId, entity, count: values.length }, "firm-config: dept values cached");
+          }
+        } catch (err) {
+          logger.warn(
+            { firmId, entity, err },
+            "firm-config: dept-value discovery failed; will fall back to live query at report time",
+          );
+        }
+      }),
+    );
   });
 
   const fieldMap: FirmFieldMap = {
@@ -205,6 +244,7 @@ export async function discoverFirmConfig(firmId: string): Promise<DiscoverySumma
     entities,
     semantics: { internalDepartment },
     missing: { internalDepartment: missing },
+    ...(Object.keys(deptValues).length > 0 ? { deptValues } : {}),
   };
 
   // Defensive backstop: the "service" firm (Myticas) is managed by the platform

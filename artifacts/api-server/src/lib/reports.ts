@@ -120,7 +120,14 @@ async function resolveDeptNames(
   if (firmId) {
     const map = await getFirmFieldMap(firmId);
     if (map) {
-      // Firm has a discovered config row → not Myticas; discover live dept values.
+      // 1. Fast path: values were cached at discovery time — zero extra Bullhorn call.
+      const cached = map.deptValues?.[entityType];
+      if (cached && cached.length > 0) {
+        return { departments: cached, source: "per-firm" };
+      }
+
+      // 2. Slow path: firm has a config row but dept values weren't cached yet
+      //    (e.g. older discovery run before this feature). Fetch live and return.
       try {
         const r = (await countEntity({
           entityType,
