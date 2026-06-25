@@ -11,15 +11,18 @@
  *   so recruiter aggregation is done by FETCHING placements (small set) and
  *   aggregating by owner in code.
  * - JobSubmission is high-volume (tens of thousands/yr) — always COUNT, never fetch.
- * - Departments are a stable, configured set for this instance (below); they are
- *   passed as exact groupValues. Records outside the set roll up to
- *   "otherOrUnmapped" so a new department never silently disappears.
+ * - Departments are resolved per firm: Myticas falls back to the hardcoded
+ *   DEPARTMENTS list (byte-identical); other firms auto-discover live values.
  */
 import { countEntity, listPlacements, ACTIVE_OPPS_DEFINITION } from "./bullhorn-client.js";
 import { currentFirmContextId } from "./bullhorn-auth.js";
-import { resolveDeptField } from "./firm-config.js";
+import { resolveDeptField, getFirmFieldMap } from "./firm-config.js";
 
-/** Configured Internal Departments (office/branch) for this instance. */
+/**
+ * Myticas' configured Internal Departments — used as the fallback groupValues list
+ * for any firm that has no discovered firm_config row yet (keeps Myticas byte-identical
+ * and degrades gracefully for a not-yet-onboarded second firm).
+ */
 export const DEPARTMENTS = [
   "STS-STSI",
   "MYT-Ottawa",
@@ -71,9 +74,9 @@ type PlacementRow = {
   id: number;
   status?: string;
   employmentType?: string;
-  correlatedCustomText1?: string;
   owner?: Person;
   jobSubmission?: { id: number; sendingUser?: Person };
+  [key: string]: unknown;
 };
 
 /** Run `fn` over `items` with bounded concurrency (keeps us under the REST rate limit). */
@@ -100,20 +103,63 @@ async function countTotal(entityType: string, query: string): Promise<number> {
   return r.total ?? 0;
 }
 
-/** Exact per-department breakdown using the configured department list as groupValues. */
+/**
+ * Resolves the department VALUE list for a given firm + entity + field.
+ * Returns both the list and a `source` flag so callers can preserve
+ * byte-identical output metadata for Myticas:
+ * - "configured" → Myticas fallback (hardcoded DEPARTMENTS); caller should
+ *   emit `departmentsSource: "configured"` to keep Myticas output identical.
+ * - "per-firm" → auto-discovered live values from Bullhorn; caller uses
+ *   `departmentsSource: "per-firm"`.
+ */
+async function resolveDeptNames(
+  firmId: string | null,
+  entityType: string,
+  deptField: string,
+): Promise<{ departments: readonly string[]; source: "configured" | "per-firm" }> {
+  if (firmId) {
+    const map = await getFirmFieldMap(firmId);
+    if (map) {
+      // Firm has a discovered config row → not Myticas; discover live dept values.
+      try {
+        const r = (await countEntity({
+          entityType,
+          query: "isDeleted:false",
+          groupBy: deptField,
+        })) as CountResult;
+        const values = (r.groups ?? [])
+          .map((g) => g.value)
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+          .sort();
+        if (values.length > 0) return { departments: values, source: "per-firm" };
+      } catch {
+        // Fall through to Myticas fallback
+      }
+    }
+  }
+  // Myticas / no config row / discovery returned empty → use hardcoded list.
+  return { departments: DEPARTMENTS, source: "configured" };
+}
+
+/**
+ * Exact per-department breakdown using a supplied department list as groupValues.
+ * Records outside the list roll up to "otherOrUnmapped" so a new department never
+ * silently disappears.
+ */
 async function groupedCountByDept(
   entityType: string,
   query: string,
   deptField: string,
+  departments: readonly string[],
 ): Promise<{ total: number; byDept: Record<string, number>; otherOrUnmapped: number; complete: boolean }> {
   const r = (await countEntity({
     entityType,
     query,
     groupBy: deptField,
-    groupValues: [...DEPARTMENTS],
+    groupValues: [...departments],
   })) as CountResult;
   const byDept: Record<string, number> = {};
-  for (const d of DEPARTMENTS) byDept[d] = 0;
+  for (const d of departments) byDept[d] = 0;
   let sum = 0;
   for (const g of r.groups ?? []) {
     const c = g.count ?? 0;
@@ -156,9 +202,11 @@ async function fetchAllPlacements(opts: {
   dateAddedStart?: string;
   dateAddedEnd?: string;
   fields?: string;
+  deptField?: string;
 }): Promise<PlacementRow[]> {
+  const deptField = opts.deptField ?? "correlatedCustomText1";
   const fields =
-    opts.fields ?? "id,status,employmentType,correlatedCustomText1,owner(id,name,firstName,lastName)";
+    opts.fields ?? `id,status,employmentType,${deptField},owner(id,name,firstName,lastName)`;
   const pageSize = 500;
   const all: PlacementRow[] = [];
   for (let page = 0, start = 0; page < 40; page++, start += pageSize) {
@@ -236,23 +284,44 @@ export async function staffingScorecard(args: { year?: number }): Promise<unknow
   // Resolve the per-firm Internal Department field (Myticas -> identical literals).
   const jobDeptField = (await resolveDeptField(firmId, "JobOrder")) ?? "correlatedCustomText1";
   const oppDeptField = (await resolveDeptField(firmId, "Opportunity")) ?? "customText1";
-  const [placements, openJobs, opps] = await Promise.all([
-    fetchAllPlacements({ dateAddedStart: range.startStr, dateAddedEnd: range.endStr }),
-    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, jobDeptField),
-    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, oppDeptField),
+  const placementDeptField = (await resolveDeptField(firmId, "Placement")) ?? "correlatedCustomText1";
+
+  // Resolve department name lists per firm (Myticas falls back to hardcoded DEPARTMENTS).
+  const [jobDeptResult, oppDeptResult, placementsRaw] = await Promise.all([
+    resolveDeptNames(firmId, "JobOrder", jobDeptField),
+    resolveDeptNames(firmId, "Opportunity", oppDeptField),
+    fetchAllPlacements({
+      dateAddedStart: range.startStr,
+      dateAddedEnd: range.endStr,
+      deptField: placementDeptField,
+    }),
+  ]);
+
+  // Use the same dept list for display rows — prefer job dept names as the canonical
+  // set; merge in any opp-only names so no dept is silently dropped.
+  const deptSet = new Set<string>([...jobDeptResult.departments, ...oppDeptResult.departments]);
+  const departments = [...deptSet].sort();
+  // "configured" only when BOTH sources fell back to the hardcoded list (Myticas).
+  const deptSource = jobDeptResult.source === "configured" && oppDeptResult.source === "configured"
+    ? "configured"
+    : "per-firm";
+
+  const [openJobs, opps] = await Promise.all([
+    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, jobDeptField, departments),
+    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, oppDeptField, departments),
   ]);
 
   const agg: Record<
     string,
     { contract: number; contractToHire: number; directHire: number; other: number; total: number }
   > = {};
-  for (const d of DEPARTMENTS) agg[d] = { contract: 0, contractToHire: 0, directHire: 0, other: 0, total: 0 };
+  for (const d of departments) agg[d] = { contract: 0, contractToHire: 0, directHire: 0, other: 0, total: 0 };
   let confirmedTotal = 0;
   let placementsOther = 0;
-  for (const p of placements) {
+  for (const p of placementsRaw) {
     if (!CONFIRMED_PLACEMENT_STATUSES.has(p.status ?? "")) continue;
     confirmedTotal++;
-    const dept = p.correlatedCustomText1 ?? "";
+    const dept = (p[placementDeptField] as string | undefined) ?? "";
     if (dept in agg) {
       agg[dept][employmentColumn(p.employmentType)]++;
       agg[dept].total++;
@@ -261,10 +330,10 @@ export async function staffingScorecard(args: { year?: number }): Promise<unknow
     }
   }
 
-  const rows = DEPARTMENTS.map((d) => {
+  const rows = departments.map((d) => {
     const pl = agg[d];
-    const oj = openJobs.byDept[d];
-    const op = opps.byDept[d];
+    const oj = openJobs.byDept[d] ?? 0;
+    const op = opps.byDept[d] ?? 0;
     return {
       department: d,
       contractPlacements: pl.contract,
@@ -328,10 +397,10 @@ export async function staffingScorecard(args: { year?: number }): Promise<unknow
       activeOpportunities: opps.otherOrUnmapped,
     },
     definitions: DEPT_DEFINITIONS,
-    departmentsSource: "configured",
+    departmentsSource: deptSource,
     notes: [
       "demandVsDelivery = openJobs / totalPlacements (higher = more unfilled demand).",
-      "otherOrUnmapped counts records whose department is blank or outside the configured list.",
+      `otherOrUnmapped counts records whose department is blank or outside the ${deptSource === "configured" ? "configured" : "resolved"} list.`,
     ],
     incomplete: !openJobs.complete || !opps.complete,
   };
@@ -345,13 +414,24 @@ export async function placementsReport(args: {
 }): Promise<unknown> {
   const range = resolveRange({ startDate: args.startDate, endDate: args.endDate, year: undefined });
   const mode = args.status ?? "confirmed";
-  const placements = await fetchAllPlacements({ dateAddedStart: range.startStr, dateAddedEnd: range.endStr });
+  const firmId = currentFirmContextId();
+  const placementDeptField = (await resolveDeptField(firmId, "Placement")) ?? "correlatedCustomText1";
+
+  const [placements, placementDeptResult] = await Promise.all([
+    fetchAllPlacements({
+      dateAddedStart: range.startStr,
+      dateAddedEnd: range.endStr,
+      deptField: placementDeptField,
+    }),
+    resolveDeptNames(firmId, "Placement", placementDeptField),
+  ]);
+  const { departments, source: deptSource } = placementDeptResult;
 
   const agg: Record<
     string,
     { contract: number; contractToHire: number; directHire: number; other: number; total: number }
   > = {};
-  for (const d of DEPARTMENTS) agg[d] = { contract: 0, contractToHire: 0, directHire: 0, other: 0, total: 0 };
+  for (const d of departments) agg[d] = { contract: 0, contractToHire: 0, directHire: 0, other: 0, total: 0 };
   const byStatus: Record<string, number> = {};
   const byTypeGlobal = { contract: 0, contractToHire: 0, directHire: 0, other: 0 };
   let total = 0;
@@ -362,7 +442,7 @@ export async function placementsReport(args: {
     if (mode === "confirmed" && !CONFIRMED_PLACEMENT_STATUSES.has(st)) continue;
     total++;
     byTypeGlobal[employmentColumn(p.employmentType)]++;
-    const dept = p.correlatedCustomText1 ?? "";
+    const dept = (p[placementDeptField] as string | undefined) ?? "";
     if (dept in agg) {
       agg[dept][employmentColumn(p.employmentType)]++;
       agg[dept].total++;
@@ -371,13 +451,15 @@ export async function placementsReport(args: {
     }
   }
 
-  const rows = DEPARTMENTS.map((d) => ({
-    department: d,
-    contract: agg[d].contract,
-    contractToHire: agg[d].contractToHire,
-    directHire: agg[d].directHire,
-    total: agg[d].total,
-  })).sort((a, b) => b.total - a.total);
+  const rows = departments
+    .map((d) => ({
+      department: d,
+      contract: agg[d].contract,
+      contractToHire: agg[d].contractToHire,
+      directHire: agg[d].directHire,
+      total: agg[d].total,
+    }))
+    .sort((a, b) => b.total - a.total);
 
   return {
     report: "placements_report",
@@ -390,21 +472,24 @@ export async function placementsReport(args: {
     byStatus,
     otherOrUnmapped: other,
     definitions: { placementsMade: DEPT_DEFINITIONS.placementsMade },
-    departmentsSource: "configured",
+    departmentsSource: deptSource,
     summary: `${total} ${mode === "confirmed" ? "confirmed " : ""}placements in ${range.label}.`,
   };
 }
 
 /** 3. Open Jobs / Demand Report — current open requisitions by department and employment type. */
 export async function openJobsReport(): Promise<unknown> {
-  const jobDeptField = (await resolveDeptField(currentFirmContextId(), "JobOrder")) ?? "correlatedCustomText1";
+  const firmId = currentFirmContextId();
+  const jobDeptField = (await resolveDeptField(firmId, "JobOrder")) ?? "correlatedCustomText1";
+  const { departments, source: deptSource } = await resolveDeptNames(firmId, "JobOrder", jobDeptField);
+
   const [byDept, byType] = await Promise.all([
-    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, jobDeptField),
+    groupedCountByDept("JobOrder", OPEN_JOBS_QUERY, jobDeptField, departments),
     groupedCount("JobOrder", OPEN_JOBS_QUERY, "employmentType", ["Contract", "Contract to Hire", "Direct Hire"]),
   ]);
-  const rows = DEPARTMENTS.map((d) => ({ department: d, openJobs: byDept.byDept[d] })).sort(
-    (a, b) => b.openJobs - a.openJobs,
-  );
+  const rows = departments
+    .map((d) => ({ department: d, openJobs: byDept.byDept[d] ?? 0 }))
+    .sort((a, b) => b.openJobs - a.openJobs);
   return {
     report: "open_jobs_report",
     generatedAt: new Date().toISOString(),
@@ -414,7 +499,7 @@ export async function openJobsReport(): Promise<unknown> {
     totals: { openJobs: byDept.total },
     otherOrUnmapped: { department: byDept.otherOrUnmapped, employmentType: byType.otherOrUnmapped },
     definitions: { openJobs: DEPT_DEFINITIONS.openJobs },
-    departmentsSource: "configured",
+    departmentsSource: deptSource,
     summary: `${byDept.total} open jobs total; ${rows[0]?.department} leads with ${rows[0]?.openJobs}.`,
     incomplete: !byDept.complete,
   };
@@ -422,14 +507,17 @@ export async function openJobsReport(): Promise<unknown> {
 
 /** 4. Sales Pipeline Report — active opportunities by department and stage. */
 export async function salesPipelineReport(): Promise<unknown> {
-  const oppDeptField = (await resolveDeptField(currentFirmContextId(), "Opportunity")) ?? "customText1";
+  const firmId = currentFirmContextId();
+  const oppDeptField = (await resolveDeptField(firmId, "Opportunity")) ?? "customText1";
+  const { departments, source: deptSource } = await resolveDeptNames(firmId, "Opportunity", oppDeptField);
+
   const [byDept, byStage] = await Promise.all([
-    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, oppDeptField),
+    groupedCountByDept("Opportunity", ACTIVE_OPPS_QUERY, oppDeptField, departments),
     groupedCount("Opportunity", ACTIVE_OPPS_QUERY, "status"),
   ]);
-  const rows = DEPARTMENTS.map((d) => ({ department: d, activeOpportunities: byDept.byDept[d] })).sort(
-    (a, b) => b.activeOpportunities - a.activeOpportunities,
-  );
+  const rows = departments
+    .map((d) => ({ department: d, activeOpportunities: byDept.byDept[d] ?? 0 }))
+    .sort((a, b) => b.activeOpportunities - a.activeOpportunities);
   return {
     report: "sales_pipeline_report",
     generatedAt: new Date().toISOString(),
@@ -439,7 +527,7 @@ export async function salesPipelineReport(): Promise<unknown> {
     totals: { activeOpportunities: byDept.total },
     otherOrUnmapped: { department: byDept.otherOrUnmapped },
     definitions: { activeOpportunities: DEPT_DEFINITIONS.activeOpportunities },
-    departmentsSource: "configured",
+    departmentsSource: deptSource,
     summary: `${byDept.total} active opportunities; ${rows[0]?.department} leads with ${rows[0]?.activeOpportunities}.`,
     incomplete: !byDept.complete,
   };
@@ -451,13 +539,22 @@ export async function jobAgingReport(): Promise<unknown> {
   const c30 = now - 30 * DAY_MS;
   const c90 = now - 90 * DAY_MS;
   const c180 = now - 180 * DAY_MS;
+  const firmId = currentFirmContextId();
+  const jobDeptField = (await resolveDeptField(firmId, "JobOrder")) ?? "correlatedCustomText1";
+  const { departments, source: deptSource } = await resolveDeptNames(firmId, "JobOrder", jobDeptField);
+
   // Cumulative "added on/before cutoff" counts, then derive non-overlapping buckets by subtraction.
   const [total, gt30, gt90, gt180, staleByDept] = await Promise.all([
     countTotal("JobOrder", OPEN_JOBS_QUERY),
     countTotal("JobOrder", `${OPEN_JOBS_QUERY} AND dateAdded:[* TO ${c30}]`),
     countTotal("JobOrder", `${OPEN_JOBS_QUERY} AND dateAdded:[* TO ${c90}]`),
     countTotal("JobOrder", `${OPEN_JOBS_QUERY} AND dateAdded:[* TO ${c180}]`),
-    groupedCountByDept("JobOrder", `${OPEN_JOBS_QUERY} AND dateAdded:[* TO ${c90}]`, "correlatedCustomText1"),
+    groupedCountByDept(
+      "JobOrder",
+      `${OPEN_JOBS_QUERY} AND dateAdded:[* TO ${c90}]`,
+      jobDeptField,
+      departments,
+    ),
   ]);
   const buckets = [
     { ageBucket: "0-30 days", count: total - gt30 },
@@ -465,9 +562,9 @@ export async function jobAgingReport(): Promise<unknown> {
     { ageBucket: "91-180 days", count: gt90 - gt180 },
     { ageBucket: "180+ days", count: gt180 },
   ];
-  const staleRows = DEPARTMENTS.map((d) => ({ department: d, staleOpenJobs: staleByDept.byDept[d] })).sort(
-    (a, b) => b.staleOpenJobs - a.staleOpenJobs,
-  );
+  const staleRows = departments
+    .map((d) => ({ department: d, staleOpenJobs: staleByDept.byDept[d] ?? 0 }))
+    .sort((a, b) => b.staleOpenJobs - a.staleOpenJobs);
   return {
     report: "job_aging_report",
     generatedAt: new Date().toISOString(),
@@ -476,7 +573,7 @@ export async function jobAgingReport(): Promise<unknown> {
     staleByDepartment: staleRows,
     totals: { openJobs: total, staleOver90Days: gt90 },
     definitions: { openJobs: DEPT_DEFINITIONS.openJobs, staleOpenJobs: "open jobs added more than 90 days ago" },
-    departmentsSource: "configured",
+    departmentsSource: deptSource,
     summary: `${total} open jobs; ${gt90} have been open >90 days (${gt180} >180 days).`,
   };
 }
