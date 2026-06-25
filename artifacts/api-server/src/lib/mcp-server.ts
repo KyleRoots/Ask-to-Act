@@ -77,6 +77,7 @@ import {
   listReports,
 } from "./reports.js";
 import { matchCandidatesForJob } from "./matching.js";
+import { findCandidates } from "./find-candidates.js";
 
 // Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
 // a human, so whitespace is pure overhead — and multi-record reads are large
@@ -565,6 +566,50 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     },
     async (a) =>
       rt("match_candidates_for_job", a, () => matchCandidatesForJob(a)),
+  );
+
+  tool(
+    "find_candidates",
+    "Find the best candidates for an ad hoc ask (NOT tied to a specific job order) — the PREFERRED tool whenever a recruiter describes who they want (\"find me a senior Python dev in Ottawa with AWS\"). It does all the search-quality work deterministically on the server so results are consistent no matter which AI is driving: (1) RECALL — expands each required concept into curated synonyms/orthographic variants (e.g. \"react\" also matches \"reactjs\"/\"react.js\"); (2) RANK — re-orders by recruiter signals (structured skill hits, résumé-confirmed skills, local match, recency, availability) instead of raw text relevance; (3) PRECISION — confirms the required terms against each shortlisted candidate's actual résumé and returns short EVIDENCE quotes; (4) EXPERIENCE — derives years/seniority/recency from work-history dates. By default it searches the workable (non-archived) pool. Use this instead of the raw `search_candidates` tool unless you need a raw Bullhorn query. For matching against a SPECIFIC job order, use `match_candidates_for_job` instead. DISPLAY RULE (REQUIRED): render each candidate NAME as a markdown hyperlink to its `bullhornUrl`, show status/location/experience, and cite the résumé evidence — do NOT claim a skill or clearance without it (`resumeConfirmed`/`resumeEvidence`). Security clearance is NOT structured in Bullhorn (it lives in résumé text); treat any clearance as UNVERIFIED until confirmed and note that clearances can lapse.",
+    {
+      mustHave: z
+        .array(z.string())
+        .min(1)
+        .describe(
+          "The required concepts every candidate should have — skills, titles, or clearances (each is AND-ed; all must be present). Each is auto-expanded into synonyms/variants for recall.",
+        ),
+      niceToHave: z
+        .array(z.string())
+        .optional()
+        .describe("Optional bonus concepts that boost ranking but are NOT required."),
+      city: z
+        .string()
+        .optional()
+        .describe("Preferred city — local candidates rank higher, but strong out-of-area people still appear (not a hard filter)."),
+      state: z
+        .string()
+        .optional()
+        .describe("Preferred state/province — same local-priority behavior as city."),
+      status: z
+        .string()
+        .optional()
+        .describe("Restrict to an exact Bullhorn candidate status (e.g. \"Active\"). Optional."),
+      includeInactive: z
+        .boolean()
+        .optional()
+        .describe("Set true to INCLUDE archived/inactive candidates (excluded by default — only the workable pool is searched)."),
+      requireResumeConfirmation: z
+        .boolean()
+        .optional()
+        .describe("Set true to DROP candidates whose résumé does not confirm at least one required term (strict precision). Default false."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("How many ranked candidates to return (default 8, max 20)."),
+    },
+    async (a) => rt("find_candidates", a, () => findCandidates(a)),
   );
 
   tool(

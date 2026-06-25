@@ -39,3 +39,4 @@
 - [Notify users = Task, not bell](bullhorn-notify-users.md) — bell feed (UserMessage/bhInternalApi) is 403-closed to ALL integrations; alert users via Task owner+secondaryOwners (bodyless to-many assoc) + notificationMinutes; never fake the bell.
 - [Bullhorn record deep links](bullhorn-record-deeplinks.md) — bullhornUrl already injected per record (enrichWithProfileUrls); links don't RENDER unless MCP server `instructions` tell the AI to hyperlink it. Data presence ≠ clickable.
 - [Candidate matching](candidate-matching.md) — one deterministic server-side matcher (never AI-improvised); submission status by candidate ID + EXHAUSTIVE pagination; default exclusions overridable but the override must widen the SEARCH, not just the JS filter.
+- [Candidate search quality](candidate-search-quality.md) — synonyms must thread through search+ranking+résumé-verify as Concepts (canonical+synonyms), not just search, or synonym-only matches get under-scored/dropped.

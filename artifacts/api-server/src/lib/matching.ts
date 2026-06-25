@@ -19,8 +19,13 @@ import {
   getJob,
   searchCandidates,
   listSubmissionsForJob,
-  getCandidateResume,
+  getCandidate,
 } from "./bullhorn-client.js";
+import { asArray, entityOf, mapLimit, str } from "./record-utils.js";
+import { toConcepts, type Concept } from "./search-taxonomy.js";
+import { isLocalMatch as isLocalMatchShared, structuredConceptHits as structuredConceptHitsShared } from "./search-ranking.js";
+import { verifyConcepts } from "./search-verify.js";
+import { deriveExperience } from "./candidate-experience.js";
 
 export interface MatchCandidatesArgs {
   jobId: number;
@@ -46,6 +51,7 @@ const MAX_LIMIT = 15;
 const DEFAULT_POOL = 50;
 const MAX_POOL = 100;
 const RESUME_CONCURRENCY = 4;
+const EXPERIENCE_CONCURRENCY = 4;
 
 /** Status substrings that mark a candidate as not-to-surface, grouped by reason. */
 const STATUS_MARKERS = {
@@ -63,24 +69,6 @@ interface CandidateRecord {
   occupation?: string;
   skillSet?: string;
   address?: { city?: string; state?: string; countryName?: string } | null;
-}
-
-/** Run `fn` over `items` with bounded concurrency to respect the REST rate limit. */
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const out: R[] = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) || 1 }, async () => {
-    while (cursor < items.length) {
-      const i = cursor++;
-      out[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return out;
 }
 
 /**
@@ -108,26 +96,6 @@ async function fetchAllSubmittedCandidateIds(jobId: number): Promise<Set<number>
     if (rows.length < PAGE) break;
   }
   return ids;
-}
-
-function asArray(v: unknown): unknown[] {
-  if (Array.isArray(v)) return v;
-  if (v && typeof v === "object" && Array.isArray((v as { data?: unknown[] }).data)) {
-    return (v as { data: unknown[] }).data;
-  }
-  return [];
-}
-
-function recordOf(v: unknown): Record<string, unknown> {
-  if (v && typeof v === "object" && "data" in (v as object)) {
-    const d = (v as { data?: unknown }).data;
-    if (d && typeof d === "object") return d as Record<string, unknown>;
-  }
-  return (v ?? {}) as Record<string, unknown>;
-}
-
-function str(v: unknown): string {
-  return typeof v === "string" ? v : "";
 }
 
 function fullName(c: CandidateRecord): string {
@@ -166,20 +134,17 @@ function statusExcludedBy(status: string, markers: string[]): string | null {
   return null;
 }
 
+/** Local-match against the job's city/state, via the shared ranking helper. */
 function isLocalMatch(cand: CandidateRecord, jobCity: string, jobState: string): boolean {
-  const cs = (cand.address?.state ?? "").trim().toLowerCase();
-  const cc = (cand.address?.city ?? "").trim().toLowerCase();
-  const js = jobState.trim().toLowerCase();
-  const jc = jobCity.trim().toLowerCase();
-  if (js && cs && cs === js) return true;
-  if (jc && cc && cc === jc) return true;
-  return false;
+  return isLocalMatchShared(cand as unknown as Record<string, unknown>, jobCity, jobState);
 }
 
-/** Count how many of the search terms appear in the candidate's structured text. */
-function structuredSkillHits(cand: CandidateRecord, terms: string[]): string[] {
-  const hay = `${cand.skillSet ?? ""} ${cand.occupation ?? ""}`.toLowerCase();
-  return terms.filter((t) => hay.includes(t.toLowerCase()));
+/**
+ * Which required CONCEPTS (canonical + synonyms) appear in the candidate's structured
+ * skill fields, reported by canonical label, via the shared concept-aware helper.
+ */
+function structuredConceptHits(cand: CandidateRecord, concepts: Concept[]): string[] {
+  return structuredConceptHitsShared(cand as unknown as Record<string, unknown>, concepts);
 }
 
 export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<unknown> {
@@ -190,7 +155,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   const poolSize = Math.min(Math.max(limit * 4, args.poolSize ?? DEFAULT_POOL), MAX_POOL);
 
   // 1. Read the job and derive the requirements we will match against.
-  const job = recordOf(await getJob({ id: args.jobId }));
+  const job = entityOf(await getJob({ id: args.jobId }));
   if (!job.id) {
     throw new Error(`Job ${args.jobId} not found (or not readable).`);
   }
@@ -217,12 +182,16 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     );
   }
 
-  // 2. Search candidates: each must-have is its own AND group (so all are required);
-  //    nice-to-haves widen recall as a single OR group. We restrict the search to the
-  //    workable (non-archived) pool ONLY when archived candidates are excluded — when
-  //    the caller opts in via includeInactive, we must NOT hard-filter them out here or
-  //    the override could never surface them.
-  const keywords: Array<string | string[]> = mustHave.map((s) => s);
+  // 2. Search candidates: each must-have is its own AND group (so all are required),
+  //    EXPANDED into curated synonyms/orthographic variants for recall (e.g. "react"
+  //    also matches "reactjs"/"react.js"). Nice-to-haves widen recall as a single OR
+  //    group. We restrict the search to the workable (non-archived) pool ONLY when
+  //    archived candidates are excluded — when the caller opts in via includeInactive,
+  //    we must NOT hard-filter them out here or the override could never surface them.
+  const mustConcepts = toConcepts(mustHave);
+  const keywords: Array<string | string[]> = mustConcepts.map((c) =>
+    c.terms.length === 1 ? c.terms[0] : c.terms,
+  );
   if (niceToHave.length > 0) keywords.push(niceToHave);
 
   const [searchRes, submittedIds] = await Promise.all([
@@ -267,11 +236,12 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     kept.push(c);
   }
 
-  // 5. Score: local priority, then structured-skill overlap, preserving Bullhorn's
-  //    relevance order as the final tiebreak.
-  const allTerms = [...mustHave, ...niceToHave];
+  // 5. Score: local priority, then structured-skill overlap (concept-aware so a synonym
+  //    counts the same as an exact term), preserving Bullhorn's relevance order as the
+  //    final tiebreak.
+  const allConcepts = toConcepts([...mustHave, ...niceToHave]);
   const scored = kept.map((c, idx) => {
-    const hits = structuredSkillHits(c, allTerms);
+    const hits = structuredConceptHits(c, allConcepts);
     const local = isLocalMatch(c, jobCity, jobState);
     return { cand: c, hits, local, relevanceRank: idx };
   });
@@ -283,28 +253,27 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
 
   const shortlist = scored.slice(0, limit);
 
-  // 6. Résumé evidence for the shortlist ONLY (small payload, evidence-backed) —
-  //    VERIFY mode returns short quotes around each must-have term.
-  const evidences = await mapLimit(shortlist, RESUME_CONCURRENCY, async (s) => {
-    try {
-      const r = (await getCandidateResume({
-        candidateId: s.cand.id,
-        highlight: allTerms,
-      })) as {
-        matchedTerms?: string[];
-        excerpts?: Array<{ term: string; text: string }>;
-      };
-      return {
-        matchedTerms: r.matchedTerms ?? [],
-        excerpt: r.excerpts?.[0]?.text ?? null,
-      };
-    } catch {
-      return { matchedTerms: [], excerpt: null };
-    }
-  });
+  // 6. Résumé PRECISION + EXPERIENCE for the shortlist ONLY (small payload), via the
+  //    shared helpers so ad hoc search and matching fact-check identically. Verify the
+  //    must-have terms against the actual résumé; derive years/seniority/recency from
+  //    work-history dates (Bullhorn's structured experience field is usually empty).
+  const shortlistIds = shortlist.map((s) => s.cand.id);
+  const now = Date.now();
+  const [verified, experiences] = await Promise.all([
+    verifyConcepts(shortlistIds, mustConcepts, { concurrency: RESUME_CONCURRENCY }),
+    mapLimit(shortlist, EXPERIENCE_CONCURRENCY, async (s) => {
+      try {
+        return deriveExperience(entityOf(await getCandidate({ id: s.cand.id })), now);
+      } catch {
+        return null;
+      }
+    }),
+  ]);
 
   const matches = shortlist.map((s, i) => {
     const c = s.cand;
+    const v = verified.get(c.id);
+    const exp = experiences[i];
     return {
       rank: i + 1,
       candidateId: c.id,
@@ -314,7 +283,17 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       isLocal: s.local,
       alreadySubmitted: submittedIds.has(c.id),
       matchedSkills: s.hits,
-      resumeEvidence: evidences[i],
+      resumeConfirmed: v?.matchedConcepts ?? [],
+      resumeMissing: v?.missingConcepts ?? mustHave,
+      resumeEvidence: v?.excerpts ?? [],
+      experience: exp
+        ? {
+            yearsExperience: exp.yearsExperience,
+            seniority: exp.seniority,
+            currentRole: exp.currentRole,
+            lastActivityMonthsAgo: exp.lastActivityMonthsAgo,
+          }
+        : null,
       bullhornUrl: (c as { bullhornUrl?: string }).bullhornUrl ?? null,
     };
   });
