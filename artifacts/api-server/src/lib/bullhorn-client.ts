@@ -744,11 +744,39 @@ export async function getCandidate(args: { id: number; fields?: string }) {
   return getEntity("Candidate", args.id, fields);
 }
 
+// A single job's publicDescription is raw HTML and can be very large; left
+// untouched it can push a get_job response past ChatGPT's client-side tool-output
+// size cap, which silently DROPS the whole result (the assistant narrates this as
+// "blocked by the connector safety layer"). Strip the HTML and cap the length so a
+// single job fetch always stays small, regardless of which AI drives.
+const MAX_JOB_DESCRIPTION_CHARS = 12000;
+
+export function sanitizeJobRecord(result: unknown): unknown {
+  const wrapped =
+    result && typeof result === "object" && "data" in (result as object)
+      ? (result as { data?: unknown }).data
+      : result;
+  if (!wrapped || typeof wrapped !== "object" || Array.isArray(wrapped)) return result;
+  const job = wrapped as Record<string, unknown>;
+  const raw = job.publicDescription;
+  if (typeof raw === "string" && raw.length > 0) {
+    let text = /<[a-z!/][^>]*>/i.test(raw) ? stripHtml(raw) : raw;
+    if (text.length > MAX_JOB_DESCRIPTION_CHARS) {
+      text =
+        text.slice(0, MAX_JOB_DESCRIPTION_CHARS) +
+        "\n…[description truncated — open the job in Bullhorn for the full text]";
+    }
+    job.publicDescription = text;
+  }
+  return result;
+}
+
 export async function getJob(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
     "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate,correlatedCustomText1,customText2";
-  return getEntity("JobOrder", args.id, fields);
+  const result = await getEntity("JobOrder", args.id, fields);
+  return sanitizeJobRecord(result);
 }
 
 export async function getCompany(args: { id: number; fields?: string }) {

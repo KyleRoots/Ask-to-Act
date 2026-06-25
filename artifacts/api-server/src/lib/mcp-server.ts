@@ -453,7 +453,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "get_job",
-    "Fetch the full record for a specific job order by its Bullhorn ID. DISPLAY RULE (REQUIRED): the record includes a `bullhornUrl` — render the job's TITLE as a markdown hyperlink to it in prose, lists, AND tables; never show the title as plain text when a `bullhornUrl` is present.",
+    "Fetch the full record for a specific job order by its Bullhorn ID. NOTE: if your goal is to find candidates for this job, do NOT pull the job first — call `match_candidates_for_job` with the job id directly; it reads the job description server-side and returns a ranked, résumé-verified shortlist in one step. DISPLAY RULE (REQUIRED): the record includes a `bullhornUrl` — render the job's TITLE as a markdown hyperlink to it in prose, lists, AND tables; never show the title as plain text when a `bullhornUrl` is present.",
     {
       id: z.number().int().positive().describe("Bullhorn job order ID"),
       fields: z.string().optional().describe("Comma-separated fields to return"),

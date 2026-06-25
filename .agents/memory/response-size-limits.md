@@ -38,3 +38,18 @@ surface custom fields makes broad pulls bigger, which works against this ceiling
 keep typical responses well under ~100KB; if a broad pull would still be huge, prefer
 returning explicit guidance to narrow scope over emitting an oversized payload that
 the client silently drops.
+
+# SINGLE-record get_* tools can trip the cap too (not just broad pulls)
+A per-record `get_*` fetch can ALSO be silently dropped if it carries one big raw
+free-text/HTML field — a job's `publicDescription` (raw HTML) alone pushed a single
+`get_job` over the cap and surfaced as "the full-description pull was blocked by the
+connector safety layer."
+**Rule:** any get_* tool returning a large raw free-text/HTML field (publicDescription,
+full résumé) must strip HTML (reuse stripHtml) and cap its length at the fetch helper,
+so the field can never blow the cap regardless of which AI drives.
+**Why:** the trigger isn't only multi-record breadth; one unbounded HTML field is
+enough. Capping at the helper covers BOTH direct calls and internal consumers (e.g. the
+matcher calls getJob too) in one place.
+**Also steer the model:** when a get_* fetch exists only to feed another tool (e.g.
+pull a job just to find candidates), point its description at the all-in-one tool
+(match_candidates_for_job reads the JD server-side) so the model skips the big fetch.
