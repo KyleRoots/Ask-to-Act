@@ -136,21 +136,10 @@ app.post(
   },
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Clerk session auth — populates getAuth(req) for portal endpoints. Resolves
-// the publishable key from the request host so multi-domain/custom-domain
-// flows work; falls back to CLERK_PUBLISHABLE_KEY otherwise.
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
-
+// Rate limiting is registered BEFORE the body parsers so abusive requests are
+// throttled before any large body is read/allocated (DoS protection). The
+// Stripe webhook above is intentionally registered earlier so it is never
+// rate-limited or affected by these parsers.
 const maxRequestsPerWindow = Number(process.env["RATE_LIMIT_MAX"] ?? 120);
 const windowMs = Number(process.env["RATE_LIMIT_WINDOW_MS"] ?? 60_000);
 
@@ -162,6 +151,32 @@ app.use(
     legacyHeaders: false,
     message: { error: "Too many requests, please try again later." },
   }),
+);
+
+// The MCP endpoint is the ONLY route that receives file uploads: file-upload
+// tools (résumé parse, file attachments) send the file as a base64 string
+// inside the JSON body, and base64 inflates bytes by ~33%. Express's 100kb
+// default silently 413s any real document (a 161KB .docx → ~215KB base64), so
+// allow a generous 25mb — but ONLY here, to limit DoS attack surface. This
+// parser sets req._body, so the global parser below skips already-parsed
+// requests. Matches /api/mcp and /api/mcp/:token.
+app.use("/api/mcp", express.json({ limit: "25mb" }));
+
+// Global body parsers for every other route. Kept small (1mb) since no other
+// endpoint accepts file payloads.
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// Clerk session auth — populates getAuth(req) for portal endpoints. Resolves
+// the publishable key from the request host so multi-domain/custom-domain
+// flows work; falls back to CLERK_PUBLISHABLE_KEY otherwise.
+app.use(
+  clerkMiddleware((req) => ({
+    publishableKey: publishableKeyFromHost(
+      getClerkProxyHost(req) ?? "",
+      process.env.CLERK_PUBLISHABLE_KEY,
+    ),
+  })),
 );
 
 app.get("/health", (_req, res) => {

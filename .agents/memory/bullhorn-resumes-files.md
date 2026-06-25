@@ -61,6 +61,27 @@ The parse endpoint fails in a sequence of *distinct* errors, each masking the ne
 **How to apply:** when résumé upload "still fails" but the error TEXT changed, that is
 progress — you cleared one layer; fix the next, do not revert.
 
+## Body-size limit silently kills base64 file uploads (Express 100kb default)
+File-upload tools (parseToCandidate/createCandidateFromResume, file attachments)
+carry the file as a **base64 string inside the JSON request body**. Express's
+`express.json()` defaults to a **100kb** body cap, and base64 inflates bytes ~33%.
+A real document (e.g. a 161KB .docx → ~215KB base64) exceeds 100kb and the request
+is rejected with 413 **before it ever reaches the tool** — the client just sees a
+generic failure / "truncated" body and may try to downconvert the file (ChatGPT
+re-encoded the .docx to plain .txt to shrink it).
+**Why:** the cap is upstream of all tool logic, so it looks like a parser/encoding
+bug, not a body-limit bug. Both MCP and REST go through the same `express.json()`,
+so one limit governs both doors.
+**How to apply:** raise the limit ONLY on the upload route (the MCP endpoint
+`/api/mcp` is the sole file-upload door — REST/OpenAPI never carries files), keep
+the global `express.json`/`urlencoded` small (1mb). Scope it by mounting
+`app.use("/api/mcp", express.json({limit:"25mb"}))` BEFORE the global parser —
+body-parser sets `req._body` so the global one skips already-parsed requests. Put
+the rate limiter BEFORE the body parsers so oversized bodies are throttled before
+allocation (DoS). A blanket 25mb global limit ahead of rate limiting is a DoS
+amplification risk — don't. If résumé/file upload "fails" for big files but works
+for tiny ones, suspect the body cap first.
+
 ## REST rate limit bites during probing
 Bullhorn REST is **120 requests / 60s** (`RateLimit-Limit: 120; w=60`). Bursty probing
 exhausts it and the MCP endpoint then returns an **empty body with no SSE `data:` line**
