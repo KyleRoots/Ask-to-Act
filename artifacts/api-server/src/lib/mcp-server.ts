@@ -201,13 +201,22 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
 const SERVER_INSTRUCTIONS = [
   "AskToAct connects you to this firm's Bullhorn ATS (read and write tools).",
   "",
-  "PRESENTING RECORDS — always make Bullhorn records clickable:",
-  "- Every linkable record in a tool result includes a `bullhornUrl` field: a deep link that opens that exact record in Bullhorn.",
-  "- When you show records to the user, hyperlink each record using Markdown — link the record's name or its Bullhorn ID to its `bullhornUrl`.",
-  '  Examples: `[Acme Corp](<bullhornUrl>)` or `[53861](<bullhornUrl>)`.',
-  "- In a table, make the Company / Candidate / Job / Contact / Bullhorn ID cell itself the link. Do not add a separate raw-URL column and do not print the raw URL as plain text.",
-  "- If a record has no `bullhornUrl`, show it without a link (do not invent one).",
+  "PRESENTING RECORDS — make every Bullhorn record open in one click:",
+  "- Each linkable record in a tool result has a `bullhornUrl`: a deep link that opens THAT record in Bullhorn.",
+  "- ALWAYS make the record itself clickable: render the record's NAME (candidate/contact/company name or job title) — or its Bullhorn ID — as a Markdown link to its `bullhornUrl`.",
+  "  In a table, the NAME cell (or a Bullhorn ID cell) IS the link, e.g. `| [Joseph Arboleras](<bullhornUrl>) | FANUC America | ... |`.",
+  "- Put the link ONLY on the record's own name/ID. Do NOT link email addresses or phone numbers — leave those as plain text.",
+  "- Never add a separate raw-URL column and never print the raw bullhornUrl as text.",
+  "- If a record has no `bullhornUrl`, show it without a link (never invent one).",
 ].join("\n");
+
+// Reinforces the same record-linking guidance on the channel ChatGPT reads most
+// reliably: each read tool's own description (travels with tools/list every chat).
+// Server `instructions` alone proved insufficient — ChatGPT auto-linked emails and
+// skipped the record deep link. Kept short; conditional so it's a no-op for tools
+// whose results carry no `bullhornUrl` (counts, describe, reports).
+const READ_PRESENTATION_SUFFIX =
+  " | Presentation: if a result record includes a `bullhornUrl`, make that record clickable — render its NAME (or Bullhorn ID) as a Markdown link to its bullhornUrl, e.g. [Acme Corp](url). Put the link ONLY on the record name/ID; never link email addresses or phone numbers.";
 
 export function createMcpServer(caller?: CallerIdentity): McpServer {
   const server = new McpServer(
@@ -229,7 +238,14 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     description: string,
     schema: Args,
     cb: ToolCallback<Args>,
-  ) => server["tool"](name, description, schema, READ_ONLY_ANNOTATIONS, cb);
+  ) =>
+    server["tool"](
+      name,
+      description + READ_PRESENTATION_SUFFIX,
+      schema,
+      READ_ONLY_ANNOTATIONS,
+      cb,
+    );
 
   const WRITE_ANNOTATIONS: ToolAnnotations = {
     readOnlyHint: false,

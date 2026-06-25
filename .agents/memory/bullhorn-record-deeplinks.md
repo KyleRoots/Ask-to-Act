@@ -16,10 +16,18 @@ search/query/get paths. Link format: `{atsBase}/BullhornStaffing/OpenWindow.cfm?
   link (never invent one).
 
 **Why links sometimes "don't show":** data presence ≠ rendered links. The `bullhornUrl`
-is in the JSON, but ChatGPT only hyperlinks it if told to. The lever is the **MCP server
-`instructions`** field (2nd arg to `new McpServer(info, { instructions })`), surfaced to the
-model at `initialize`. It instructs the client to Markdown-link each record's name/ID to its
-`bullhornUrl`. If links still don't render after that, escalate to per-tool description nudges.
+is in the JSON, but ChatGPT only hyperlinks it if told to.
+
+**What actually works (ordered by reliability, from real testing):**
+1. MCP server `instructions` (2nd arg to `new McpServer(info, { instructions })`, surfaced at
+   `initialize`) — necessary but **NOT sufficient on its own**. With instructions alone,
+   ChatGPT auto-linked the EMAIL column (GFM auto-linkifies bare emails) and skipped the
+   record deep link entirely.
+2. **Per-tool descriptions** — the reliable channel. Append a presentation suffix to every
+   read tool's description via the shared `tool()` wrapper (`READ_PRESENTATION_SUFFIX`), so it
+   travels with `tools/list` on every chat. Tell it to link ONLY the record name/ID, never
+   email/phone (ChatGPT will still mailto-autolink bare emails regardless — that's GFM, not us).
+Use both together.
 
 **How to apply:** if a user reports missing/clickable-record issues, first curl prod
 `tools/call` and confirm `bullhornUrl` is in the payload (it almost certainly is) — the fix
