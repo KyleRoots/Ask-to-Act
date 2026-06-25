@@ -76,6 +76,7 @@ import {
   recruiterLeaderboard,
   listReports,
 } from "./reports.js";
+import { matchCandidatesForJob } from "./matching.js";
 
 // Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
 // a human, so whitespace is pure overhead — and multi-record reads are large
@@ -516,6 +517,54 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         () =>
           listSubmissionsForJob({ jobId, dateAddedStart, dateAddedEnd, count, start, fields }),
       ),
+  );
+
+  tool(
+    "match_candidates_for_job",
+    "Find and rank the best candidate matches for a specific job order — the PREFERRED tool for any \"match/find/source candidates for job X\" request. It does the whole job deterministically on the server: (1) reads the job and reports the requirements it matched against (skills, location, on-site/remote, years); (2) searches candidates against those requirements; (3) RELIABLY EXCLUDES, by default, candidates who are Placed, Do Not Contact / Opted Out, Inactive / Archived, or who are ALREADY SUBMITTED TO THIS JOB (matched by candidate ID — never by name, so the submission status is trustworthy and verifiable); (4) prioritizes local/on-site candidates while still surfacing strong remote ones; (5) returns short résumé EVIDENCE quotes plus a `bullhornUrl` for every candidate. By default it derives the must-have skills from the job itself — pass `mustHaveSkills` to override, and set the include* flags only when the recruiter explicitly wants those excluded groups back. DISPLAY RULE (REQUIRED): render each candidate NAME as a markdown hyperlink to its `bullhornUrl`, show their status and whether they are already submitted, and cite the résumé evidence — do NOT claim a skill or clearance without the evidence quote. Security clearance is NOT structured in Bullhorn (it lives in résumé text); treat any clearance as UNVERIFIED until confirmed via get_candidate_resume and note that clearances can lapse.",
+    {
+      jobId: z.number().int().positive().describe("Bullhorn job order ID to match candidates against."),
+      mustHaveSkills: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Override the required skills/criteria (each is AND-ed; all must be present). If omitted, the server derives them from the job's `skills` field (falling back to the title). Pass this to refine or correct what the role really needs.",
+        ),
+      niceToHaveSkills: z
+        .array(z.string())
+        .optional()
+        .describe("Optional bonus criteria (OR-ed) that boost ranking but are not required."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("How many ranked matches to return (default 6, max 15)."),
+      localOnly: z
+        .boolean()
+        .optional()
+        .describe(
+          "Default false. When false, local/on-site candidates are ranked first but strong remote candidates are still shown. Set true to EXCLUDE out-of-area candidates entirely.",
+        ),
+      includePlaced: z
+        .boolean()
+        .optional()
+        .describe("Set true to INCLUDE candidates whose status is Placed (excluded by default)."),
+      includeSubmitted: z
+        .boolean()
+        .optional()
+        .describe("Set true to INCLUDE candidates already submitted to THIS job (excluded by default)."),
+      includeDoNotContact: z
+        .boolean()
+        .optional()
+        .describe("Set true to INCLUDE Do Not Contact / Opted Out candidates (excluded by default)."),
+      includeInactive: z
+        .boolean()
+        .optional()
+        .describe("Set true to INCLUDE Inactive / Archived candidates (excluded by default)."),
+    },
+    async (a) =>
+      rt("match_candidates_for_job", a, () => matchCandidatesForJob(a)),
   );
 
   tool(
