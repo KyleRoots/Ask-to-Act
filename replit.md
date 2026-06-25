@@ -38,7 +38,9 @@ A remote Model Context Protocol (MCP) server that connects any MCP-compatible AI
 
 ## Product
 
-Recruiters enable the Bullhorn connector in their AI (ChatGPT, Claude, Gemini, or Grok) and can immediately ask: "Find candidates in Chicago with .NET experience", "What are the open jobs at Acme Corp?", "Submit candidate #123 to job #456 and add a note." 33 read tools span dedicated entity tools (candidates, jobs, companies, contacts, submissions, placements, notes, leads, opportunities, appointments, tasks, users), reporting tools, and generic fallbacks (search_entity, query_entity, get_entity, describe_entity). 20 write tools cover submissions and status changes, notes, job/company/contact create+update, tasks and appointments, tearsheet curation, placements, and file/résumé upload with new-candidate creation — each under the recruiter's own OAuth session.
+Recruiters enable the Bullhorn connector in their AI (ChatGPT, Claude, Gemini, or Grok) and can immediately ask: "Find candidates in Chicago with .NET experience", "What are the open jobs at Acme Corp?", "Submit candidate #123 to job #456 and add a note." 33 read tools span dedicated entity tools (candidates, jobs, companies, contacts, submissions, placements, notes, leads, opportunities, appointments, tasks, users), reporting tools, and generic fallbacks (search_entity, query_entity, get_entity, describe_entity). 21 write tools cover submissions and status changes, client submissions (sendouts — the "Client Submission" pipeline stage), notes, job/company/contact create+update, tasks and appointments, tearsheet curation, placements, and file/résumé upload with new-candidate creation — each under the recruiter's own OAuth session.
+
+**Product principle (user directive):** anything a recruiter/sales/back-office user can do inside the Bullhorn ATS, the AI must also be able to do — and the tooling must make the AI *understand* what the action is (e.g. a "Client Submission" is a Sendout, not a status), never silently substituting a wrong action. Scope new write tools to honor this parity.
 
 ## Required environment variables (set in Replit Secrets)
 

@@ -18,4 +18,9 @@ The horizontal tabs on a Bullhorn JobOrder Overview (e.g. `Pipeline | Client Sub
 **How to apply:**
 - Submission tool descriptions must say: status values are instance-specific; ALWAYS call `list_field_options(JobSubmission, status)` and pass an EXACT value; pipeline tabs (Client Submission/Interview/Placement) are stages, not statuses — never substitute one for a status; if the user names a stage, confirm the exact status (or recognise "Client Submission" = Sendout, a separate action).
 - Enforce server-side: `createJobSubmission` and `bulkCreateSubmissions` now call `assertPicklistValue("JobSubmission","status",…)` (bulk validates once before the loop) so an invalid status is rejected with the real option list — matching `updateSubmissionStatus`. `assertPicklistValue` fails OPEN (Bullhorn stays final authority).
-- True "Client Submission" support would require a **Sendout** write tool (needs a clientContact; verify whether `PUT entity/Sendout` triggers a client email before building). Deferred pending product decision.
+
+## Real "Client Submission" capability (BUILT)
+`create_sendout` MCP write tool + `createSendout()` perform an actual Client Submission via `PUT entity/Sendout`.
+- **No client email is sent.** Creating a Sendout via the JSON `entity/` door only records it; the `email` field merely stores an address and is intentionally left unset. (Bullhorn email-out is a separate composer action.) Tenant-level Bullhorn automations could still react to a new Sendout — that's environment config, not our code.
+- Sendout meta flags NO required fields; valid fields: candidate, clientContact, clientCorporation, jobSubmission, user, email, dateAdded, isRead, numTimesRead.
+- `clientContact`/`clientCorporation` default to the JobOrder's own (recruiter default) when omitted; `user` = session user. Duplicate guard on `candidate+jobOrder+isDeleted=false`. A passed `jobSubmissionId` is verified to belong to the same candidate+job (fails open on read error, throws on confirmed mismatch).

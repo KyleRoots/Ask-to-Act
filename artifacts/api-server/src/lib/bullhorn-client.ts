@@ -3453,6 +3453,157 @@ export async function updatePlacement(
   return { updated: true, placementId };
 }
 
+// ── Sendout (Client Submission) create ────────────────────────────────────
+//
+// A Sendout is Bullhorn's record of submitting a candidate TO THE CLIENT — the
+// "Client Submission" pipeline stage. It is a DIFFERENT entity from a
+// JobSubmission (which carries the internal pipeline status). Created via
+// PUT entity/Sendout. This REST create records the submission ONLY; it does NOT
+// send any email to the client (Bullhorn's email-out is a separate composer
+// action). The `email` field would merely store an address, so it is
+// intentionally never set here to avoid implying an email was sent.
+
+/** Reads a job's primary client contact + company to default a Sendout's recipients. */
+async function getJobOrderClientRefs(
+  session: BullhornWriteSession,
+  jobOrderId: number,
+): Promise<{ clientContactId?: number; clientCorporationId?: number }> {
+  try {
+    const url = new URL(`entity/JobOrder/${jobOrderId}`, session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set("fields", "id,clientContact(id),clientCorporation(id)");
+    const res = await fetch(url.toString());
+    if (!res.ok) return {};
+    const data = (await res.json()) as {
+      data?: { clientContact?: { id?: number }; clientCorporation?: { id?: number } };
+    };
+    return {
+      clientContactId: data.data?.clientContact?.id,
+      clientCorporationId: data.data?.clientCorporation?.id,
+    };
+  } catch (err) {
+    logger.warn({ err, jobOrderId }, "Bullhorn: failed to resolve job client refs for Sendout");
+    return {};
+  }
+}
+
+/**
+ * Rejects a jobSubmissionId that belongs to a different candidate or job than
+ * the Sendout being created (prevents silently cross-linking records). Fails
+ * OPEN on read errors — Bullhorn stays the final authority — but throws on a
+ * confirmed mismatch.
+ */
+async function assertSubmissionMatchesCandidateJob(
+  session: BullhornWriteSession,
+  jobSubmissionId: number,
+  candidateId: number,
+  jobOrderId: number,
+): Promise<void> {
+  try {
+    const url = new URL(`entity/JobSubmission/${jobSubmissionId}`, session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set("fields", "id,candidate(id),jobOrder(id)");
+    const res = await fetch(url.toString());
+    if (!res.ok) return;
+    const data = (await res.json()) as {
+      data?: { candidate?: { id?: number }; jobOrder?: { id?: number } };
+    };
+    const subCandidateId = data.data?.candidate?.id;
+    const subJobOrderId = data.data?.jobOrder?.id;
+    if (
+      (subCandidateId !== undefined && subCandidateId !== candidateId) ||
+      (subJobOrderId !== undefined && subJobOrderId !== jobOrderId)
+    ) {
+      throw new BullhornFieldValidationError(
+        `jobSubmissionId ${jobSubmissionId} belongs to candidate ${subCandidateId}/job ${subJobOrderId}, ` +
+          `not candidate ${candidateId}/job ${jobOrderId}. Link the matching JobSubmission or omit jobSubmissionId.`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof BullhornFieldValidationError) throw err;
+    logger.warn(
+      { err, jobSubmissionId },
+      "Bullhorn: failed to verify jobSubmission match for Sendout — proceeding",
+    );
+  }
+}
+
+export async function createSendout(
+  session: BullhornWriteSession,
+  args: {
+    candidateId: number;
+    jobOrderId: number;
+    clientContactId?: number;
+    clientCorporationId?: number;
+    jobSubmissionId?: number;
+    additionalFields?: Record<string, unknown>;
+  },
+): Promise<{
+  sendoutId: number;
+  candidateId: number;
+  jobOrderId: number;
+  clientContactId: number;
+  clientCorporationId: number;
+  jobSubmissionId?: number;
+}> {
+  // Default the recipient contact + company to the job's own hiring contact /
+  // client company when not specified — what a recruiter does by default when
+  // sending a candidate out on a job.
+  let clientContactId = args.clientContactId;
+  let clientCorporationId = args.clientCorporationId;
+  if (clientContactId === undefined || clientCorporationId === undefined) {
+    const refs = await getJobOrderClientRefs(session, args.jobOrderId);
+    clientContactId = clientContactId ?? refs.clientContactId;
+    clientCorporationId = clientCorporationId ?? refs.clientCorporationId;
+  }
+  if (clientContactId === undefined) {
+    throw new BullhornFieldValidationError(
+      `Cannot create a client submission (Sendout): no client contact was provided and job ${args.jobOrderId} has no client contact on file. ` +
+        `Provide clientContactId — the client-side person the candidate is being submitted to.`,
+    );
+  }
+  if (clientCorporationId === undefined) {
+    throw new BullhornFieldValidationError(
+      `Cannot create a client submission (Sendout): no client company could be resolved. Provide clientCorporationId — the client company the candidate is being submitted to.`,
+    );
+  }
+  if (args.jobSubmissionId !== undefined) {
+    await assertSubmissionMatchesCandidateJob(
+      session,
+      args.jobSubmissionId,
+      args.candidateId,
+      args.jobOrderId,
+    );
+  }
+  await checkDuplicate(
+    session,
+    "Sendout",
+    `candidate.id=${args.candidateId} AND jobOrder.id=${args.jobOrderId} AND isDeleted=false`,
+    `a client submission (Sendout) for candidate ${args.candidateId} on job ${args.jobOrderId}`,
+    "The candidate has already been submitted to the client for this job. Review the existing client submission instead of creating a duplicate.",
+  );
+  const userId = await getSessionUserId(session);
+  const body = compact({
+    candidate: assoc(args.candidateId),
+    jobOrder: assoc(args.jobOrderId),
+    clientContact: assoc(clientContactId),
+    clientCorporation: assoc(clientCorporationId),
+    jobSubmission: assoc(args.jobSubmissionId),
+    user: assoc(userId),
+    ...(args.additionalFields ?? {}),
+  });
+  await validateWriteFields("Sendout", body, { mode: "create" });
+  const sendoutId = await createEntityRecord(session, "Sendout", body);
+  return {
+    sendoutId,
+    candidateId: args.candidateId,
+    jobOrderId: args.jobOrderId,
+    clientContactId,
+    clientCorporationId,
+    jobSubmissionId: args.jobSubmissionId,
+  };
+}
+
 // ── Files API: résumé / file upload + candidate-from-résumé ───────────────
 //
 // Distinct from the JSON entity/ door: file operations are multipart, and the

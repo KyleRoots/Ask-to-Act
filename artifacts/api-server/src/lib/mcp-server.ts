@@ -48,6 +48,7 @@ import {
   addCandidatesToTearsheet,
   removeCandidatesFromTearsheet,
   createPlacement,
+  createSendout,
   updatePlacement,
   uploadFileToRecord,
   createCandidateFromResume,
@@ -1406,6 +1407,52 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       runWriteTool("update_placement", { placementId }, async () => {
         const session = await resolveWriteSession();
         return updatePlacement(session, placementId, fields);
+      }),
+  );
+
+  writeTool(
+    "create_sendout",
+    "WRITE (SENSITIVE): Submits a candidate TO THE CLIENT — a Bullhorn Sendout, i.e. the 'Client Submission' pipeline stage. " +
+      "Use this when the user wants to submit/send a candidate to the client, do a 'client submission', or move a candidate into the 'Client Submission' tab on a job. " +
+      "This is NOT a JobSubmission status — 'Client Submission' is a stage, not a status; do not use create_job_submission/update_submission_status for it. " +
+      "It records the submission only and does NOT email the client. " +
+      "If clientContactId/clientCorporationId are omitted, they default to the job's own client contact and company (provide clientContactId explicitly to submit to a different contact). " +
+      "Best practice: the candidate should already have a JobSubmission on this job — pass that jobSubmissionId to link them. Blocks if the candidate was already sent to the client for this job. " +
+      "ALWAYS confirm the candidate, job, and client contact with the user before creating.",
+    {
+      candidateId: z.number().int().positive().describe("Bullhorn candidate ID being submitted to the client."),
+      jobOrderId: z.number().int().positive().describe("Bullhorn job order ID the candidate is being submitted for."),
+      clientContactId: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Client contact (ClientContact ID) the candidate is submitted to. Defaults to the job's client contact if omitted."),
+      clientCorporationId: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Client company (ClientCorporation ID). Defaults to the job's client company if omitted."),
+      jobSubmissionId: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Existing JobSubmission ID to link this client submission to (recommended)."),
+      additionalFields: additionalFieldsSchema,
+    },
+    async ({ candidateId, jobOrderId, clientContactId, clientCorporationId, jobSubmissionId, additionalFields }) =>
+      runWriteTool("create_sendout", { candidateId, jobOrderId }, async () => {
+        const session = await resolveWriteSession();
+        return createSendout(session, {
+          candidateId,
+          jobOrderId,
+          clientContactId,
+          clientCorporationId,
+          jobSubmissionId,
+          additionalFields,
+        });
       }),
   );
 
