@@ -2747,6 +2747,7 @@ export async function createJobSubmission(
     status: string;
   },
 ): Promise<{ submissionId: number; sendingUserId: number }> {
+  await assertPicklistValue("JobSubmission", "status", args.status);
   await checkExistingSubmission(session, args.candidateId, args.jobOrderId);
   const sendingUserId = await getSessionUserId(session);
   const body = {
@@ -2802,6 +2803,11 @@ export async function bulkCreateSubmissions(
       `Too many submissions in one call (${args.submissions.length}). Max is 20. Split into multiple calls.`,
     );
   }
+
+  // Validate the shared status once (instance-specific picklist) so an invalid
+  // value (e.g. a pipeline-stage label like "Client Submission") is rejected
+  // with the real option list before any record is written.
+  await assertPicklistValue("JobSubmission", "status", args.status);
 
   const sendingUserId = await getSessionUserId(session);
 

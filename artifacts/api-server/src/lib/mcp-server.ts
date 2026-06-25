@@ -1023,7 +1023,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "Runs all submissions in parallel and returns a per-item result so you can report exactly which succeeded and which failed. " +
       "Max 20 submissions per call; split larger batches. " +
       "Your Bullhorn user ID is auto-derived from your session — no find_users call needed. " +
-      "STATUS → BULLHORN PIPELINE BUCKET: 'Internally Submitted' / 'Candidate Interested' → Pipeline (recommended default); 'New Lead' → Response; 'Offer Extended' → Client Submission. " +
+      "STATUS VALUES ARE INSTANCE-SPECIFIC: ALWAYS call list_field_options(JobSubmission, status) and pass an EXACT value from that list — never guess, translate, or substitute one status for another (an invalid value is rejected with the real list). " +
+      "The tabs shown on a job in Bullhorn (e.g. 'Client Submission', 'Interview', 'Placement') are workflow STAGES, NOT submission statuses, and are NOT valid values here. If the user names one, do NOT map it to a status — explain it is a pipeline stage and confirm which exact status they mean. ('Client Submission' means sending the candidate to the client — a Sendout — which is a separate action, not a JobSubmission status.) " +
       "WORKFLOW: (1) resolve all candidate names to IDs via search, (2) call list_field_options(JobSubmission, status) to confirm status, " +
       "(3) show the user the full list of candidateId+jobOrderId pairs and ask for ONE confirmation before calling this tool, " +
       "(4) call this tool once — do NOT loop create_job_submission for the same batch. " +
@@ -1058,12 +1059,9 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "WRITE: Submits a candidate to a job order, creating a JobSubmission record in Bullhorn. " +
       "Requires a personal Bullhorn account — the submission is created as YOU and respects your Bullhorn permissions. " +
       "Your Bullhorn user ID is auto-derived from your session — you do NOT need to call find_users first. " +
-      "Call list_field_options(JobSubmission, status) first to confirm valid status values for this instance. " +
-      "STATUS → BULLHORN PIPELINE BUCKET mapping: " +
-      "'New Lead' / 'Online Applicant' → Response bucket (inbound interest, not yet reviewed); " +
-      "'Internally Submitted' / 'Candidate Interested' → Pipeline bucket (recruiter is actively working this candidate); " +
-      "'Offer Extended' / 'Offer Accepted' → Client Submission bucket. " +
-      "DEFAULT: use 'Internally Submitted' when the recruiter is actively submitting a candidate — this places it in the Pipeline bucket where recruiters expect to see it. " +
+      "STATUS VALUES ARE INSTANCE-SPECIFIC: ALWAYS call list_field_options(JobSubmission, status) first and pass an EXACT value from that list — never guess, translate, or substitute one status for another. The status is validated against this instance's options before writing; an invalid value is rejected with the real list. " +
+      "The tabs shown on a job in Bullhorn (e.g. 'Client Submission', 'Interview', 'Placement') are workflow STAGES, NOT submission statuses, and are NOT valid values here. If the user asks for one, do NOT map it to a different status (e.g. do NOT use 'Offer Extended' for 'Client Submission') — explain it is a pipeline stage and confirm which exact status they want. 'Client Submission' specifically means sending the candidate to the client (a Sendout), a different action, not a JobSubmission status. " +
+      "DEFAULT when the recruiter is actively submitting a candidate internally: use 'Internally Submitted' (only if it appears in list_field_options for this instance). " +
       "ALWAYS confirm candidateId, jobOrderId, and status with the user before submitting — this creates a live record in Bullhorn visible to all recruiters. " +
       "Check for existing submissions with list_submissions_for_job first to avoid duplicates.",
     {
@@ -1155,9 +1153,10 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "update_submission_status",
-    "WRITE: Advances a JobSubmission to a new pipeline status (e.g. move from 'Internally Submitted' to 'Client Submission' or 'Interview Scheduled'). " +
+    "WRITE: Advances a JobSubmission to a new status. " +
       "Runs as YOU and respects your Bullhorn permissions. " +
-      "ALWAYS call list_field_options(JobSubmission, status) first and confirm the target status with the user — the value is validated against this instance's options before writing. " +
+      "ALWAYS call list_field_options(JobSubmission, status) first and pass an EXACT value from that list, confirming the target status with the user — the value is validated against this instance's options before writing. " +
+      "Bullhorn job pipeline tabs like 'Client Submission', 'Interview' and 'Placement' are workflow STAGES, NOT submission statuses — never substitute one of them for a status; if the user names one, confirm which exact status they mean. " +
       "Use list_submissions_for_job or list_submissions_for_candidate to find the submissionId.",
     {
       submissionId: z.number().int().positive().describe("Bullhorn JobSubmission ID to update."),
