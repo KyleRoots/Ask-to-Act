@@ -1,0 +1,69 @@
+1. Show me the 10 most recently added candidates.
+2. Find the contact record for Joseph Arboleras and give me his email, phone, and a link to his record.
+3. How many job orders are open right now?
+4. List the active companies in the MYT-Chicago department.
+
+I’ll run these as separate Bullhorn lookups, using exact counts for the open job total and paged lists only where you asked for records.
+
+Looked for available tools
+Called tool
+
+I have the recent candidate page. The direct structured candidate query was blocked, but the candidate search returned a date-added-descending page with the newest-looking records, so I’ll flag that carefully in the final.
+
+Looked for available tools
+Looked for available tools
+Called tool
+Thought for 52s
+1. 10 most recently added candidates
+
+The structured candidate query was blocked by Bullhorn/OpenAI safety checks, but the candidate search returned the newest-looking records by dateAdded. I would treat this as a reliable page, but not as a formally audited report.
+
+Added	Candidate	Status	Title / Occupation	Owner
+Jun 25	Dalton Elvis D Souza	Online Applicant	Solution Architect	Pandologic API
+Jun 25	Uros Gligorijevic	Online Applicant	Senior Software Engineer	Myticas API User
+Jun 25	haindavi G	New Lead	Designation Data Engineer	Matador API
+Jun 24	Syed Sajid Hussain	Online Applicant	Integration Lead	Myticas API User
+Jun 24	Kyle Roots	New Lead	Manager, Digital Marketing and Analytics	Kyle Roots
+Jun 24	Duc Nguyen	Online Applicant	Senior Software Developer	Myticas API User
+Jun 24	Kankoue Hemazro	Online Applicant	Administrateur Réseaux et Systèmes	Pandologic API
+Jun 24	Guangtai Wei	Online Applicant	Recruitment Coordinator	Myticas API User
+Jun 24	Munj Nayak	Online Applicant	Founding AI Product Manager	Myticas API User
+Jun 24	Nagamani Rudraraju	Active	Senior Salesforce Architect	Myticas Recruiter
+2. Joseph Arboleras contact record
+Contact	Email	Phone	Company	Status
+Joseph Arboleras	joseph.arboleras@fanucamerica.com	(248) 377-7000	FANUC America	New Contact
+3. Open job orders right now
+
+There are 406 open job orders right now.
+
+Definition used: isOpen:true AND NOT status:Archive AND isDeleted:false.
+
+4. Active companies in MYT-Chicago
+
+There are 24 active companies in the MYT-Chicago department.
+
+Company	Phone	Website	Owner(s)
+Vendor Company TEST			Anastasiya Ivanova
+Curinos		www.curinos.com	Jasmine Harvey
+Performance Trust Capital Partners	(312) 521-1000	www.performancetrust.com	Jasmine Harvey
+NorthPoint Fresh	(779) 200-3423	www.northpointfresh.com	Jasmine Harvey
+NOW Foods Private Label	(800) 999-8069	www.nowprivatelabel.com	Jasmine Harvey
+Strata	(312) 726-1227	www.stratadecision.com	Jasmine Harvey
+Voyage Advisory	(312) 869-8000	www.voyageadvisory.com	Jasmine Harvey
+Vantor		www.vantor.com	Jasmine Harvey
+BILT	(800) 517-2458	www.biltapp.com	Jasmine Harvey
+8th Light	(877) 407-4154	www.8thlight.com	Jasmine Harvey
+Sloan	(847) 671-4300	www.sloan.com	Jasmine Harvey
+NetSfere	(224) 764-3400	www.netsfere.com	Jasmine Harvey
+Tokio Marine Highland	(312) 736-2351	www.tokiomarinehighland.com	Jasmine Harvey
+Early Warning	(480) 483-4610	www.earlywarning.com	Jasmine Harvey
+Nerdio	(888) 531-0626	www.getnerdio.com	Jasmine Harvey
+Infinite Roar		www.infiniteroar.com	Jasmine Harvey
+Fulcrum GT	(312) 212-8499	www.fulcrumgt.com	Jasmine Harvey
+Scribd	(415) 896-9890	www.scribd.com	Jasmine Harvey
+Hollister	(800) 323-4060	www.hollister.com	Jasmine Harvey
+Surf Internet	(888) 274-6381	www.surfinternet.com	Jasmine Harvey
+Life Fitness / Hammer Strength	(847) 288-3300	www.lifefitness.com	Jasmine Harvey
+Fictiv	(415) 580-2509	www.fictiv.com	Jasmine Harvey
+Fuchs	+49 62138020	www.fuchs.com	Jasmine Harvey
+V2X	(571) 481-2000	www.gov2x.com	Dean Theodossiou, Nick Theodossiou, Sam Osman
