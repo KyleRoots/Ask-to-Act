@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { applyCountryIdToAddress, BullhornFieldValidationError } from "./bullhorn-client.js";
+import {
+  applyCountryIdToAddress,
+  foldDottedAddressKeys,
+  BullhornFieldValidationError,
+} from "./bullhorn-client.js";
 import { addressFieldSchema } from "./mcp-server.js";
 
 // Bullhorn stores a location's country as a numeric `countryID` (a reference
@@ -151,6 +155,68 @@ describe("addressFieldSchema (MCP tool-arg validation)", () => {
     // alias, the value reaches the resolver, and persists as the numeric id.
     const validated = schema.parse({ countryCode: "Egypt" });
     const body: Record<string, unknown> = { address: validated };
+    applyCountryIdToAddress(body, COUNTRY_MAP);
+    expect(body.address).toEqual({ countryID: 70 });
+  });
+});
+
+// Regression: ChatGPT repeatedly FLATTENS the address composite into dotted
+// top-level keys (e.g. `address.countryName`) instead of a nested object.
+// Bullhorn has no such fields, so we fold them back into the nested composite
+// before validation. This is the AI-behavior-agnostic fix for the country update.
+describe("foldDottedAddressKeys", () => {
+  it("folds a dotted address sub-field into the nested composite", () => {
+    const body: Record<string, unknown> = { "address.countryName": "Egypt" };
+    foldDottedAddressKeys(body);
+    expect(body).toEqual({ address: { countryName: "Egypt" } });
+  });
+
+  it("folds multiple dotted sub-fields into one composite", () => {
+    const body: Record<string, unknown> = {
+      "address.countryCode": "Egypt",
+      "address.city": "Cairo",
+      "address.address1": "1 St",
+    };
+    foldDottedAddressKeys(body);
+    expect(body).toEqual({
+      address: { countryCode: "Egypt", city: "Cairo", address1: "1 St" },
+    });
+  });
+
+  it("folds non-default address composites (secondaryAddress, billingAddress)", () => {
+    const body: Record<string, unknown> = {
+      "secondaryAddress.countryName": "United States",
+      "billingAddress.zip": "11511",
+    };
+    foldDottedAddressKeys(body);
+    expect(body).toEqual({
+      secondaryAddress: { countryName: "United States" },
+      billingAddress: { zip: "11511" },
+    });
+  });
+
+  it("merges dotted keys into an existing nested address object", () => {
+    const body: Record<string, unknown> = {
+      address: { city: "Cairo" },
+      "address.countryName": "Egypt",
+    };
+    foldDottedAddressKeys(body);
+    expect(body).toEqual({ address: { city: "Cairo", countryName: "Egypt" } });
+  });
+
+  it("leaves non-address dotted keys and normal fields untouched", () => {
+    const body: Record<string, unknown> = {
+      "clientCorporation.id": 16172,
+      title: "Recruiter",
+    };
+    foldDottedAddressKeys(body);
+    expect(body).toEqual({ "clientCorporation.id": 16172, title: "Recruiter" });
+  });
+
+  it("end-to-end: dotted country folds, then resolves to numeric countryID", () => {
+    // The exact ChatGPT failure: it sends `address.countryName: "Egypt"`.
+    const body: Record<string, unknown> = { "address.countryName": "Egypt" };
+    foldDottedAddressKeys(body);
     applyCountryIdToAddress(body, COUNTRY_MAP);
     expect(body.address).toEqual({ countryID: 70 });
   });

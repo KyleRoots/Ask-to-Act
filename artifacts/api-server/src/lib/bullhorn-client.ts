@@ -3130,6 +3130,10 @@ export async function validateWriteFields(
   body: Record<string, unknown>,
   opts: { mode: "create" | "update" } = { mode: "create" },
 ): Promise<void> {
+  // Accept the dotted address notation some AI clients emit (e.g.
+  // `address.countryName`) by folding it into the nested composite BEFORE
+  // validation, so the write proceeds via the normal address pipeline.
+  foldDottedAddressKeys(body);
   const entry = resolveEntity(entityType);
   let fieldMap: Map<string, WriteFieldMeta>;
   try {
@@ -3293,6 +3297,38 @@ const ADDRESS_SHAPE_KEYS = new Set([
   "state",
   "zip",
 ]);
+
+/**
+ * Some AI clients (notably ChatGPT) refuse to emit a nested address composite
+ * and instead FLATTEN it into dotted top-level keys, e.g.
+ * `{ "address.countryName": "Egypt", "address.city": "Cairo" }`. Bullhorn has no
+ * such fields, so validation would reject them outright. This folds any
+ * `<composite>.<subfield>` key whose subfield is a known address sub-field back
+ * into the nested object Bullhorn expects: `{ address: { countryName, city } }`.
+ *
+ * Keyed on the SUBFIELD being an address sub-field (not the prefix), so it is
+ * self-limiting: non-address dotted keys (e.g. `clientCorporation.id`) are left
+ * untouched, and if the folded prefix is not actually a valid field for the
+ * entity, validateWriteFields still rejects it afterward. Mutates `body` in
+ * place; runs before validation so both the nested and dotted notations work.
+ */
+export function foldDottedAddressKeys(body: Record<string, unknown>): void {
+  for (const key of Object.keys(body)) {
+    const dot = key.indexOf(".");
+    if (dot <= 0 || dot === key.length - 1) continue;
+    const sub = key.slice(dot + 1);
+    if (!ADDRESS_SHAPE_KEYS.has(sub.toLowerCase())) continue;
+    const prefix = key.slice(0, dot);
+    const existing = body[prefix];
+    const target: Record<string, unknown> =
+      existing && typeof existing === "object" && !Array.isArray(existing)
+        ? (existing as Record<string, unknown>)
+        : {};
+    target[sub] = body[key];
+    body[prefix] = target;
+    delete body[key];
+  }
+}
 
 /** True when a value looks like a Bullhorn address composite (object of address sub-fields). */
 function isAddressLikeObject(v: unknown): v is Record<string, unknown> {
