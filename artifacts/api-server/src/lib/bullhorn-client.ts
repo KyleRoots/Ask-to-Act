@@ -3302,13 +3302,23 @@ function isAddressLikeObject(v: unknown): v is Record<string, unknown> {
   );
 }
 
-/** Collects every address-shaped composite object present in a write body. */
-function collectAddressObjects(body: Record<string, unknown>): Array<Record<string, unknown>> {
-  const out: Array<Record<string, unknown>> = [];
-  for (const v of Object.values(body)) {
-    if (isAddressLikeObject(v)) out.push(v as Record<string, unknown>);
+/**
+ * Returns [fieldName, addressObject] pairs for every address-shaped composite
+ * value in a write body. Used both for collection and for keyed merge.
+ */
+function collectAddressEntries(
+  body: Record<string, unknown>,
+): Array<[string, Record<string, unknown>]> {
+  const out: Array<[string, Record<string, unknown>]> = [];
+  for (const [k, v] of Object.entries(body)) {
+    if (isAddressLikeObject(v)) out.push([k, v as Record<string, unknown>]);
   }
   return out;
+}
+
+/** Collects every address-shaped composite object present in a write body. */
+function collectAddressObjects(body: Record<string, unknown>): Array<Record<string, unknown>> {
+  return collectAddressEntries(body).map(([, v]) => v);
 }
 
 /** True when a single address object still needs a country-name -> countryID lookup. */
@@ -3405,6 +3415,65 @@ async function createEntityRecord(
   return data.changedEntityId ?? 0;
 }
 
+/**
+ * For each address composite present in `body`, fetches the record's current
+ * address from Bullhorn and merges it in as a baseline so the POST receives
+ * a COMPLETE address object.
+ *
+ * Bullhorn rejects partial address composites (e.g. just `{ countryID }`) with
+ * a 500 "error persisting an entity" — it requires all sub-fields (address1,
+ * city, state, zip, countryID) to be present together on write.
+ *
+ * Merge logic: current values are the baseline; caller's values are the
+ * overlay. If the caller supplied a country NAME key (countryName/country/
+ * countryCode), the inherited `countryID` from the current record is removed
+ * so that `resolveAddressCountryId` (called next) performs a fresh name→id
+ * lookup rather than keeping the old country.
+ *
+ * Fails open: if the fetch fails we log a warning and let the partial body
+ * pass through (Bullhorn will validate and return its own error).
+ */
+async function mergeCurrentAddresses(
+  session: BullhornWriteSession,
+  entity: string,
+  id: number,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const entries = collectAddressEntries(body);
+  if (entries.length === 0) return;
+
+  const fields = entries.map(([k]) => k).join(",");
+  try {
+    const url = new URL(`entity/${entity}/${id}`, session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set("fields", fields);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error(`Bullhorn GET status ${res.status}`);
+    const json = (await res.json()) as { data?: Record<string, unknown> };
+    const current = json.data ?? {};
+    for (const [key, newAddr] of entries) {
+      const currentAddr = current[key];
+      if (!currentAddr || typeof currentAddr !== "object" || Array.isArray(currentAddr)) continue;
+      const merged: Record<string, unknown> = {
+        ...(currentAddr as Record<string, unknown>),
+        ...newAddr,
+      };
+      // If the caller specified a country by NAME, clear the inherited countryID
+      // so the name→id resolver produces a fresh lookup instead of keeping the
+      // old country's id.
+      if (newAddr.countryName != null || newAddr.country != null || newAddr.countryCode != null) {
+        delete merged.countryID;
+      }
+      body[key] = merged;
+    }
+  } catch (err) {
+    logger.warn(
+      { err, entity, id, fields },
+      "Bullhorn: failed to pre-fetch address for merge — sending caller-supplied address as-is",
+    );
+  }
+}
+
 /** POST an update to an existing entity record. */
 async function updateEntityRecord(
   session: BullhornWriteSession,
@@ -3412,6 +3481,9 @@ async function updateEntityRecord(
   id: number,
   body: Record<string, unknown>,
 ): Promise<void> {
+  // Merge current address sub-fields before resolving country so Bullhorn
+  // receives a complete composite (partial address = 500 persistence error).
+  await mergeCurrentAddresses(session, entity, id, body);
   await resolveAddressCountryId(body);
   await writeFetch(session, "POST", `entity/${entity}/${id}`, body);
 }

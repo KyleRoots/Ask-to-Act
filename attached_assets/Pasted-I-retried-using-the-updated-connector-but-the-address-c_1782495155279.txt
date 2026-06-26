@@ -1,0 +1,35 @@
+I retried using the updated connector, but the address change still did **not** save.
+
+What I tested:
+
+1. **Full address object**
+
+   * Rejected by the tool schema.
+
+2. **Flat address fields**
+
+   * `address.countryCode`, `address.countryName`, etc.
+   * Rejected as invalid Bullhorn fields.
+
+3. **Serialized address JSON**
+
+   * Reached Bullhorn, but Bullhorn returned a persistence error.
+
+4. **Exact Egypt address structure from an existing Egypt job**
+
+   * I found an existing job, **Network Engineer - Egypt**, with:
+   * `countryCode: EG`
+   * `countryID: 2237`
+   * `countryName: Egypt`
+   * Retried with that same structure, but Bullhorn still returned a persistence error.
+
+Current status for job **35381**:
+
+| Field                     | Current Value                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Job                       | [Technical Recruiter (North America Support)](https://cls45.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity=JobOrder&id=35381) |
+| Work Location Requirement | Remote                                                                                                                                     |
+| Work From Home            | Yes                                                                                                                                        |
+| Address Country           | United States                                                                                                                              |
+
+The connector update helped partially because it allowed the request to reach Bullhorn, but Bullhorn is still rejecting the persisted `address` update for `JobOrder`. The likely remaining fix is that the connector needs explicit support for Bullhorn’s `Address` composite object on `JobOrder`, rather than passing it through the generic `update_job` field map.
