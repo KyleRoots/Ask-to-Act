@@ -47,3 +47,4 @@
 - [MCP rate limit keying](mcp-rate-limit-keying.md) — limiter keys by HASHED bearer/path token (not IP — connectors share cloud egress IPs) and mounts BEFORE the 25mb json parser; global limiter must skip /api/mcp.
 - [Bullhorn linkable id injection](bullhorn-linkable-id.md) — AI custom `fields` that omit numeric id → no bullhornUrl → no hyperlink; inject id post-sanitize with a top-level parens-aware scan (skip `*`, don't false-positive nested assoc like owner(id,name)).
 - [Bullhorn consent-bounce recovery](bullhorn-consent-bounce-recovery.md) — first-time consent strands user OFF our domain → no server-side detection; use a return-visit cookie heuristic + keep manual form token-gated.
+- [Bullhorn address/country writes](bullhorn-address-country-writes.md) — country is numeric countryID inside the `address` composite (not name/code/flat); writes resolve name→id via options/Country, strip text aliases.

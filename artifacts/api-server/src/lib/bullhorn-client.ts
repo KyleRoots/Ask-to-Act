@@ -3247,12 +3247,112 @@ function q(value: string): string {
   return value.replace(/'/g, "''");
 }
 
+// Per-firm cache of Bullhorn's country name -> numeric countryID map, keyed by
+// firm context so interleaved multi-tenant traffic never thrashes a single
+// entry (and one firm's map can never be served to another). The list is
+// firm-wide and stable; bullhornFetch also caches the underlying read.
+const countryIdMapByFirm = new Map<string, Map<string, number>>();
+
+/**
+ * Loads Bullhorn's country list (`options/Country`) as a lowercased
+ * name -> countryID map. Bullhorn stores a location's country as a numeric
+ * `countryID` (a reference into this list), NOT as a name/code, so any name a
+ * user supplies must be translated before a write.
+ */
+async function getCountryIdMap(): Promise<Map<string, number>> {
+  const firm = currentFirmContextId() ?? "no-firm";
+  const cached = countryIdMapByFirm.get(firm);
+  if (cached) return cached;
+  const data = (await bullhornFetch("options/Country", { count: 300 })) as {
+    data?: Array<{ value?: unknown; label?: unknown }>;
+  };
+  const map = new Map<string, number>();
+  for (const o of data.data ?? []) {
+    const id = Number(o.value);
+    const label = typeof o.label === "string" ? o.label.trim() : "";
+    if (Number.isFinite(id) && label) map.set(label.toLowerCase(), id);
+  }
+  countryIdMapByFirm.set(firm, map);
+  return map;
+}
+
+/**
+ * True when an `address` body needs a country-name -> countryID lookup: it has
+ * an address object with a country *name* (countryName/country/countryCode) but
+ * no usable numeric `countryID` yet.
+ */
+function addressNeedsCountryLookup(body: Record<string, unknown>): boolean {
+  const addr = body.address;
+  if (!addr || typeof addr !== "object" || Array.isArray(addr)) return false;
+  const a = addr as Record<string, unknown>;
+  if (a.countryID != null && a.countryID !== "") return false;
+  const raw = a.countryName ?? a.country ?? a.countryCode;
+  return typeof raw === "string" && raw.trim() !== "";
+}
+
+/**
+ * Pure transform: resolves user-friendly country input inside an `address`
+ * composite into the numeric `countryID` Bullhorn requires on write, using a
+ * pre-fetched name -> id map. Accepts a name via `countryName`/`country`/
+ * `countryCode`, or a numeric `countryID` directly (string ids are coerced).
+ * The text aliases are read-only/derived on write, so they are stripped after
+ * resolution to avoid Bullhorn rejecting them as invalid address fields.
+ *
+ * No-op when the body carries no `address` object. Mutates the address in place.
+ * Throws BullhornFieldValidationError when a supplied country name is unknown.
+ */
+export function applyCountryIdToAddress(
+  body: Record<string, unknown>,
+  countryMap: Map<string, number>,
+): void {
+  const addr = body.address;
+  if (!addr || typeof addr !== "object" || Array.isArray(addr)) return;
+  const a = addr as Record<string, unknown>;
+
+  if (a.countryID != null && a.countryID !== "") {
+    // Normalize a numeric id supplied as a string ("70" -> 70).
+    if (typeof a.countryID === "string" && /^\d+$/.test(a.countryID.trim())) {
+      a.countryID = Number(a.countryID.trim());
+    }
+  } else {
+    const raw = a.countryName ?? a.country ?? a.countryCode;
+    if (typeof raw === "string" && raw.trim()) {
+      const id = countryMap.get(raw.trim().toLowerCase());
+      if (id === undefined) {
+        throw new BullhornFieldValidationError(
+          `"${raw.trim()}" is not a recognized Bullhorn country name. ` +
+            `Provide the country's full name exactly as Bullhorn spells it (e.g. "Egypt", "United States", "United Kingdom"), ` +
+            `or pass a numeric address.countryID.`,
+        );
+      }
+      a.countryID = id;
+    }
+  }
+
+  delete a.countryName;
+  delete a.country;
+  delete a.countryCode;
+}
+
+/**
+ * Async wrapper: fetches the country map only when a name lookup is actually
+ * needed, then applies the pure transform. Used at the central write choke
+ * points so every address-bearing create/update gets country translation.
+ */
+async function resolveAddressCountryId(body: Record<string, unknown>): Promise<void> {
+  const map = addressNeedsCountryLookup(body)
+    ? await getCountryIdMap()
+    : new Map<string, number>();
+  applyCountryIdToAddress(body, map);
+}
+
 /** PUT a new entity record; returns its new Bullhorn ID. */
 async function createEntityRecord(
   session: BullhornWriteSession,
   entity: string,
   body: Record<string, unknown>,
 ): Promise<number> {
+  await resolveAddressCountryId(body);
   const data = (await writeFetch(session, "PUT", `entity/${entity}`, body)) as {
     changedEntityId?: number;
   };
@@ -3266,6 +3366,7 @@ async function updateEntityRecord(
   id: number,
   body: Record<string, unknown>,
 ): Promise<void> {
+  await resolveAddressCountryId(body);
   await writeFetch(session, "POST", `entity/${entity}/${id}`, body);
 }
 

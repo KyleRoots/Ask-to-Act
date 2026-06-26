@@ -1295,6 +1295,11 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     z.null(),
     z.object({ id: z.number().int().positive() }),
     z.array(z.object({ id: z.number().int().positive() })),
+    // Composite fields (Bullhorn ADDRESS type, e.g. `address`) are nested
+    // objects of scalar sub-fields: address1, address2, city, state, zip, and
+    // either countryID (numeric) or countryName (a name like "Egypt", which the
+    // server resolves to the numeric countryID automatically).
+    z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
   ]);
 
   const additionalFieldsSchema = z
@@ -1302,7 +1307,9 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     .optional()
     .describe(
       "Optional extra fields keyed by their exact Bullhorn API field name (use describe_entity to find names; list_field_options for picklist values). " +
-        "Unknown field names are rejected before submission. For an association set the *Id helper param instead where one exists.",
+        "Unknown field names are rejected before submission. For an association set the *Id helper param instead where one exists. " +
+        "To set a location, pass the `address` composite as a nested object, e.g. { address: { address1: '123 Main St', city: 'Cairo', state: 'Cairo', zip: '11511', countryName: 'Egypt' } }. " +
+        "Give the country by name (countryName) — it is resolved to Bullhorn's numeric countryID automatically; you may also pass countryID directly.",
     );
 
   writeTool(
@@ -1347,12 +1354,17 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "update_job",
     "WRITE: Updates fields on an existing JobOrder in Bullhorn, as YOU. " +
       "Provide only the fields you want to change in `fields` (keyed by exact Bullhorn field name; use describe_entity(JobOrder) and list_field_options for valid names/values). " +
+      "To change the job's location/country, pass the `address` composite as a nested object — e.g. { address: { countryName: 'Egypt' } } (you can also include address1/city/state/zip). " +
+      "The country is given by NAME (countryName) and resolved to Bullhorn's numeric countryID automatically; there is no `address.countryCode`/`address.countryName` flat field. " +
       "ALWAYS confirm the change with the user first.",
     {
       jobOrderId: z.number().int().positive().describe("Bullhorn JobOrder ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
-        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Covered', numOpenings: 2 })."),
+        .describe(
+          "Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Covered', numOpenings: 2 }). " +
+            "For location, use the address composite, e.g. { address: { countryName: 'Egypt' } }.",
+        ),
     },
     async ({ jobOrderId, fields }) =>
       runWriteTool("update_job", { jobOrderId }, async () => {
