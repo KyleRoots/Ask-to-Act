@@ -12,10 +12,33 @@ import { rememberState } from "../lib/oauth-state.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
-import { escapeHtml, page } from "../lib/html.js";
+import { escapeHtml, page, brandLogo } from "../lib/html.js";
 import { nonceAttr } from "../lib/csp-nonce.js";
 
 const router: IRouter = Router();
+
+/**
+ * Name of the cookie that records "this browser already started a Bullhorn
+ * OAuth attempt for this user". Set when we redirect to Bullhorn; read when the
+ * user lands back on the enroll link without having completed (refreshToken
+ * still null) — the signature of Bullhorn's first-time consent bounce, which
+ * strands the user on Bullhorn's own login page instead of returning here.
+ */
+const ENROLL_ATTEMPT_COOKIE = "a2a_enroll_started";
+
+/** Reads a single cookie value from the raw Cookie header (no cookie-parser). */
+function readCookie(req: Request, name: string): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) {
+      return decodeURIComponent(part.slice(idx + 1).trim());
+    }
+  }
+  return undefined;
+}
 
 /**
  * POST /api/users
@@ -734,6 +757,49 @@ ${err}
 }
 
 /**
+ * Recovery page shown when we detect Bullhorn's first-time consent bounce: the
+ * user started the OAuth redirect but landed back on the enroll link without
+ * completing. Offers a one-click retry and a self-serve manual fallback. This
+ * page is reachable ONLY with a valid one-time enroll token, so crawlers can
+ * never see it (the manual credential form stays behind a further click).
+ */
+function bounceRecoveryPage(token: string, userName: string, firmName?: string | null): string {
+  const e = escapeHtml;
+  const firmLine = firmName ? ` for <strong>${e(firmName)}</strong>` : "";
+  const retryUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&go=1`;
+  const manualUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&manual=1`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Finish connecting | AskToAct</title>
+<style${nonceAttr()}>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
+main{max-width:480px;width:100%}
+.logo{display:flex;align-items:center;gap:8px;margin-bottom:24px}
+.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}
+.logo-text span{color:#38BDF8}
+.card{background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:32px}
+h1{font-size:20px;font-weight:800;margin:0 0 10px;letter-spacing:-0.02em}
+.sub{font-size:14px;color:#94a3b8;margin:0 0 24px;line-height:1.6}
+.btn{display:block;width:100%;text-align:center;padding:13px;border-radius:9px;font-size:14px;font-weight:600;text-decoration:none;margin-bottom:12px}
+.btn-primary{background:#4F46E5;color:#fff}
+.btn-primary:hover{background:#4338ca}
+.btn-secondary{background:#0f1622;color:#a5b4fc;border:1px solid rgba(79,70,229,.35)}
+.btn-secondary:hover{border-color:#4F46E5;background:rgba(79,70,229,.12)}
+.hint{font-size:12px;color:#64748b;line-height:1.6;margin:18px 0 0}
+</style></head>
+<body><main>
+<div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div>
+<div class="card">
+  <h1>Let's finish connecting Bullhorn</h1>
+  <p class="sub">Hi ${e(userName)} — it looks like the Bullhorn connection${firmLine} didn't complete. Bullhorn sometimes interrupts the very first sign-in and sends you back to its own login screen. Pick an option below to finish:</p>
+  <a class="btn btn-primary" href="${retryUrl}">Try the Bullhorn sign-in again</a>
+  <a class="btn btn-secondary" href="${manualUrl}">Connect manually instead</a>
+  <p class="hint">"Connect manually" lets you enter your Bullhorn username and password once on this page — we complete the connection securely on the server, which avoids Bullhorn's first-time interruption entirely.</p>
+</div>
+</main></body></html>`;
+}
+
+/**
  * GET /api/auth/user/enroll?token=<enrollToken>
  * No auth required — shows the recruiter a credentials form. The token is
  * one-time-use and expires after 7 days; use POST /api/users/:id/invite to
@@ -812,6 +878,20 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       return;
     }
 
+    // Bounce recovery: Bullhorn's first-time consent screen sometimes bounces a
+    // brand-new user back to its own login page instead of returning to our
+    // callback, so the connection silently never completes. We detect the
+    // return: if this browser already started an attempt for this user (cookie
+    // set on the previous redirect) and they're back here still unconnected,
+    // show a recovery page with a retry + manual fallback. ?go=1 forces the
+    // redirect (the "try again" button on that page).
+    const forceRedirect = req.query["go"] === "1";
+    if (!forceRedirect && readCookie(req, ENROLL_ATTEMPT_COOKIE) === rows[0].id) {
+      res.set("Cache-Control", "no-store");
+      res.send(bounceRecoveryPage(token, rows[0].name, firmName));
+      return;
+    }
+
     // Default flow: redirect the recruiter to Bullhorn's own login page. The
     // user authenticates and approves consent on bullhorn.com — no password is
     // ever entered on this domain. Bullhorn redirects back to the shared
@@ -820,6 +900,17 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
     rememberState(state);
     const authorizeUrl = await getAuthorizeUrl(state);
+    // Record that an OAuth attempt started for this user so a bounce is
+    // detectable on return. SameSite=Lax so it survives the top-level redirect
+    // back from Bullhorn; scoped to the enroll path; expires with the link's
+    // realistic completion window.
+    res.cookie(ENROLL_ATTEMPT_COOKIE, rows[0].id, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000,
+      path: "/api/auth/user/enroll",
+    });
     res.set("Cache-Control", "no-store");
     res.redirect(authorizeUrl);
   } catch (err) {
