@@ -223,6 +223,51 @@ const SERVER_INSTRUCTIONS = [
 const READ_PRESENTATION_SUFFIX =
   " | Presentation: if a result record includes a `bullhornUrl`, make that record clickable — render its NAME (or Bullhorn ID) as a Markdown link to its bullhornUrl, e.g. [Acme Corp](url). Do this for EVERY row, including rows that also show an email or phone — the name is the link, the email stays plain text. Put the link ONLY on the record name/ID; never link email addresses or phone numbers.";
 
+// Shared schema for Bullhorn ADDRESS composite parameters on update tools.
+// Defined as a top-level typed object so OpenAI's tool-call validator can
+// accept it without ambiguity (nested objects inside z.record additionalProperties
+// are blocked by the OpenAI client-side anyOf validator).
+//
+// IMPORTANT: declare EVERY country alias the resolver accepts
+// (countryName / country / countryCode / countryID). Zod strips undeclared keys
+// by DEFAULT, so omitting an alias silently drops the AI's input before the
+// name→countryID resolver runs, collapsing the address to {} and producing a
+// "200 success but country never changed" no-op. Keep this in lockstep with the
+// aliases read in bullhorn-client.ts (resolveOneAddressCountry).
+export const addressFieldSchema = z
+  .object({
+    address1: z.string().optional().describe("Street address line 1."),
+    address2: z.string().optional().describe("Street address line 2 / suite."),
+    city: z.string().optional().describe("City."),
+    state: z.string().optional().describe("State or province."),
+    zip: z.string().optional().describe("Postal / ZIP code."),
+    countryName: z
+      .string()
+      .optional()
+      .describe(
+        "Country by full name (e.g. 'Egypt', 'United States', 'United Kingdom'). " +
+          "Resolved to Bullhorn's numeric countryID automatically — use this instead of countryID where possible.",
+      ),
+    country: z
+      .string()
+      .optional()
+      .describe(
+        "Alias for countryName — country by full NAME (e.g. 'Egypt'). Resolved to countryID automatically.",
+      ),
+    countryCode: z
+      .string()
+      .optional()
+      .describe(
+        "Alias for countryName — also expects the country's full NAME (e.g. 'Egypt'), NOT an ISO code. Resolved to countryID automatically.",
+      ),
+    countryID: z
+      .number()
+      .int()
+      .optional()
+      .describe("Bullhorn numeric country ID. Prefer countryName."),
+  })
+  .optional();
+
 export function createMcpServer(caller?: CallerIdentity): McpServer {
   const server = new McpServer(
     {
@@ -1304,32 +1349,6 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     // "Egypt", which the server resolves to the numeric countryID automatically).
     z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
   ]);
-
-  // Shared schema for Bullhorn ADDRESS composite parameters on update tools.
-  // Defined as a top-level typed object so OpenAI's tool-call validator can
-  // accept it without ambiguity (nested objects inside z.record additionalProperties
-  // are blocked by the OpenAI client-side anyOf validator).
-  const addressFieldSchema = z
-    .object({
-      address1: z.string().optional().describe("Street address line 1."),
-      address2: z.string().optional().describe("Street address line 2 / suite."),
-      city: z.string().optional().describe("City."),
-      state: z.string().optional().describe("State or province."),
-      zip: z.string().optional().describe("Postal / ZIP code."),
-      countryName: z
-        .string()
-        .optional()
-        .describe(
-          "Country by full name (e.g. 'Egypt', 'United States', 'United Kingdom'). " +
-            "Resolved to Bullhorn's numeric countryID automatically — use this instead of countryID where possible.",
-        ),
-      countryID: z
-        .number()
-        .int()
-        .optional()
-        .describe("Bullhorn numeric country ID. Prefer countryName."),
-    })
-    .optional();
 
   const additionalFieldsSchema = z
     .record(z.string(), writeFieldValueSchema)
