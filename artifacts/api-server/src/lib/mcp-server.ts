@@ -1293,12 +1293,15 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     z.number(),
     z.boolean(),
     z.null(),
-    z.object({ id: z.number().int().positive() }),
-    z.array(z.object({ id: z.number().int().positive() })),
-    // Composite fields (Bullhorn ADDRESS type, e.g. `address`) are nested
-    // objects of scalar sub-fields: address1, address2, city, state, zip, and
-    // either countryID (numeric) or countryName (a name like "Egypt", which the
-    // server resolves to the numeric countryID automatically).
+    // Association refs — .passthrough() omits `additionalProperties:false` from
+    // the generated JSON Schema so that OpenAI's client-side anyOf validator
+    // does not block composite (address) objects on the basis of this branch.
+    z.object({ id: z.number().int().positive() }).passthrough(),
+    z.array(z.object({ id: z.number().int().positive() }).passthrough()),
+    // Composite fields (Bullhorn ADDRESS type, e.g. `address`, `secondaryAddress`,
+    // `billingAddress`) are nested objects of scalar sub-fields: address1, address2,
+    // city, state, zip, and either countryID (numeric) or countryName (a name like
+    // "Egypt", which the server resolves to the numeric countryID automatically).
     z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
   ]);
 
