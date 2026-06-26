@@ -3276,39 +3276,67 @@ async function getCountryIdMap(): Promise<Map<string, number>> {
   return map;
 }
 
-/**
- * True when an `address` body needs a country-name -> countryID lookup: it has
- * an address object with a country *name* (countryName/country/countryCode) but
- * no usable numeric `countryID` yet.
- */
-function addressNeedsCountryLookup(body: Record<string, unknown>): boolean {
-  const addr = body.address;
-  if (!addr || typeof addr !== "object" || Array.isArray(addr)) return false;
-  const a = addr as Record<string, unknown>;
+// Sub-field names that identify a Bullhorn ADDRESS composite by shape. Entities
+// can carry several address composites (e.g. Candidate `address` +
+// `secondaryAddress`, ClientCorporation `address` + `billingAddress`); we detect
+// them by shape so every one is handled uniformly without hard-coding field
+// names per entity. Association refs like `{ id }` have no address sub-field and
+// are therefore never mistaken for an address.
+const ADDRESS_SHAPE_KEYS = new Set([
+  "countryname",
+  "country",
+  "countrycode",
+  "countryid",
+  "address1",
+  "address2",
+  "city",
+  "state",
+  "zip",
+]);
+
+/** True when a value looks like a Bullhorn address composite (object of address sub-fields). */
+function isAddressLikeObject(v: unknown): v is Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  return Object.keys(v as Record<string, unknown>).some((k) =>
+    ADDRESS_SHAPE_KEYS.has(k.toLowerCase()),
+  );
+}
+
+/** Collects every address-shaped composite object present in a write body. */
+function collectAddressObjects(body: Record<string, unknown>): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const v of Object.values(body)) {
+    if (isAddressLikeObject(v)) out.push(v as Record<string, unknown>);
+  }
+  return out;
+}
+
+/** True when a single address object still needs a country-name -> countryID lookup. */
+function oneAddressNeedsCountryLookup(a: Record<string, unknown>): boolean {
   if (a.countryID != null && a.countryID !== "") return false;
   const raw = a.countryName ?? a.country ?? a.countryCode;
   return typeof raw === "string" && raw.trim() !== "";
 }
 
 /**
- * Pure transform: resolves user-friendly country input inside an `address`
- * composite into the numeric `countryID` Bullhorn requires on write, using a
- * pre-fetched name -> id map. Accepts a name via `countryName`/`country`/
- * `countryCode`, or a numeric `countryID` directly (string ids are coerced).
- * The text aliases are read-only/derived on write, so they are stripped after
- * resolution to avoid Bullhorn rejecting them as invalid address fields.
- *
- * No-op when the body carries no `address` object. Mutates the address in place.
+ * True when ANY address composite in the body needs a country-name lookup, so
+ * the (cached) country map is fetched only when a translation is actually due.
+ */
+function addressNeedsCountryLookup(body: Record<string, unknown>): boolean {
+  return collectAddressObjects(body).some(oneAddressNeedsCountryLookup);
+}
+
+/**
+ * Translates/normalizes the country on a SINGLE address object in place: a name
+ * via `countryName`/`country`/`countryCode` becomes the numeric `countryID`
+ * Bullhorn requires, a string id is coerced to a number, and the read-only text
+ * aliases are stripped so Bullhorn never rejects them as invalid address fields.
  * Throws BullhornFieldValidationError when a supplied country name is unknown.
  */
-export function applyCountryIdToAddress(
-  body: Record<string, unknown>,
+function resolveOneAddressCountry(
+  a: Record<string, unknown>,
   countryMap: Map<string, number>,
 ): void {
-  const addr = body.address;
-  if (!addr || typeof addr !== "object" || Array.isArray(addr)) return;
-  const a = addr as Record<string, unknown>;
-
   if (a.countryID != null && a.countryID !== "") {
     // Normalize a numeric id supplied as a string ("70" -> 70).
     if (typeof a.countryID === "string" && /^\d+$/.test(a.countryID.trim())) {
@@ -3322,7 +3350,7 @@ export function applyCountryIdToAddress(
         throw new BullhornFieldValidationError(
           `"${raw.trim()}" is not a recognized Bullhorn country name. ` +
             `Provide the country's full name exactly as Bullhorn spells it (e.g. "Egypt", "United States", "United Kingdom"), ` +
-            `or pass a numeric address.countryID.`,
+            `or pass a numeric countryID.`,
         );
       }
       a.countryID = id;
@@ -3332,6 +3360,24 @@ export function applyCountryIdToAddress(
   delete a.countryName;
   delete a.country;
   delete a.countryCode;
+}
+
+/**
+ * Pure transform: resolves user-friendly country input into the numeric
+ * `countryID` Bullhorn requires on write, for EVERY address composite present
+ * in the body (address, secondaryAddress, billingAddress, …), using a
+ * pre-fetched name -> id map.
+ *
+ * No-op when the body carries no address composite. Mutates addresses in place.
+ * Throws BullhornFieldValidationError when a supplied country name is unknown.
+ */
+export function applyCountryIdToAddress(
+  body: Record<string, unknown>,
+  countryMap: Map<string, number>,
+): void {
+  for (const a of collectAddressObjects(body)) {
+    resolveOneAddressCountry(a, countryMap);
+  }
 }
 
 /**

@@ -63,6 +63,41 @@ describe("applyCountryIdToAddress", () => {
     expect(body).toEqual({ status: "Accepting Candidates" });
   });
 
+  it("resolves secondaryAddress and billingAddress (any address composite, not just `address`)", () => {
+    const candidate: Record<string, unknown> = {
+      firstName: "Sam",
+      secondaryAddress: { city: "Cairo", countryName: "Egypt" },
+    };
+    applyCountryIdToAddress(candidate, COUNTRY_MAP);
+    expect(candidate.secondaryAddress).toEqual({ city: "Cairo", countryID: 70 });
+
+    const company: Record<string, unknown> = {
+      name: "Acme",
+      billingAddress: { countryName: "United Kingdom" },
+    };
+    applyCountryIdToAddress(company, COUNTRY_MAP);
+    expect(company.billingAddress).toEqual({ countryID: 222 });
+  });
+
+  it("resolves multiple address composites in a single body", () => {
+    const body: Record<string, unknown> = {
+      address: { countryName: "Egypt" },
+      secondaryAddress: { countryName: "United States" },
+    };
+    applyCountryIdToAddress(body, COUNTRY_MAP);
+    expect(body.address).toEqual({ countryID: 70 });
+    expect(body.secondaryAddress).toEqual({ countryID: 1 });
+  });
+
+  it("never mistakes an association ref ({ id }) for an address", () => {
+    const body: Record<string, unknown> = {
+      clientCorporation: { id: 16172 },
+      owner: { id: 99 },
+    };
+    applyCountryIdToAddress(body, COUNTRY_MAP);
+    expect(body).toEqual({ clientCorporation: { id: 16172 }, owner: { id: 99 } });
+  });
+
   it("leaves non-country address sub-fields untouched", () => {
     const body: Record<string, unknown> = {
       address: { address1: "1 St", city: "Cairo", state: "Cairo", zip: "11511", countryName: "Egypt" },

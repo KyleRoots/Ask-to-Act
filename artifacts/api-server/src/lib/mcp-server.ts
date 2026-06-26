@@ -1308,7 +1308,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     .describe(
       "Optional extra fields keyed by their exact Bullhorn API field name (use describe_entity to find names; list_field_options for picklist values). " +
         "Unknown field names are rejected before submission. For an association set the *Id helper param instead where one exists. " +
-        "To set a location, pass the `address` composite as a nested object, e.g. { address: { address1: '123 Main St', city: 'Cairo', state: 'Cairo', zip: '11511', countryName: 'Egypt' } }. " +
+        "To set a location, pass an address composite as a nested object, e.g. { address: { address1: '123 Main St', city: 'Cairo', state: 'Cairo', zip: '11511', countryName: 'Egypt' } }. " +
+        "This works for ANY address field the entity has (e.g. address, secondaryAddress, billingAddress). " +
         "Give the country by name (countryName) — it is resolved to Bullhorn's numeric countryID automatically; you may also pass countryID directly.",
     );
 
