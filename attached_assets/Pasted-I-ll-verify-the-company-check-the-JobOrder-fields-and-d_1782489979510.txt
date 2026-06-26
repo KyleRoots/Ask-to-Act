@@ -1,0 +1,175 @@
+I’ll verify the company, check the JobOrder fields and dropdown options in Bullhorn, then I’ll give you a final creation summary before any live record is saved.
+
+Looked for available tools
+Called tool
+
+Company ID 16172 resolves correctly to Myticas Consulting, and “Contract” is a valid Employment Type. I’m checking the JobOrder schema now to avoid missing required Bullhorn fields.
+
+Called tool
+
+I can create it, but I need your confirmation before saving the live Bullhorn job record.
+
+I verified:
+
+Client: Myticas Consulting
+Client ID: 16172
+Client status: Active Account
+Employment Type: Contract is valid in Bullhorn
+Available job statuses include: Qualifying, Accepting Candidates, Accepting Candidates - Interviewing, Hold - Covered, Hold - Client Hold, Offer Out, Filled, Archive, and others
+Available Internal Departments include: MYT-Chicago, MYT-Ohio, MYT-Clover, MYT-Ottawa, STS-STSI
+Best matching Public Category: Accounting / Human Resources: HR Technical Recruiter
+
+Before I create it, I recommend using these defaults:
+
+Field	Proposed Value
+Job Title	Technical Recruiter (North America Support)
+Client	Myticas Consulting, ID 16172
+Location	Egypt, Remote
+Employment Type	Contract
+Status	Accepting Candidates
+Internal Department	MYT-Ottawa
+Work Location Requirement	Remote
+Work From Home	Yes
+Public Category	HR Technical Recruiter
+Minimum Experience	3 years
+Travel Requirements	None
+Visa Sponsorship Provided	No
+Job Duration	Not specified
+Pay/Bill Rate	Not specified
+Client Contact	Not specified
+
+Formatted job description I would save:
+
+Job Summary
+
+We are seeking an experienced Technical Recruiter based in Egypt to support hiring initiatives across North America. The ideal candidate will have a strong background in IT and technical recruiting, excellent English communication skills, and the ability to work within North American business hours.
+
+This role is responsible for managing the full recruitment lifecycle, partnering with hiring managers, and sourcing top technology talent across a variety of technical disciplines.
+
+Key Responsibilities
+
+Manage the full-cycle recruitment process for technical and IT positions across North America.
+Partner closely with hiring managers to understand hiring needs, job requirements, and team objectives.
+Develop and execute sourcing strategies to identify qualified candidates through job boards, LinkedIn, networking, referrals, and other recruitment channels.
+Screen resumes and conduct initial candidate assessments to evaluate technical qualifications, experience, and cultural fit.
+Coordinate and schedule interviews with candidates and hiring teams across multiple time zones.
+Maintain a positive candidate experience throughout the recruitment process.
+Build and maintain talent pipelines for current and future hiring needs.
+Track recruitment metrics and provide regular hiring updates to stakeholders.
+Ensure compliance with company hiring policies and recruitment best practices.
+Stay informed about technology trends, labor market conditions, and competitive talent landscapes.
+
+Required Qualifications
+
+Bachelor’s degree in Human Resources, Business Administration, Information Technology, or a related field.
+Minimum 3 to 5 years of experience in IT or technical recruiting.
+Proven experience recruiting for technical roles such as Software Engineers, Developers, DevOps Engineers, Cloud Engineers, Data Engineers, QA Engineers, Cybersecurity Professionals, and IT Infrastructure positions.
+Strong understanding of technical terminology, technologies, and software development methodologies.
+Excellent verbal and written English communication skills.
+Experience supporting recruitment efforts in North America, including the United States and/or Canada, is preferred.
+Ability to work North American business hours.
+Experience using Applicant Tracking Systems and sourcing tools such as LinkedIn Recruiter.
+Strong organizational, time management, and stakeholder management skills.
+
+Preferred Qualifications
+
+Experience working in a staffing agency, RPO, or high-growth technology environment.
+Familiarity with North American employment markets and recruiting practices.
+Experience recruiting for both permanent and contract technical positions.
+
+Key Competencies
+
+Technical sourcing expertise.
+Relationship building and stakeholder management.
+Strong interviewing and assessment skills.
+Excellent communication and presentation abilities.
+Attention to detail and process management.
+Ability to work independently in a fast-paced environment.
+Results-oriented with a focus on quality hiring.
+
+Working Hours
+
+Must be available to work North American time zones, Eastern and/or Central Time.
+Flexibility to accommodate hiring manager and candidate schedules across North America.
+
+What We Offer
+
+Competitive compensation package.
+Opportunity to work with global teams and leading technology professionals.
+Career growth and professional development opportunities.
+Flexible work environment.
+
+To proceed, reply with:
+
+Approved. Create the job with the proposed defaults.
+
+Or send changes for status, internal department, client contact, pay/bill rate, or duration before I save it.
+
+Approved. Create the job with the proposed defaults
+
+I’ll create the live job now using the approved defaults and the formatted description.
+
+Looked for available tools
+Called tool
+
+The first create attempt was rejected by Bullhorn with a generic persistence error. I’m going to compare against existing Myticas job records to identify which required field or value is missing.
+
+Called tool
+Called tool
+
+Bullhorn appears to require a client contact on similar Myticas jobs. I found the active “Myticas Consulting Default Contact” and am using that to complete the create action.
+
+Called tool
+Called tool
+
+Created successfully in Bullhorn.
+
+Field	Saved Value
+Job	Technical Recruiter (North America Support)
+Job ID	35381
+Client	Myticas Consulting, ID 16172
+Client Contact	Myticas Consulting Default Contact, ID 3423087
+Status	Accepting Candidates
+Employment Type	Contract
+Internal Department	MYT-Ottawa
+Work Location Requirement	Remote
+Work From Home	Yes
+Public Category	HR Technical Recruiter
+Minimum Experience	3 years
+Travel Requirements	None
+Visa Sponsorship	No
+Openings	1
+
+Note: Bullhorn retained the default country/address value as United States on the address field, but the job is set to Remote and Work From Home = Yes.
+
+Okay, great. Could you change the country/address value from United States to Egypt?
+
+I’ll update job 35381 so the address country reflects Egypt, then verify the saved value.
+
+Looked for available tools
+Called tool
+
+The connector’s update schema does not accept the full address object directly. I’m trying the supported flat address field format next, then I’ll verify whether Bullhorn accepted it.
+
+Looking for available tools
+Thought for 26s
+
+I tried to update the address country on job 35381, but the current AskToAct update tool does not support editing the Bullhorn address composite field directly.
+
+What happened:
+
+The job was created successfully.
+I attempted to update the address to Egypt.
+Bullhorn/AskToAct rejected the update because the connector only accepts simple field values, not the full nested address object.
+I also tried flat address fields like address.countryCode and address.countryName, but Bullhorn rejected those as invalid JobOrder fields.
+
+The job still remains correctly set as:
+
+Remote
+Work From Home = Yes
+Employment Type = Contract
+Internal Department = MYT-Ottawa
+
+But the address country remains United States because that specific field is not editable through the current connector action.
+
+You may need to update the country manually in Bullhorn for job 35381, or the AskToAct connector would need an enhancement to support JobOrder address/location composite updates.
