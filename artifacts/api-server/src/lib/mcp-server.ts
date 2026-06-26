@@ -1305,6 +1305,32 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
   ]);
 
+  // Shared schema for Bullhorn ADDRESS composite parameters on update tools.
+  // Defined as a top-level typed object so OpenAI's tool-call validator can
+  // accept it without ambiguity (nested objects inside z.record additionalProperties
+  // are blocked by the OpenAI client-side anyOf validator).
+  const addressFieldSchema = z
+    .object({
+      address1: z.string().optional().describe("Street address line 1."),
+      address2: z.string().optional().describe("Street address line 2 / suite."),
+      city: z.string().optional().describe("City."),
+      state: z.string().optional().describe("State or province."),
+      zip: z.string().optional().describe("Postal / ZIP code."),
+      countryName: z
+        .string()
+        .optional()
+        .describe(
+          "Country by full name (e.g. 'Egypt', 'United States', 'United Kingdom'). " +
+            "Resolved to Bullhorn's numeric countryID automatically — use this instead of countryID where possible.",
+        ),
+      countryID: z
+        .number()
+        .int()
+        .optional()
+        .describe("Bullhorn numeric country ID. Prefer countryName."),
+    })
+    .optional();
+
   const additionalFieldsSchema = z
     .record(z.string(), writeFieldValueSchema)
     .optional()
@@ -1357,23 +1383,29 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "update_job",
     "WRITE: Updates fields on an existing JobOrder in Bullhorn, as YOU. " +
-      "Provide only the fields you want to change in `fields` (keyed by exact Bullhorn field name; use describe_entity(JobOrder) and list_field_options for valid names/values). " +
-      "To change the job's location/country, pass the `address` composite as a nested object — e.g. { address: { countryName: 'Egypt' } } (you can also include address1/city/state/zip). " +
-      "The country is given by NAME (countryName) and resolved to Bullhorn's numeric countryID automatically; there is no `address.countryCode`/`address.countryName` flat field. " +
+      "Use `fields` for scalar / association changes (status, title, numOpenings, owner, etc.) " +
+      "and the dedicated `address` parameter for location / country — do NOT put address inside `fields`. " +
       "ALWAYS confirm the change with the user first.",
     {
       jobOrderId: z.number().int().positive().describe("Bullhorn JobOrder ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
         .describe(
-          "Fields to change, keyed by exact Bullhorn field name (e.g. { status: 'Covered', numOpenings: 2 }). " +
-            "For location, use the address composite, e.g. { address: { countryName: 'Egypt' } }.",
+          "Scalar and association fields to change, keyed by exact Bullhorn field name " +
+            "(e.g. { status: 'Covered', numOpenings: 2 }). Do NOT put address here — use the `address` parameter.",
         ),
+      address: addressFieldSchema.describe(
+        "Job location / address. Include only the sub-fields you want to change — all others are preserved. " +
+          "Set country by full name via countryName (e.g. 'Egypt', 'United States') — " +
+          "resolved to Bullhorn's numeric countryID automatically.",
+      ),
     },
-    async ({ jobOrderId, fields }) =>
+    async ({ jobOrderId, fields, address }) =>
       runWriteTool("update_job", { jobOrderId }, async () => {
         const session = await resolveWriteSession();
-        return updateJobOrder(session, jobOrderId, fields);
+        const allFields = { ...fields };
+        if (address !== undefined) allFields.address = address;
+        return updateJobOrder(session, jobOrderId, allFields);
       }),
   );
 
@@ -1397,17 +1429,28 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "update_company",
     "WRITE: Updates fields on an existing ClientCorporation in Bullhorn, as YOU. " +
-      "Provide only the fields to change in `fields` (exact Bullhorn field names). ALWAYS confirm with the user first.",
+      "Use `fields` for scalar / association changes and the dedicated `address` / `billingAddress` parameters for location updates. ALWAYS confirm with the user first.",
     {
       companyId: z.number().int().positive().describe("Bullhorn ClientCorporation ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
-        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { phone: '...', status: 'Active Account' })."),
+        .describe(
+          "Scalar and association fields to change, keyed by exact Bullhorn field name (e.g. { phone: '...', status: 'Active Account' }). Do NOT put address here.",
+        ),
+      address: addressFieldSchema.describe(
+        "Main / headquarters address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
+      billingAddress: addressFieldSchema.describe(
+        "Billing address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
     },
-    async ({ companyId, fields }) =>
+    async ({ companyId, fields, address, billingAddress }) =>
       runWriteTool("update_company", { companyId }, async () => {
         const session = await resolveWriteSession();
-        return updateCompany(session, companyId, fields);
+        const allFields = { ...fields };
+        if (address !== undefined) allFields.address = address;
+        if (billingAddress !== undefined) allFields.billingAddress = billingAddress;
+        return updateCompany(session, companyId, allFields);
       }),
   );
 
@@ -1435,35 +1478,57 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "update_contact",
     "WRITE: Updates fields on an existing ClientContact in Bullhorn, as YOU. " +
-      "Provide only the fields to change in `fields` (exact Bullhorn field names). ALWAYS confirm with the user first.",
+      "Use `fields` for scalar / association changes and the dedicated `address` / `secondaryAddress` parameters for location updates. ALWAYS confirm with the user first.",
     {
       contactId: z.number().int().positive().describe("Bullhorn ClientContact ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
-        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', status: 'Active' })."),
+        .describe(
+          "Scalar and association fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', status: 'Active' }). Do NOT put address here.",
+        ),
+      address: addressFieldSchema.describe(
+        "Primary address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
+      secondaryAddress: addressFieldSchema.describe(
+        "Secondary / home address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
     },
-    async ({ contactId, fields }) =>
+    async ({ contactId, fields, address, secondaryAddress }) =>
       runWriteTool("update_contact", { contactId }, async () => {
         const session = await resolveWriteSession();
-        return updateContact(session, contactId, fields);
+        const allFields = { ...fields };
+        if (address !== undefined) allFields.address = address;
+        if (secondaryAddress !== undefined) allFields.secondaryAddress = secondaryAddress;
+        return updateContact(session, contactId, allFields);
       }),
   );
 
   writeTool(
     "update_candidate",
     "WRITE: Updates fields on an existing Candidate in Bullhorn, as YOU (contact info, owner, custom fields, status, etc.). " +
-      "Provide only the fields to change in `fields` (exact Bullhorn field names). A `status` value is validated against the live picklist. " +
-      "For a quick status-only change, update_candidate_status also works. ALWAYS confirm with the user first.",
+      "Use `fields` for scalar / association changes and the dedicated `address` / `secondaryAddress` parameters for location updates. " +
+      "A `status` value is validated against the live picklist. For a quick status-only change, update_candidate_status also works. ALWAYS confirm with the user first.",
     {
       candidateId: z.number().int().positive().describe("Bullhorn Candidate ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
-        .describe("Fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', phone: '...', status: 'Active' })."),
+        .describe(
+          "Scalar and association fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', phone: '...', status: 'Active' }). Do NOT put address here.",
+        ),
+      address: addressFieldSchema.describe(
+        "Primary address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
+      secondaryAddress: addressFieldSchema.describe(
+        "Secondary / home address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
     },
-    async ({ candidateId, fields }) =>
+    async ({ candidateId, fields, address, secondaryAddress }) =>
       runWriteTool("update_candidate", { candidateId }, async () => {
         const session = await resolveWriteSession();
-        return updateCandidate(session, candidateId, fields);
+        const allFields = { ...fields };
+        if (address !== undefined) allFields.address = address;
+        if (secondaryAddress !== undefined) allFields.secondaryAddress = secondaryAddress;
+        return updateCandidate(session, candidateId, allFields);
       }),
   );
 
@@ -1498,18 +1563,23 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "update_lead",
-    "WRITE: Updates fields on an existing Lead in Bullhorn, as YOU. Provide only the fields to change in `fields` (exact Bullhorn field names). " +
+    "WRITE: Updates fields on an existing Lead in Bullhorn, as YOU. Use `fields` for scalar / association changes and the dedicated `address` parameter for location updates. " +
       "A `status` value is validated against the live picklist. ALWAYS confirm with the user first.",
     {
       leadId: z.number().int().positive().describe("Bullhorn Lead ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
-        .describe("Fields to change, keyed by exact Bullhorn field name."),
+        .describe("Scalar and association fields to change, keyed by exact Bullhorn field name. Do NOT put address here."),
+      address: addressFieldSchema.describe(
+        "Lead address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
     },
-    async ({ leadId, fields }) =>
+    async ({ leadId, fields, address }) =>
       runWriteTool("update_lead", { leadId }, async () => {
         const session = await resolveWriteSession();
-        return updateLead(session, leadId, fields);
+        const allFields = { ...fields };
+        if (address !== undefined) allFields.address = address;
+        return updateLead(session, leadId, allFields);
       }),
   );
 
@@ -1540,18 +1610,23 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "update_opportunity",
-    "WRITE: Updates fields on an existing Opportunity in Bullhorn, as YOU. Provide only the fields to change in `fields` (exact Bullhorn field names). " +
+    "WRITE: Updates fields on an existing Opportunity in Bullhorn, as YOU. Use `fields` for scalar / association changes and the dedicated `address` parameter for location updates. " +
       "A `status` value is validated against the live picklist. ALWAYS confirm with the user first.",
     {
       opportunityId: z.number().int().positive().describe("Bullhorn Opportunity ID to update."),
       fields: z
         .record(z.string(), writeFieldValueSchema)
-        .describe("Fields to change, keyed by exact Bullhorn field name."),
+        .describe("Scalar and association fields to change, keyed by exact Bullhorn field name. Do NOT put address here."),
+      address: addressFieldSchema.describe(
+        "Opportunity location / address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
+      ),
     },
-    async ({ opportunityId, fields }) =>
+    async ({ opportunityId, fields, address }) =>
       runWriteTool("update_opportunity", { opportunityId }, async () => {
         const session = await resolveWriteSession();
-        return updateOpportunity(session, opportunityId, fields);
+        const allFields = { ...fields };
+        if (address !== undefined) allFields.address = address;
+        return updateOpportunity(session, opportunityId, allFields);
       }),
   );
 
