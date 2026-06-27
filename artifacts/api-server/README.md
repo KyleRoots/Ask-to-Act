@@ -71,7 +71,8 @@ Set all of these as secrets in Replit (never hardcode them):
 | `BULLHORN_PASSWORD` | **Yes** | Service account password |
 | `RATE_LIMIT_MAX` | No | Max requests per window (default: 120) |
 | `RATE_LIMIT_WINDOW_MS` | No | Rate limit window in milliseconds (default: 60000) |
-| `PORT` | Yes | Port to listen on (set automatically by Replit) |
+| `CORS_ALLOWED_ORIGINS` | No | Comma-separated list of browser origins allowed to call the API (e.g. `https://app.example.com`). Default: no cross-origin browser access. Server-to-server callers (ChatGPT Enterprise, etc.) are unaffected. Set to `*` to allow any origin (not recommended). |
+| `PORT` | Yes | Port to listen on (set automatically by the host) |
 
 ### Generating a secure bearer token
 
