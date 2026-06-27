@@ -49,6 +49,7 @@ Recruiters in ChatGPT Enterprise toggle the Bullhorn app on and can immediately 
 - `PORT` — set automatically by Replit
 - `RATE_LIMIT_MAX` (optional) — max requests per window, default 120
 - `RATE_LIMIT_WINDOW_MS` (optional) — window size in ms, default 60000
+- `CORS_ALLOWED_ORIGINS` (optional) — comma-separated browser origins allowed to call the API; default none (server-to-server callers are unaffected). Set `*` to allow any origin (not recommended).
 - `CACHE_TTL_MS` (optional) — read-cache entry lifetime in ms, default 60000 (set 0 to disable)
 - `CACHE_MAX_ENTRIES` (optional) — max cached read responses, default 500
 - `BULLHORN_UI_BASE_URL` (optional) — base URL used to build record deep links; defaults to the UI cluster derived from the REST swimlane (e.g. `rest45...` → `https://cls45.bullhornstaffing.com`). Set this only if the instance's UI host differs.
