@@ -187,6 +187,60 @@ curl -X POST http://localhost:5000/api/mcp \
 
 ---
 
+## Deploying to Railway + Supabase
+
+The repo ships a portable `Dockerfile` (at the repo root) and a `railway.json`, so
+the server can run on Railway, Render, Fly.io, or any container host. The
+reference setup is **Railway** (runs the server) + **Supabase** (Postgres).
+
+### 1. Database (Supabase)
+
+1. Create a free Supabase project and copy its Postgres connection string
+   (Project Settings → Database → Connection string → URI).
+2. Create the one table the server needs. Either run the schema push locally
+   with `DATABASE_URL` pointed at Supabase:
+
+   ```bash
+   DATABASE_URL="postgresql://...supabase..." pnpm --filter @workspace/db run push
+   ```
+
+   …or create it directly with SQL:
+
+   ```sql
+   create table if not exists bullhorn_tokens (
+     id text primary key,
+     refresh_token text not null,
+     updated_at timestamp not null default now()
+   );
+   ```
+
+### 2. Server (Railway)
+
+1. Create a Railway project from this GitHub repo. Railway reads `railway.json`
+   and builds the root `Dockerfile` automatically.
+2. Set the environment variables (see the table above). At minimum:
+   `MCP_BEARER_TOKEN`, `DATABASE_URL` (the Supabase URI), `BULLHORN_CLIENT_ID`,
+   `BULLHORN_CLIENT_SECRET`, `BULLHORN_USERNAME`, `BULLHORN_PASSWORD`, and
+   `BULLHORN_REDIRECT_URI`. `PORT` is provided by Railway.
+3. Deploy. Railway health-checks `/api/healthz`.
+
+### 3. Connect Bullhorn (one-time)
+
+After the first deploy the token table is empty, so trigger the one-time
+Bullhorn connection (headless, no browser):
+
+```bash
+curl -X POST https://<your-app>.up.railway.app/api/auth/bullhorn/connect \
+  -H "Authorization: Bearer <MCP_BEARER_TOKEN>"
+```
+
+### 4. Point ChatGPT at the new URL
+
+Update the MCP server URL in the ChatGPT Enterprise connector to
+`https://<your-app>.up.railway.app/api/mcp` (keep the same bearer token to avoid
+any per-user reconfiguration). A custom domain in front keeps this URL stable
+across future moves.
+
 ## Roadmap
 
 - **v2 — Write tools**: Add note, update candidate status, update job fields, change placement status (with ChatGPT confirmation prompts)
