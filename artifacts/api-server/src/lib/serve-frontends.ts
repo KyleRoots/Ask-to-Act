@@ -37,9 +37,9 @@ const spaSecurity = helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'wasm-unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:"],
-      fontSrc: ["'self'", "data:"],
+      fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
       connectSrc: ["'self'", "https:"],
       frameSrc: ["'self'", "https:"],
       workerSrc: ["'self'", "blob:"],
