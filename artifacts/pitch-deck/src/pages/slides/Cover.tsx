@@ -2,49 +2,48 @@ import { LogoIcon } from "@/components/Logo";
 
 export default function Cover() {
   return (
-    <div className="w-screen h-screen overflow-hidden relative bg-bg text-text">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(79,70,229,0.22),_transparent_55%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(56,189,248,0.14),_transparent_50%)]" />
+    <div className="pd-slide relative bg-bg text-text w-full min-h-full flex flex-col overflow-x-hidden overflow-y-auto">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(79,70,229,0.22),_transparent_55%)] pointer-events-none" aria-hidden />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(56,189,248,0.14),_transparent_50%)] pointer-events-none" aria-hidden />
 
-      <div className="absolute top-[6vh] left-[6vw] flex items-center gap-[1.2vw]">
-        <LogoIcon vw={3.2} />
-        <span className="font-display text-[1.4vw] tracking-[0.3em] uppercase text-muted">
-          Investor & Customer Briefing
-        </span>
-      </div>
-
-      <div className="absolute top-[6vh] right-[6vw] flex items-center gap-[2vw]">
-        <div className="flex items-center gap-[0.6vw]">
-          <div className="w-[0.6vw] h-[0.6vw] rounded-full bg-green-400 animate-pulse" />
-          <span className="font-body text-[1.1vw] text-green-400">Live · connect.asktoact.ai</span>
+      <header className="relative z-10 pd-slide-x pd-slide-pt pb-4 flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <LogoIcon vw={3.2} />
+          <span className="font-display pd-eyebrow tracking-[0.25em] uppercase text-muted leading-snug max-w-[14rem] sm:max-w-none">
+            Investor & Customer Briefing
+          </span>
         </div>
-        <span className="font-body text-[1.4vw] text-muted">Confidential · 2026</span>
-      </div>
+        <div className="pd-cover-meta text-muted">
+          <span className="flex items-center gap-1.5 text-green-400 font-body font-medium">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse shrink-0" />
+            Live · connect.asktoact.ai
+          </span>
+          <span className="font-body hidden sm:inline">Confidential · 2026</span>
+        </div>
+      </header>
 
-      <div className="absolute left-[6vw] top-[30vh] max-w-[80vw]">
-        <div className="font-display font-extrabold text-[9vw] leading-[0.92] tracking-tight">
+      <main className="relative z-10 flex-1 pd-slide-x flex flex-col justify-center gap-[clamp(1rem,2.5vh,2rem)] py-6 min-h-0">
+        <div className="font-display font-extrabold pd-cover-title leading-[0.92] tracking-tight">
           <span className="bg-gradient-to-br from-white via-white to-sky-300 bg-clip-text text-transparent">AskToAct</span>
         </div>
-        <div className="mt-[2.5vh] font-display font-medium text-[3.2vw] leading-tight tracking-tight text-text max-w-[70vw]">
+        <div className="font-display font-medium pd-cover-tagline leading-tight tracking-tight text-text max-w-[36rem]">
           We sell the rails,
           <span className="bg-gradient-to-r from-indigo-300 via-sky-400 to-cyan-300 bg-clip-text text-transparent"> not the chatbot.</span>
         </div>
-        <div className="mt-[2vh] inline-flex items-center gap-[0.8vw] px-[1.2vw] py-[0.7vh] rounded-full bg-indigo-500/15 border border-indigo-400/30">
-          <span className="font-body text-[1.15vw] text-indigo-200 font-semibold">62+ Bullhorn actions · Myticas + STSI live</span>
+        <div className="inline-flex self-start items-center gap-2 px-4 py-2 rounded-full bg-indigo-500/15 border border-indigo-400/30 max-w-full">
+          <span className="font-body pd-small text-indigo-200 font-semibold leading-snug">
+            62+ Bullhorn actions · Myticas + STSI live
+          </span>
         </div>
-        <div className="mt-[3.5vh] font-body text-[1.65vw] text-muted max-w-[58vw] leading-relaxed">
+        <p className="font-body pd-body text-muted max-w-[36rem] leading-relaxed">
           The recruiter types in ChatGPT. The right thing happens in Bullhorn — with their own permissions enforced, every action audited, no copy-paste in between.
-        </div>
-      </div>
+        </p>
+      </main>
 
-      <div className="absolute bottom-[5vh] left-[6vw] right-[6vw] flex items-end justify-between">
-        <div className="font-body text-[1.3vw] text-muted tracking-wide">
-          Prepared for internal partners
-        </div>
-        <div className="font-body text-[1.3vw] text-muted tracking-wide">
-          10-minute walkthrough
-        </div>
-      </div>
+      <footer className="relative z-10 pd-slide-x pd-slide-pb pt-4 border-t border-line/40 flex flex-wrap items-center justify-between gap-3 font-body pd-small text-muted">
+        <span>Prepared for partners & prospects</span>
+        <span>10-minute walkthrough</span>
+      </footer>
     </div>
   );
 }

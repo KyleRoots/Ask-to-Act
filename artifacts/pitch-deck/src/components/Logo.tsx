@@ -1,10 +1,10 @@
 export function LogoIcon({ vw = 3 }: { vw?: number }) {
-  const px = `${vw}vw`;
+  const size = `clamp(28px, ${vw}vw, 56px)`;
   const id = `ata-pd-${vw}`;
   return (
     <svg
-      width={px}
-      height={px}
+      width={size}
+      height={size}
       viewBox="0 0 48 48"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -39,10 +39,10 @@ export function LogoIcon({ vw = 3 }: { vw?: number }) {
 
 export function LogoWordmark({ vw = 3 }: { vw?: number }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: `${vw * 0.35}vw`, userSelect: "none" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: `clamp(0.35rem, ${vw * 0.35}vw, 0.75rem)`, userSelect: "none" }}>
       <LogoIcon vw={vw} />
       <span style={{
-        fontSize: `${vw * 0.56}vw`,
+        fontSize: `clamp(0.75rem, ${vw * 0.56}vw, 1.25rem)`,
         fontWeight: 800,
         letterSpacing: "-0.025em",
         lineHeight: 1,

@@ -11,7 +11,7 @@ export default function ExecSummary() {
     <div style={{ fontFamily: '"DM Sans", system-ui, sans-serif', background: '#0b1a2e', color: '#f8fafc', minHeight: '100vh' }}>
 
       {/* Top bar */}
-      <div style={{ borderBottom: '1px solid #1e3a5f', padding: '1.5rem 4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="es-topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
             <defs>
@@ -38,7 +38,7 @@ export default function ExecSummary() {
             Ask<span style={{ color: '#38BDF8' }}>To</span>Act
           </span>
         </div>
-        <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
+        <div className="es-topbar-meta">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <div style={{ width: '0.45rem', height: '0.45rem', borderRadius: '50%', background: '#4ade80' }} />
             <span style={{ fontSize: '0.8rem', color: '#4ade80', letterSpacing: '0.08em' }}>Live · connect.asktoact.ai</span>
@@ -50,7 +50,7 @@ export default function ExecSummary() {
       </div>
 
       {/* Hero */}
-      <div style={{ padding: '5rem 4rem 3.5rem', maxWidth: '960px', margin: '0 auto' }}>
+      <div className="es-hero">
         <div style={{ fontSize: '0.75rem', color: '#38bdf8', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Product Overview</div>
         <h1 style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 800, fontSize: 'clamp(2.5rem, 5vw, 4rem)', lineHeight: 1, letterSpacing: '-0.03em', margin: '0 0 1.5rem' }}>
           We sell the rails,<br />
@@ -84,10 +84,10 @@ export default function ExecSummary() {
         </div>
       </div>
 
-      <div style={{ maxWidth: '960px', margin: '0 auto', padding: '0 4rem 6rem' }}>
+      <div className="es-body">
 
         {/* Key stats row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
+        <div className="es-grid-3" style={{ marginBottom: '4rem' }}>
           <Stat number="~$1,560" label="Monthly productivity lost per recruiter seat to AI copy-paste (6h/wk × $60/hr burdened). A 10-seat desk loses ~$15,600/mo; AskToAct costs $789/mo for those 10 seats — a ~20× return." />
           <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
           <Stat number="62+" label={`Recruiting actions live in production: ${TOOL_SUMMARY} — search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload — directly from ChatGPT or Claude`} accent="#4ade80" />
@@ -125,7 +125,7 @@ export default function ExecSummary() {
             They never leave the AI interface.
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', margin: '2rem 0' }}>
+          <div className="es-grid-3" style={{ margin: '2rem 0' }}>
             <FlowBox label="AI" sub="ChatGPT, Claude, Gemini (whatever the customer uses)" highlight={false} />
             <FlowBox label="AskToAct" sub="Permissions · Translation · Audit" highlight={true} />
             <FlowBox label="Systems" sub="Bullhorn, Salesforce, Workday, ADP" highlight={false} />
@@ -147,7 +147,7 @@ export default function ExecSummary() {
 
         {/* Section: Why We Win */}
         <Section title="Why AskToAct Wins" index="03">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '1rem 0 2rem' }}>
+          <div className="es-grid-2" style={{ margin: '1rem 0 2rem' }}>
             <MoatCard number="01" title="Model-agnostic" body="Works with whichever AI the customer already pays for. No vendor dependency. As models commoditize, the connection layer becomes more valuable, not less." />
             <MoatCard number="02" title="Per-user permission enforcement" body="Every write runs under the recruiter's own Bullhorn session — not a shared admin account. IT can approve deployment without granting the AI elevated access. This is the question enterprise security teams ask first." />
             <MoatCard number="03" title="Data integrity layer" body="Duplicate-proof submission guard, locked headline metrics validated on every call, server-side field validation before every write. Generic wrappers write whatever the AI says. We don't." />
@@ -172,7 +172,7 @@ export default function ExecSummary() {
         {/* Why It's a No-Brainer callout */}
         <div style={{ background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '1rem', padding: '2rem 2.25rem', marginBottom: '3rem' }}>
           <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Why It's a No-Brainer</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem' }}>
+          <div className="es-grid-2">
             <NoBrainerItem icon="✓" title="Zero lock-in" body="Built on MCP — the open standard adopted by ChatGPT, Claude, and Gemini. If a better model launches tomorrow, it still works. Customers aren't betting on a proprietary platform." />
             <NoBrainerItem icon="✓" title="Minimal setup" body="Self-serve onboarding: admin provisions seats, recruiters connect their own Bullhorn accounts via OAuth, paste a URL into ChatGPT. Live in under 30 minutes. No IT department, no implementation project." />
             <NoBrainerItem icon="✓" title="Month-to-month, cancel anytime" body="No long-term commitment required. The product has to earn its place on the budget every month. That's the model — and it's by design." />
@@ -198,7 +198,7 @@ export default function ExecSummary() {
             <div style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.5 }}>{FOUNDING_PRICING.note}</div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '2rem 0' }}>
+          <div className="es-grid-2" style={{ margin: '2rem 0' }}>
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>List pricing · Wired in Stripe today</div>
               <RevenueRow label={`Platform · $${LIST_PRICING.platform} / mo`} desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
@@ -228,7 +228,7 @@ export default function ExecSummary() {
 
           <div style={{ background: '#0d1f36', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.5rem', marginTop: '1rem' }}>
             <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1rem' }}>Access Management · How Onboarding Works</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+            <div className="es-grid-4">
               <OnboardStep num="1" label="Firm signs up" desc="Admin account provisioned via subscription gate" />
               <OnboardStep num="2" label="Seats provisioned" desc="Admin creates recruiter accounts from their dashboard" />
               <OnboardStep num="3" label="Self-serve enrollment" desc="Each recruiter OAuth-connects their own Bullhorn account" />
@@ -309,7 +309,7 @@ export default function ExecSummary() {
             Myticas and STSI are running complimentary production pilots — the next actions are usage review,
             founding-customer conversion, and pipeline expansion. No product sprint required.
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', margin: '1.75rem 0' }}>
+          <div className="es-grid-3" style={{ margin: '1.75rem 0' }}>
             <AskCard number="1" title="Pilot check-ins" body="30-day reviews with Myticas and STSI: usage data, recruiter feedback, field-mapping gaps, and ROI signals. Decide founding-customer conversion timing." />
             <AskCard number="2" title="Convert to founding pricing" body={`Offer ${FOUNDING_PRICING.label.toLowerCase()}: $${FOUNDING_PRICING.flatUpTo10Seats}/mo for up to 10 active seats, month-to-month. Walk away if ROI isn't there — but the math should be obvious.`} />
             <AskCard number="3" title="Expand pipeline" body="Use dual-pilot proof to approach the next 3–5 mid-market Bullhorn firms. Customer brief at connect.asktoact.ai/exec-summary/customer is ready to send." />
@@ -321,7 +321,7 @@ export default function ExecSummary() {
         </Section>
 
         {/* Footer */}
-        <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '4rem', paddingTop: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="es-footer-bar" style={{ borderTop: '1px solid #1e3a5f', marginTop: '4rem', paddingTop: '2rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <div style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#38bdf8' }} />
             <span style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1rem' }}>AskToAct</span>

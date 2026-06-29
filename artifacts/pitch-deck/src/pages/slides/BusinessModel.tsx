@@ -1,146 +1,93 @@
-import { LogoWordmark } from "@/components/Logo";
+import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
 
 export default function BusinessModel() {
   return (
-    <div className="w-screen h-screen overflow-hidden relative bg-bg text-text">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,_rgba(251,191,36,0.10),_transparent_55%)]" />
-
-      <div className="absolute top-[7vh] left-[6vw] right-[6vw] flex items-center justify-between">
-        <div className="flex items-center gap-[1vw]">
-          <div className="w-[0.8vw] h-[0.8vw] rounded-full bg-gold" />
-          <span className="font-display text-[1.2vw] tracking-[0.3em] uppercase text-muted">
-            03 · How It Makes Money
-          </span>
-        </div>
-        <LogoWordmark vw={2.2} />
-      </div>
-
-      <div className="absolute top-[16vh] left-[6vw] right-[6vw]">
-        <h1 className="font-display font-bold text-[4.2vw] leading-[1] tracking-tight text-text max-w-[75vw]">
+    <SlideShell
+      section="03 · How It Makes Money"
+      accent="gold"
+      glow="radial-gradient(ellipse at bottom right, rgba(251,191,36,0.10), transparent 55%)"
+      title={
+        <SlideTitle>
           The ROI math is obvious.
           <span className="text-gold"> The price isn't the barrier.</span>
-        </h1>
-        <p className="mt-[1.5vh] font-body text-[1.7vw] text-muted">
+        </SlideTitle>
+      }
+      subtitle={
+        <SlideSubtitle>
           Month-to-month. Cancel anytime. No long-term commitment required.
-          <span className="text-text font-display font-semibold"> ~85% gross margin at every tier.</span>
-        </p>
+          <span className="text-text font-display font-semibold"> ~95% gross margin at every tier.</span>
+        </SlideSubtitle>
+      }
+    >
+      <div className="pd-grid-2 mt-2">
+        <div className="flex flex-col gap-4">
+          <PricingLine title="Platform · $499 / mo" body="Base access, admin tools, audit logs, 1 ATS connector included." />
+          <PricingLine title="Per-active-seat · $29 / mo" body="Only billed when a seat actually uses the bridge that month. Idle seats cost nothing." />
+          <PricingLine title="Additional connectors · $299 / mo" body="Each system beyond the first (Salesforce, Workday, Greenhouse, etc.)." />
+          <PricingLine title="White-glove setup · $3,500 · Optional" body="Guided setup, training, OAuth registration. Self-serve is free." muted />
+
+          <div className="bg-gold/10 border border-gold/30 rounded-lg px-4 py-3">
+            <div className="font-display pd-eyebrow tracking-[0.15em] uppercase text-gold mb-1">Founding customer · post-pilot</div>
+            <div className="font-body pd-small text-muted leading-snug">
+              <span className="text-text font-display font-semibold">$399 / mo</span> flat · up to 10 active seats · 1 connector · month-to-month
+            </div>
+          </div>
+
+          <div className="bg-accent/8 border border-accent/30 rounded-lg px-4 py-3">
+            <div className="font-display pd-eyebrow tracking-[0.15em] uppercase text-accent mb-1">List pricing · 10-seat desk</div>
+            <div className="font-body pd-small text-muted leading-snug">
+              Cost: <span className="text-text font-display font-semibold">$789 / mo</span> · Value recovered:{" "}
+              <span className="text-gold font-display font-semibold">~$15,600 / mo</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-line rounded-xl p-5 md:p-6">
+          <div className="font-display pd-eyebrow tracking-[0.15em] uppercase text-muted">Monthly · Revenue vs. Margin</div>
+          <MarginRow seats="10 seats · 1 connector" infra="~$30–40 infra / mo" revenue="~$789 / mo" margin="~95% GM" />
+          <MarginRow seats="25 seats · 1 connector" infra="~$40–60 infra / mo" revenue="~$1.2k / mo" margin="~95% GM" />
+          <MarginRow seats="50 seats · 2 connectors" infra="~$60–100 infra / mo" revenue="~$2.2k / mo" margin="~95% GM" />
+          <MarginRow seats="100 seats · 3 connectors" infra="~$100–150 infra / mo" revenue="~$4k / mo" margin="~96% GM" last />
+          <p className="mt-4 pt-4 border-t border-line font-body pd-small text-muted leading-snug">
+            AI cost is borne by the customer. Infrastructure cost per seat falls with volume. Each new seat is near-zero incremental cost.
+          </p>
+        </div>
       </div>
+    </SlideShell>
+  );
+}
 
-      <div className="absolute top-[38vh] left-[6vw] right-[6vw] grid grid-cols-2 gap-[3vw]">
+function PricingLine({ title, body, muted }: { title: string; body: string; muted?: boolean }) {
+  return (
+    <div className={`border-l-2 pl-4 ${muted ? "border-line" : "border-accent"}`}>
+      <div className={`font-display pd-eyebrow tracking-[0.15em] uppercase ${muted ? "text-muted" : "text-accent"}`}>{title}</div>
+      <div className="mt-1 font-body pd-small text-muted leading-snug">{body}</div>
+    </div>
+  );
+}
 
-        <div className="flex flex-col gap-[1.6vh]">
-          <div className="border-l-2 border-accent pl-[1.2vw]">
-            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
-              Platform · $499 / mo
-            </div>
-            <div className="mt-[0.4vh] font-body text-[1.35vw] text-muted leading-snug">
-              Base access, admin tools, audit logs, 1 ATS connector included.
-            </div>
-          </div>
-          <div className="border-l-2 border-accent pl-[1.2vw]">
-            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
-              Per-active-seat · $29 / mo
-            </div>
-            <div className="mt-[0.4vh] font-body text-[1.35vw] text-muted leading-snug">
-              Only billed when a seat actually uses the bridge that month. Idle seats cost nothing.
-            </div>
-          </div>
-          <div className="border-l-2 border-accent pl-[1.2vw]">
-            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-accent">
-              Additional connectors · $299 / mo
-            </div>
-            <div className="mt-[0.4vh] font-body text-[1.35vw] text-muted leading-snug">
-              Each system beyond the first (Salesforce, Workday, Greenhouse, etc.).
-            </div>
-          </div>
-          <div className="border-l-2 border-line pl-[1.2vw]">
-            <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-muted">
-              White-glove setup · $3,500 · Optional
-            </div>
-            <div className="mt-[0.4vh] font-body text-[1.35vw] text-muted leading-snug">
-              Guided setup, training, OAuth registration. Self-serve is free. Most firms don't need this.
-            </div>
-          </div>
-
-          <div className="mt-[0.5vh] bg-gold/10 border border-gold/30 rounded-[0.8vw] px-[1.2vw] py-[1.2vh]">
-            <div className="font-display text-[1.05vw] tracking-[0.2em] uppercase text-gold mb-[0.6vh]">
-              Founding customer · post-pilot
-            </div>
-            <div className="font-body text-[1.3vw] text-muted leading-snug">
-              <span className="text-text font-display font-semibold">$399 / mo</span>
-              {" "}flat · up to 10 active seats · 1 connector · month-to-month
-            </div>
-          </div>
-
-          <div className="mt-[0.5vh] bg-accent/8 border border-accent/30 rounded-[0.8vw] px-[1.2vw] py-[1.2vh]">
-            <div className="font-display text-[1.05vw] tracking-[0.2em] uppercase text-accent mb-[0.6vh]">
-              List pricing · 10-seat desk
-            </div>
-            <div className="font-body text-[1.3vw] text-muted leading-snug">
-              Cost of AskToAct: <span className="text-text font-display font-semibold">$789 / mo</span>
-              {" "}·{" "}
-              Value recovered: <span className="text-gold font-display font-semibold">~$15,600 / mo</span>
-              <br />
-              <span className="text-[1.1vw]">vs. Bullhorn ($99–165/user) + ChatGPT ($25–30/user) with no bridge between them.</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-surface border border-line rounded-[1.2vw] p-[3vh_2vw]">
-          <div className="font-display text-[1.1vw] tracking-[0.2em] uppercase text-muted">
-            Monthly · Revenue vs. Margin
-          </div>
-
-          <div className="mt-[2vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
-            <div>
-              <div className="font-display font-semibold text-[1.9vw] text-text">10 seats · 1 connector</div>
-              <div className="font-body text-[1.1vw] text-muted">~$30–40 infra / mo</div>
-            </div>
-            <div className="text-right">
-              <div className="font-display font-bold text-[2vw] text-accent">~$789 / mo</div>
-              <div className="font-body text-[1.1vw] text-gold">~95% gross margin</div>
-            </div>
-          </div>
-
-          <div className="mt-[1.5vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
-            <div>
-              <div className="font-display font-semibold text-[1.9vw] text-text">25 seats · 1 connector</div>
-              <div className="font-body text-[1.1vw] text-muted">~$40–60 infra / mo</div>
-            </div>
-            <div className="text-right">
-              <div className="font-display font-bold text-[2vw] text-accent">~$1.2k / mo</div>
-              <div className="font-body text-[1.1vw] text-gold">~95% gross margin</div>
-            </div>
-          </div>
-
-          <div className="mt-[1.5vh] flex items-baseline justify-between border-b border-line pb-[1.5vh]">
-            <div>
-              <div className="font-display font-semibold text-[1.9vw] text-text">50 seats · 2 connectors</div>
-              <div className="font-body text-[1.1vw] text-muted">~$60–100 infra / mo</div>
-            </div>
-            <div className="text-right">
-              <div className="font-display font-bold text-[2vw] text-accent">~$2.2k / mo</div>
-              <div className="font-body text-[1.1vw] text-gold">~95% gross margin</div>
-            </div>
-          </div>
-
-          <div className="mt-[1.5vh] flex items-baseline justify-between">
-            <div>
-              <div className="font-display font-semibold text-[1.9vw] text-text">100 seats · 3 connectors</div>
-              <div className="font-body text-[1.1vw] text-muted">~$100–150 infra / mo</div>
-            </div>
-            <div className="text-right">
-              <div className="font-display font-bold text-[2vw] text-accent">~$4k / mo</div>
-              <div className="font-body text-[1.1vw] text-gold">~96% gross margin</div>
-            </div>
-          </div>
-
-          <div className="mt-[2vh] font-body text-[1.15vw] text-muted leading-snug border-t border-line pt-[2vh]">
-            AI cost is borne by the customer. Infrastructure cost per seat falls with volume.
-            Each new seat is near-zero incremental cost — expansion is pure margin.
-          </div>
-        </div>
-
+function MarginRow({
+  seats,
+  infra,
+  revenue,
+  margin,
+  last,
+}: {
+  seats: string;
+  infra: string;
+  revenue: string;
+  margin: string;
+  last?: boolean;
+}) {
+  return (
+    <div className={`mt-4 flex flex-wrap items-baseline justify-between gap-2 ${last ? "" : "border-b border-line pb-4"}`}>
+      <div>
+        <div className="font-display font-semibold pd-body text-text">{seats}</div>
+        <div className="font-body pd-small text-muted">{infra}</div>
+      </div>
+      <div className="text-right">
+        <div className="font-display font-bold pd-body text-accent">{revenue}</div>
+        <div className="font-body pd-small text-gold">{margin}</div>
       </div>
     </div>
   );

@@ -1,73 +1,65 @@
-import { LogoWordmark } from "@/components/Logo";
+import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
+
+const ASKS = [
+  {
+    title: "Pilot check-ins",
+    body: "30-day reviews with Myticas and STSI — usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.",
+    accent: "accent" as const,
+  },
+  {
+    title: "Convert pilots",
+    body: "Founding rate: $399/mo for up to 10 active seats, month-to-month. List pricing ($499 + $29/seat) after founding cohort.",
+    accent: "accent" as const,
+  },
+  {
+    title: "Send the customer brief",
+    body: "connect.asktoact.ai/exec-summary/customer — share with the next 3–5 Bullhorn firms in pipeline.",
+    accent: "gold" as const,
+  },
+];
 
 export default function TheAsk() {
   return (
-    <div className="w-screen h-screen overflow-hidden relative bg-bg text-text">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(56,189,248,0.18),_transparent_55%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(251,191,36,0.10),_transparent_55%)]" />
-
-      <div className="absolute top-[7vh] left-[6vw] right-[6vw] flex items-center justify-between">
-        <div className="flex items-center gap-[1vw]">
-          <div className="w-[0.8vw] h-[0.8vw] rounded-full bg-gold" />
-          <span className="font-display text-[1.2vw] tracking-[0.3em] uppercase text-muted">
-            05 · What We Need
-          </span>
-        </div>
-        <LogoWordmark vw={2.2} />
-      </div>
-
-      <div className="absolute top-[18vh] left-[6vw] right-[6vw]">
-        <h1 className="font-display font-bold text-[5.2vw] leading-[0.98] tracking-tight text-text max-w-[75vw]">
+    <SlideShell
+      section="05 · What We Need"
+      accent="gold"
+      glow="radial-gradient(ellipse at bottom left, rgba(56,189,248,0.18), transparent 55%), radial-gradient(ellipse at top right, rgba(251,191,36,0.10), transparent 55%)"
+      title={
+        <SlideTitle>
           Pilots are live.
           <span className="text-accent"> Convert and expand.</span>
-        </h1>
-        <p className="mt-[2vh] font-body text-[1.9vw] text-muted max-w-[65vw] leading-relaxed">
+        </SlideTitle>
+      }
+      subtitle={
+        <SlideSubtitle>
           Myticas and STSI are running complimentary production pilots on connect.asktoact.ai — 62+ Bullhorn actions live.
           Next: 30-day check-ins, founding-customer conversion at $399/mo, and outbound to the next firms.
-        </p>
+        </SlideSubtitle>
+      }
+      footer={
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div className="font-display font-bold pd-h2 text-text leading-tight max-w-[36rem]">
+            AskToAct
+            <span className="text-muted font-display font-medium pd-body"> · We sell the rails, not the chatbot.</span>
+          </div>
+          <div className="font-body pd-small text-muted md:text-right shrink-0">
+            <div className="text-accent font-display font-semibold">connect.asktoact.ai</div>
+            <div>Live in production today</div>
+          </div>
+        </div>
+      }
+    >
+      <div className="pd-grid-3 mt-2 md:mt-4">
+        {ASKS.map((a) => (
+          <div
+            key={a.title}
+            className={`flex flex-col gap-3 border-t-2 pt-4 md:pt-6 ${a.accent === "gold" ? "border-gold" : "border-accent"}`}
+          >
+            <div className="font-display font-extrabold pd-body text-text leading-tight">{a.title}</div>
+            <div className="font-body pd-small text-muted leading-snug">{a.body}</div>
+          </div>
+        ))}
       </div>
-
-      <div className="absolute top-[52vh] left-[6vw] right-[6vw] grid grid-cols-3 gap-[3vw]">
-
-        <div className="flex flex-col gap-[2vh] border-t-2 border-accent pt-[3vh]">
-          <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
-            Pilot check-ins
-          </div>
-          <div className="font-body text-[1.5vw] text-muted leading-snug">
-            30-day reviews with Myticas and STSI — usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-[2vh] border-t-2 border-accent pt-[3vh]">
-          <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
-            Convert pilots
-          </div>
-          <div className="font-body text-[1.5vw] text-muted leading-snug">
-            Founding rate: $399/mo for up to 10 active seats, month-to-month. List pricing ($499 + $29/seat) after founding cohort.
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-[2vh] border-t-2 border-gold pt-[3vh]">
-          <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
-            Send the customer brief
-          </div>
-          <div className="font-body text-[1.5vw] text-muted leading-snug">
-            connect.asktoact.ai/exec-summary/customer — share with the next 3–5 Bullhorn firms in pipeline.
-          </div>
-        </div>
-
-      </div>
-
-      <div className="absolute bottom-[5vh] left-[6vw] right-[6vw] flex items-end justify-between">
-        <div className="font-display font-bold text-[3.2vw] text-text leading-tight max-w-[70vw]">
-          AskToAct
-          <span className="text-muted font-display font-medium text-[2vw]"> · We sell the rails, not the chatbot.</span>
-        </div>
-        <div className="font-body text-[1.3vw] text-muted text-right">
-          <div className="text-accent font-display font-semibold">connect.asktoact.ai</div>
-          <div>Live in production today</div>
-        </div>
-      </div>
-    </div>
+    </SlideShell>
   );
 }

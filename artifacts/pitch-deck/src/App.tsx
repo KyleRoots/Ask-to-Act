@@ -140,10 +140,11 @@ function SlideEditor() {
   }, [currentIndex, navigate]);
 
   return (
-    <div className="select-none">
+    <div className="select-none h-full min-h-[100dvh]">
       {slides.map((slide, index) => (
         <div
           key={slide.id}
+          className="h-full min-h-[100dvh]"
           style={{ display: index === currentIndex ? "block" : "none" }}
         >
           <slide.Component />
@@ -175,23 +176,32 @@ function AllSlides() {
   );
 }
 
+function computeViewerDims(): { width: number; height: number } {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  // Portrait phones / narrow viewports: use full screen so slides can scroll internally
+  if (w < 768 || h > w) {
+    return { width: w, height: h };
+  }
+  return {
+    width: Math.min(w, h * (16 / 9)),
+    height: Math.min(h, w * (9 / 16)),
+  };
+}
+
 // This component is used for the deployed view at `/`
 function SlideViewer() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [dims, setDims] = useState(() => ({
-    width: Math.min(window.innerWidth, window.innerHeight * (16 / 9)),
-    height: Math.min(window.innerHeight, window.innerWidth * (9 / 16)),
-  }));
+  const [dims, setDims] = useState(computeViewerDims);
 
   useEffect(() => {
-    const update = () => {
-      setDims({
-        width: Math.min(window.innerWidth, window.innerHeight * (16 / 9)),
-        height: Math.min(window.innerHeight, window.innerWidth * (9 / 16)),
-      });
-    };
+    const update = () => setDims(computeViewerDims());
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
   }, []);
 
   useEffect(() => {

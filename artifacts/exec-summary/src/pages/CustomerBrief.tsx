@@ -173,11 +173,10 @@ function FlowStrip() {
     { label: "Bullhorn", sub: "ATS system of record" },
   ];
   return (
-    <div style={{ position: "relative", zIndex: 1, display: "flex", flexWrap: "wrap", alignItems: "stretch", gap: "0.5rem", marginBottom: "1.5rem" }}>
+    <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: "0.75rem", marginBottom: "1.5rem" }}>
       {steps.map((s, i) => (
-        <div key={s.label} style={{ display: "flex", alignItems: "center", gap: "0.5rem", flex: "1 1 140px" }}>
+        <div key={s.label}>
           <div style={{
-            flex: 1,
             background: s.highlight ? "linear-gradient(135deg, rgba(79,70,229,0.2) 0%, rgba(14,165,233,0.12) 100%)" : "rgba(16,37,65,0.6)",
             border: s.highlight ? "2px solid rgba(56,189,248,0.5)" : "1px solid #1e3a5f",
             borderRadius: "0.75rem", padding: "1rem", textAlign: "center",
@@ -186,9 +185,9 @@ function FlowStrip() {
             <div style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: "0.95rem", color: s.highlight ? "#38bdf8" : "#f8fafc" }}>{s.label}</div>
             <div style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.35rem" }}>{s.sub}</div>
           </div>
-          {i < steps.length - 1 && (
-            <span style={{ color: "#38bdf8", fontSize: "1.1rem", fontWeight: 700, flexShrink: 0 }} aria-hidden>→</span>
-          )}
+          {i < steps.length - 1 ? (
+            <div style={{ textAlign: "center", color: "#38bdf8", fontSize: "1.1rem", fontWeight: 700, padding: "0.35rem 0" }} aria-hidden>↓</div>
+          ) : null}
         </div>
       ))}
     </div>
