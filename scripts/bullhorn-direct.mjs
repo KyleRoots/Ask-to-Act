@@ -194,11 +194,14 @@ async function authenticate() {
   return restLogin(accessToken, ep.loginUrl);
 }
 
-async function bhFetch(session, path, init) {
+async function bhFetch(session, path, init, params = {}) {
   const base = session.restUrl.replace(/\/$/, "");
   const normalized = path.replace(/^\//, "");
   const url = new URL(normalized, `${base}/`);
   url.searchParams.set("BhRestToken", session.BhRestToken);
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, String(v));
+  }
   const res = await fetch(url.toString(), init);
   const text = await res.text();
   if (!res.ok) {
@@ -247,18 +250,24 @@ async function main() {
     case "meta": {
       const entity = rest[0];
       if (!entity) throw new Error("Usage: meta <Entity>");
-      const data = await bhFetch(session, `meta/${entity}?meta=basic`, {
-        headers: { Accept: "application/json" },
-      });
-      const fields = data?.fields ?? [];
-      const configured = fields.filter(
-        (f) =>
-          f &&
-          typeof f === "object" &&
-          "label" in f &&
-          typeof f.label === "string" &&
-          /custom/i.test(String(f.name ?? "")),
+      const data = await bhFetch(
+        session,
+        `meta/${entity}`,
+        { headers: { Accept: "application/json" } },
+        { fields: "*", meta: "basic" },
       );
+      const fields = data?.fields ?? [];
+      const configured = fields.filter((f) => {
+        if (!f || typeof f !== "object" || typeof f.name !== "string" || typeof f.label !== "string") {
+          return false;
+        }
+        if (!/^(custom|correlatedCustom)/i.test(f.name)) return false;
+        const trimmed = f.label.trim();
+        if (!trimmed || trimmed.toLowerCase() === f.name.toLowerCase()) return false;
+        return !/^(custom\s*)?(text\s*block|encrypted\s*text|bill\s*rate|pay\s*rate|text|int|integer|float|date|object|number)\s*\d+$/i.test(
+          trimmed,
+        );
+      });
       console.log(
         JSON.stringify(
           { entity, fieldCount: fields.length, configuredCustomFields: configured },

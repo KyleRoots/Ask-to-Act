@@ -216,11 +216,15 @@ async function bhFetch(
   session: Session,
   path: string,
   init?: RequestInit,
+  params: Record<string, string | number> = {},
 ): Promise<unknown> {
   const base = session.restUrl.replace(/\/$/, "");
   const normalized = path.replace(/^\//, "");
   const url = new URL(normalized, `${base}/`);
   url.searchParams.set("BhRestToken", session.BhRestToken);
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, String(v));
+  }
   const res = await fetch(url.toString(), init);
   const text = await res.text();
   if (!res.ok) {
@@ -269,18 +273,24 @@ async function main(): Promise<void> {
     case "meta": {
       const entity = rest[0];
       if (!entity) throw new Error("Usage: meta <Entity>");
-      const data = await bhFetch(session, `meta/${entity}?meta=basic`, {
-        headers: { Accept: "application/json" },
-      });
-      const fields = (data as { fields?: unknown[] })?.fields ?? [];
-      const configured = fields.filter(
-        (f) =>
-          f &&
-          typeof f === "object" &&
-          "label" in f &&
-          typeof (f as { label?: string }).label === "string" &&
-          /custom/i.test(String((f as { name?: string }).name ?? "")),
+      const data = await bhFetch(
+        session,
+        `meta/${entity}`,
+        { headers: { Accept: "application/json" } },
+        { fields: "*", meta: "basic" },
       );
+      const fields = (data as { fields?: Array<Record<string, unknown>> })?.fields ?? [];
+      const configured = fields.filter((f) => {
+        const name = f.name;
+        const label = f.label;
+        if (typeof name !== "string" || typeof label !== "string") return false;
+        if (!/^(custom|correlatedCustom)/i.test(name)) return false;
+        const trimmed = label.trim();
+        if (!trimmed || trimmed.toLowerCase() === name.toLowerCase()) return false;
+        return !/^(custom\s*)?(text\s*block|encrypted\s*text|bill\s*rate|pay\s*rate|text|int|integer|float|date|object|number)\s*\d+$/i.test(
+          trimmed,
+        );
+      });
       console.log(JSON.stringify({ entity, fieldCount: fields.length, configuredCustomFields: configured }, null, 2));
       return;
     }
