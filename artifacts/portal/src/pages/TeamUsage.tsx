@@ -41,7 +41,7 @@ function UsageRow({ u }: { u: TeamUsageData["users"][number] }) {
     <div className="rounded-xl" style={{ background: "hsl(217 35% 11%)", border: `1px solid ${BORDER}` }}>
       <button
         onClick={() => hasTools && setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left"
+        className="w-full flex items-center gap-3 px-4 py-3 text-left hover-elevate active-elevate-2 rounded-xl transition-colors"
         style={{ cursor: hasTools ? "pointer" : "default" }}
       >
         <span className="shrink-0 w-5 text-center text-xs" style={{ color: "#3A4460" }}>
@@ -99,7 +99,11 @@ export default function TeamUsage() {
         className="sticky top-0 z-10 flex items-center justify-between px-5 sm:px-8 py-4"
         style={{ background: "rgba(5,13,26,.9)", backdropFilter: "blur(14px)", borderBottom: `1px solid ${BORDER}` }}
       >
-        <button onClick={() => navigate("/dashboard")} className="text-sm flex items-center gap-2" style={{ color: "#6B7A99" }}>
+        <button
+          onClick={() => navigate("/dashboard")}
+          className="text-sm flex items-center gap-2 transition-colors hover:text-[#94A3B8]"
+          style={{ color: "#6B7A99" }}
+        >
           <span>←</span> Back to dashboard
         </button>
       </header>
@@ -126,8 +130,8 @@ export default function TeamUsage() {
             <p className="text-sm" style={{ color: "#6B7A99" }}>You need company admin access to view team usage.</p>
             <button
               onClick={() => navigate("/dashboard")}
-              className="mt-5 text-xs px-4 py-2 rounded-lg"
-              style={{ background: "rgba(99,102,241,.15)", color: "#A5B4FC", border: "1px solid rgba(165,180,252,.2)" }}
+              className="mt-5 ata-btn-ghost ata-btn-sm"
+              style={{ color: "#A5B4FC", borderColor: "rgba(165,180,252,.2)", background: "rgba(99,102,241,.15)" }}
             >
               Back to dashboard
             </button>

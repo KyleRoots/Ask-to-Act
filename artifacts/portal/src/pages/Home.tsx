@@ -51,8 +51,7 @@ export default function Home() {
         </div>
         <button
           onClick={() => navigate("/sign-in")}
-          className="text-sm font-medium px-4 py-2 rounded-xl transition-colors"
-          style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+          className="ata-btn-ghost"
         >
           Sign in
         </button>
@@ -66,7 +65,7 @@ export default function Home() {
           Customer Portal
         </div>
 
-        <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight mb-6"
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-white tracking-tight leading-tight mb-6"
           style={{ letterSpacing: "-0.035em" }}>
           Your team's AI<br />
           <span style={{
@@ -82,21 +81,16 @@ export default function Home() {
           to your recruiting system — no IT setup required.
         </p>
 
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-md sm:max-w-none mx-auto">
           <button
             onClick={() => navigate("/sign-in")}
-            className="px-6 py-3.5 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.97]"
-            style={{
-              background: "linear-gradient(135deg, #4F46E5 0%, #0EA5E9 100%)",
-              boxShadow: "0 4px 20px rgba(79,70,229,0.4)",
-            }}
+            className="ata-btn-primary w-full sm:w-auto"
           >
             Sign in to your portal →
           </button>
           <button
             onClick={() => navigate("/sign-up")}
-            className="px-6 py-3.5 rounded-xl text-sm font-semibold transition-colors"
-            style={{ background: SURFACE, color: "#94A3B8", border: `1px solid ${BORDER}` }}
+            className="ata-btn-secondary w-full sm:w-auto"
           >
             Create account
           </button>
@@ -110,7 +104,7 @@ export default function Home() {
 
       {/* Feature cards */}
       <section className="relative max-w-3xl mx-auto px-5 sm:px-8 pb-20">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {features.map((f) => (
             <div key={f.title} className="rounded-2xl p-5" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
               <div className="text-2xl mb-3">{f.icon}</div>
