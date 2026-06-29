@@ -53,7 +53,13 @@ export default function ExecSummary() {
       <div style={{ padding: '5rem 4rem 3.5rem', maxWidth: '960px', margin: '0 auto' }}>
         <div style={{ fontSize: '0.75rem', color: '#38bdf8', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Product Overview</div>
         <h1 style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 800, fontSize: 'clamp(2.5rem, 5vw, 4rem)', lineHeight: 1, letterSpacing: '-0.03em', margin: '0 0 1.5rem' }}>
-          We sell the rails,<br /><span style={{ color: '#38bdf8' }}>not the chatbot.</span>
+          We sell the rails,<br />
+          <span style={{
+            background: 'linear-gradient(135deg, #818CF8 0%, #38BDF8 50%, #22D3EE 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}>not the chatbot.</span>
         </h1>
         <p style={{ fontSize: '1.2rem', color: '#cbd5e1', lineHeight: 1.6, maxWidth: '680px', margin: '0 0 1.5rem' }}>
           AskToAct is the AI action layer for the recruiting and staffing stack: a model-agnostic middleware

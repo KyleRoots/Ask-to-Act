@@ -3,13 +3,13 @@ import { LogoIcon } from "@/components/Logo";
 export default function Cover() {
   return (
     <div className="w-screen h-screen overflow-hidden relative bg-bg text-text">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(56,189,248,0.18),_transparent_55%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(251,191,36,0.08),_transparent_50%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(79,70,229,0.22),_transparent_55%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(56,189,248,0.14),_transparent_50%)]" />
 
       <div className="absolute top-[6vh] left-[6vw] flex items-center gap-[1.2vw]">
         <LogoIcon vw={3.2} />
         <span className="font-display text-[1.4vw] tracking-[0.3em] uppercase text-muted">
-          Internal Stakeholder Briefing
+          Investor & Customer Briefing
         </span>
       </div>
 
@@ -22,12 +22,15 @@ export default function Cover() {
       </div>
 
       <div className="absolute left-[6vw] top-[30vh] max-w-[80vw]">
-        <div className="font-display font-extrabold text-[9vw] leading-[0.92] tracking-tight text-text">
-          AskToAct
+        <div className="font-display font-extrabold text-[9vw] leading-[0.92] tracking-tight">
+          <span className="bg-gradient-to-br from-white via-white to-sky-300 bg-clip-text text-transparent">AskToAct</span>
         </div>
         <div className="mt-[2.5vh] font-display font-medium text-[3.2vw] leading-tight tracking-tight text-text max-w-[70vw]">
           We sell the rails,
-          <span className="text-accent"> not the chatbot.</span>
+          <span className="bg-gradient-to-r from-indigo-300 via-sky-400 to-cyan-300 bg-clip-text text-transparent"> not the chatbot.</span>
+        </div>
+        <div className="mt-[2vh] inline-flex items-center gap-[0.8vw] px-[1.2vw] py-[0.7vh] rounded-full bg-indigo-500/15 border border-indigo-400/30">
+          <span className="font-body text-[1.15vw] text-indigo-200 font-semibold">62+ Bullhorn actions · Myticas + STSI live</span>
         </div>
         <div className="mt-[3.5vh] font-body text-[1.65vw] text-muted max-w-[58vw] leading-relaxed">
           The recruiter types in ChatGPT. The right thing happens in Bullhorn — with their own permissions enforced, every action audited, no copy-paste in between.
