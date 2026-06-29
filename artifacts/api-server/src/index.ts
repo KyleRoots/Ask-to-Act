@@ -6,6 +6,7 @@ import {
   getUncachableStripeClient,
 } from "./lib/stripe/stripeClient.js";
 import { ensureColumns } from "./lib/ensure-columns.js";
+import { getBaseUrl } from "./lib/getBaseUrl.js";
 
 const rawPort = process.env["PORT"];
 
@@ -82,10 +83,14 @@ async function initStripe(): Promise<void> {
 
   try {
     const stripeSync = await getStripeSync();
-    const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-    if (domain) {
+    // Register the webhook against the app's real public base URL. In
+    // production this is PROD_URL (e.g. https://connect.asktoact.ai); on Replit
+    // dev it uses REPLIT_DEV_DOMAIN. We skip auto-registration for local
+    // (non-https) URLs since Stripe cannot reach them.
+    const baseUrl = getBaseUrl();
+    if (baseUrl.startsWith("https://")) {
       await stripeSync.findOrCreateManagedWebhook(
-        `https://${domain}/api/stripe/webhook`,
+        `${baseUrl}/api/stripe/webhook`,
       );
     }
     // Backfill runs async — don't block server startup

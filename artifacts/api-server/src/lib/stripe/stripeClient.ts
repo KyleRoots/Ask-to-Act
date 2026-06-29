@@ -5,6 +5,17 @@ async function getStripeCredentials(): Promise<{
   secretKey: string;
   webhookSecret?: string;
 }> {
+  // Preferred path for non-Replit hosts (Railway, etc.): read the Stripe secret
+  // (and optional webhook signing secret) directly from environment variables.
+  // Falls back to the Replit connector below when these aren't set.
+  const directSecret = process.env.STRIPE_SECRET_KEY;
+  if (directSecret) {
+    return {
+      secretKey: directSecret,
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    };
+  }
+
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
@@ -14,8 +25,9 @@ async function getStripeCredentials(): Promise<{
 
   if (!hostname || !xReplitToken) {
     throw new Error(
-      "Missing Replit connector environment variables. " +
-        "Connect the Stripe integration via the Integrations tab.",
+      "Stripe is not configured. Set STRIPE_SECRET_KEY (and optionally " +
+        "STRIPE_WEBHOOK_SECRET) for direct hosting, or connect the Stripe " +
+        "integration on Replit.",
     );
   }
 
