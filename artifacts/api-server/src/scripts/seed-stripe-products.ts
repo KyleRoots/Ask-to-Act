@@ -12,6 +12,13 @@
 import Stripe from "stripe";
 
 async function getStripeClient(): Promise<Stripe> {
+  // Prefer a direct STRIPE_SECRET_KEY (Railway / any host); fall back to the
+  // Replit connector when it isn't set.
+  const directSecret = process.env.STRIPE_SECRET_KEY;
+  if (directSecret) {
+    return new Stripe(directSecret);
+  }
+
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
@@ -21,8 +28,8 @@ async function getStripeClient(): Promise<Stripe> {
 
   if (!hostname || !xReplitToken) {
     throw new Error(
-      "Missing Replit connector env vars (REPLIT_CONNECTORS_HOSTNAME, REPL_IDENTITY). " +
-        "Connect the Stripe integration in the Integrations tab first.",
+      "Stripe is not configured. Set STRIPE_SECRET_KEY for direct hosting, " +
+        "or connect the Stripe integration on Replit.",
     );
   }
 

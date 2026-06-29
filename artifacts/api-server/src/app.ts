@@ -15,12 +15,19 @@ import {
 import router from "./routes";
 import legalRouter from "./routes/legal";
 import { logger } from "./lib/logger";
+import { mountFrontends } from "./lib/serve-frontends";
 
 const app: Express = express();
 app.set("trust proxy", 1);
 
 // Clerk FAPI proxy — must be before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+
+// First-party SPAs (portal, admin) + static marketing pages, served under their
+// path prefixes on the same origin. Mounted BEFORE the strict nonce-based CSP
+// below because bundled SPA assets get a SPA-appropriate CSP of their own (see
+// serve-frontends.ts). No-op when builds aren't present (e.g. API-only dev).
+mountFrontends(app);
 
 // Per-request CSP nonce — MUST run before helmet so res.locals.cspNonce exists
 // when helmet builds the Content-Security-Policy header, and so the downstream
