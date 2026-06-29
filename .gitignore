@@ -42,6 +42,7 @@ testem.log
 Thumbs.db
 
 .cursor/rules/nx-rules.mdc
+.cursor/mcp.json
 .github/instructions/nx.instructions.md
 
 # Replit

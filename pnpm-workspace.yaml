@@ -42,6 +42,7 @@ minimumReleaseAgeExclude:
   - qs
 
 onlyBuiltDependencies:
+  - '@clerk/shared'
   - '@swc/core'
   - esbuild
   - msw
