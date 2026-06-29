@@ -20,8 +20,12 @@ const clerkPubKey = publishableKeyFromHost(
   import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
 );
 
-// REQUIRED — empty in dev (intentional), auto-populated in prod. Do NOT gate.
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+// REQUIRED — empty in dev (intentional). In production, Clerk auth is proxied
+// through the API at /api/__clerk on the same origin. Fall back when the build
+// didn't receive VITE_CLERK_PROXY_URL (common on first Railway deploy).
+const clerkProxyUrl =
+  import.meta.env.VITE_CLERK_PROXY_URL ||
+  (import.meta.env.PROD ? "/api/__clerk" : "");
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
