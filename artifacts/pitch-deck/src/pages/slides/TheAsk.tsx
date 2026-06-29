@@ -18,11 +18,12 @@ export default function TheAsk() {
 
       <div className="absolute top-[18vh] left-[6vw] right-[6vw]">
         <h1 className="font-display font-bold text-[5.2vw] leading-[0.98] tracking-tight text-text max-w-[75vw]">
-          Start a pilot.
-          <span className="text-accent"> No commitment required.</span>
+          Pilots are live.
+          <span className="text-accent"> Convert and expand.</span>
         </h1>
         <p className="mt-[2vh] font-body text-[1.9vw] text-muted max-w-[65vw] leading-relaxed">
-          The product is live. The billing is wired. The only thing left is a sales call and a 30-day window to prove the ROI. Walk away if it doesn't deliver.
+          Myticas and STSI are running complimentary production pilots on connect.asktoact.ai — 62+ Bullhorn actions live.
+          Next: 30-day check-ins, founding-customer conversion at $399/mo, and outbound to the next firms.
         </p>
       </div>
 
@@ -30,28 +31,28 @@ export default function TheAsk() {
 
         <div className="flex flex-col gap-[2vh] border-t-2 border-accent pt-[3vh]">
           <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
-            Name a firm
+            Pilot check-ins
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            Identify one mid-market staffing firm for first commercial outreach. We handle the rest — demo, onboarding, and first month of support.
+            30-day reviews with Myticas and STSI — usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.
           </div>
         </div>
 
         <div className="flex flex-col gap-[2vh] border-t-2 border-accent pt-[3vh]">
           <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
-            Greenlight the pilot
+            Convert pilots
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            Approve a 30-day paid pilot — month-to-month, no contractual lock-in. If they don't see ROI in 30 days, they cancel. That's the whole ask.
+            Founding rate: $399/mo for up to 10 active seats, month-to-month. List pricing ($499 + $29/seat) after founding cohort.
           </div>
         </div>
 
         <div className="flex flex-col gap-[2vh] border-t-2 border-gold pt-[3vh]">
           <div className="font-display font-extrabold text-[2.2vw] text-text leading-tight">
-            Set a check-in
+            Send the customer brief
           </div>
           <div className="font-body text-[1.5vw] text-muted leading-snug">
-            30 days from first customer go-live: review usage data, recruiter feedback, and the expansion motion. One meeting, not a committee.
+            connect.asktoact.ai/exec-summary/customer — share with the next 3–5 Bullhorn firms in pipeline.
           </div>
         </div>
 

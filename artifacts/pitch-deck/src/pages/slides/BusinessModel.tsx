@@ -62,16 +62,26 @@ export default function BusinessModel() {
             </div>
           </div>
 
+          <div className="mt-[0.5vh] bg-gold/10 border border-gold/30 rounded-[0.8vw] px-[1.2vw] py-[1.2vh]">
+            <div className="font-display text-[1.05vw] tracking-[0.2em] uppercase text-gold mb-[0.6vh]">
+              Founding customer · post-pilot
+            </div>
+            <div className="font-body text-[1.3vw] text-muted leading-snug">
+              <span className="text-text font-display font-semibold">$399 / mo</span>
+              {" "}flat · up to 10 active seats · 1 connector · month-to-month
+            </div>
+          </div>
+
           <div className="mt-[0.5vh] bg-accent/8 border border-accent/30 rounded-[0.8vw] px-[1.2vw] py-[1.2vh]">
             <div className="font-display text-[1.05vw] tracking-[0.2em] uppercase text-accent mb-[0.6vh]">
-              No-Brainer Math · 10-Seat Desk
+              List pricing · 10-seat desk
             </div>
             <div className="font-body text-[1.3vw] text-muted leading-snug">
               Cost of AskToAct: <span className="text-text font-display font-semibold">$789 / mo</span>
               {" "}·{" "}
               Value recovered: <span className="text-gold font-display font-semibold">~$15,600 / mo</span>
               <br />
-              <span className="text-[1.1vw]">6h/week × 10 recruiters × $60/hr burdened cost = ~20× ROI from month one.</span>
+              <span className="text-[1.1vw]">vs. Bullhorn ($99–165/user) + ChatGPT ($25–30/user) with no bridge between them.</span>
             </div>
           </div>
         </div>

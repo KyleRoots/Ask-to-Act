@@ -1,3 +1,11 @@
+import {
+  FOUNDING_PRICING,
+  LIST_PRICING,
+  PILOT_FIRMS,
+  ROI_10_SEAT,
+  TOOL_SUMMARY,
+} from "@/data/messaging";
+
 export default function ExecSummary() {
   return (
     <div style={{ fontFamily: '"DM Sans", system-ui, sans-serif', background: '#0b1a2e', color: '#f8fafc', minHeight: '100vh' }}>
@@ -36,6 +44,7 @@ export default function ExecSummary() {
             <span style={{ fontSize: '0.8rem', color: '#4ade80', letterSpacing: '0.08em' }}>Live · connect.asktoact.ai</span>
           </div>
           <span style={{ fontSize: '0.8rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase' }}>Internal · Confidential</span>
+          <a href="customer" style={{ fontSize: '0.8rem', color: '#64748b', textDecoration: 'none' }}>Customer brief →</a>
           <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Executive Summary · 2026</span>
         </div>
       </div>
@@ -56,7 +65,7 @@ export default function ExecSummary() {
         <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderLeft: '3px solid #fbbf24', borderRadius: '0.75rem', padding: '1.25rem 1.75rem', maxWidth: '680px', marginBottom: '1.25rem' }}>
           <div style={{ fontSize: '0.7rem', color: '#fbbf24', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>The Cost of Not Subscribing</div>
           <p style={{ fontSize: '0.95rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0 }}>
-            6 hours/week of copy-paste per recruiter × $60/hr burdened cost = <strong style={{ color: '#fbbf24' }}>~$1,560/month in lost productivity per seat</strong>. Across a 10-seat desk that's <strong style={{ color: '#fbbf24' }}>~$15,600/month</strong> — and AskToAct for that desk is <strong style={{ color: '#38bdf8' }}>$789/month</strong>. That's a <strong style={{ color: '#38bdf8' }}>~20× ROI</strong> — before counting the audit trail, the error reduction, or the governance story. Month-to-month, cancel anytime.
+            copy-paste between AI and Bullhorn ({ROI_10_SEAT.hoursPerWeek}h/wk × ${ROI_10_SEAT.burdenedHourly}/hr burdened). Across a 10-seat desk that's <strong style={{ color: '#fbbf24' }}>~${ROI_10_SEAT.productivityLost.toLocaleString()}/month</strong> — and AskToAct at list pricing for that desk is <strong style={{ color: '#38bdf8' }}>${ROI_10_SEAT.askToActList}/month</strong> (founding rate: <strong style={{ color: '#38bdf8' }}>${ROI_10_SEAT.askToActFounding}/month</strong>). That's a <strong style={{ color: '#38bdf8' }}>~20× ROI</strong> at list — and ~40× at founding — before counting audit trail, error reduction, or governance. Month-to-month, cancel anytime.
           </p>
         </div>
 
@@ -75,7 +84,7 @@ export default function ExecSummary() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
           <Stat number="~$1,560" label="Monthly productivity lost per recruiter seat to AI copy-paste (6h/wk × $60/hr burdened). A 10-seat desk loses ~$15,600/mo; AskToAct costs $789/mo for those 10 seats — a ~20× return." />
           <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
-          <Stat number="53" label="Recruiting actions live in production: 33 read + 20 write tools — search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload — directly from ChatGPT or Claude" accent="#4ade80" />
+          <Stat number="62+" label={`Recruiting actions live in production: ${TOOL_SUMMARY} — search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload — directly from ChatGPT or Claude`} accent="#4ade80" />
         </div>
 
         {/* Section: The Problem */}
@@ -118,7 +127,7 @@ export default function ExecSummary() {
 
           <p style={bodyStyle}>
             AskToAct is model-agnostic by design. It does not sell an AI; it assumes the customer already has one.
-            The first connector covers 53 tools across the complete Bullhorn workflow — 33 read and 20 write. On the read side:
+            The first Bullhorn connector covers {TOOL_SUMMARY} across the complete recruiting workflow. On the read side:
             candidate search and profile reads, contact and company lookup, résumé reads, and live reporting. On the write side:
             submissions and pipeline status changes, note writing, job/company/contact create and update, tasks and appointments,
             tearsheet curation, placement recording, and résumé/file upload with new-candidate creation. Every write tool
@@ -170,18 +179,27 @@ export default function ExecSummary() {
         {/* Section: Business Model */}
         <Section title="How It Makes Money" index="04">
           <p style={bodyStyle}>
-            AskToAct runs on three stacked recurring streams plus a one-time onboarding fee. The unit economics are strong:
-            infrastructure cost per seat is low and falls with volume; the AI cost is borne entirely by the customer.
+            AskToAct runs on stacked recurring streams plus an optional onboarding fee. Infrastructure cost per seat is low;
+            the AI cost is borne entirely by the customer. Against a typical staffing stack — Bullhorn at $99–$165/user/month
+            plus ChatGPT at $25–$30/user — AskToAct is an incremental bridge, not another full platform license.
           </p>
+
+          <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.25)', borderRadius: '0.75rem', padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Recommended · Founding customer conversion (post-pilot)</div>
+            <div style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1.25rem', color: '#f8fafc', marginBottom: '0.35rem' }}>
+              ${FOUNDING_PRICING.flatUpTo10Seats}/mo · {FOUNDING_PRICING.includes}
+            </div>
+            <div style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.5 }}>{FOUNDING_PRICING.note}</div>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', margin: '2rem 0' }}>
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Pricing Structure · Month-to-Month Default</div>
-              <RevenueRow label="Platform · $499 / mo" desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
-              <RevenueRow label="Per-active-seat · $29 / mo" desc="Only billed when a seat makes at least one AI call that month — idle seats cost nothing" />
-              <RevenueRow label="Additional connectors · $299 / mo" desc="Each system beyond the first (Salesforce, Workday, Greenhouse…)" />
+              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>List pricing · Wired in Stripe today</div>
+              <RevenueRow label={`Platform · $${LIST_PRICING.platform} / mo`} desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
+              <RevenueRow label={`Per-active-seat · $${LIST_PRICING.perActiveSeat} / mo`} desc="Only billed when a seat makes at least one AI call that month — idle seats cost nothing" />
+              <RevenueRow label={`Additional connectors · $${LIST_PRICING.additionalConnector} / mo`} desc="Each system beyond the first (roadmap: Salesforce, Workday, Greenhouse…)" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
-                <RevenueRow label="White-glove setup · $3,500 · Optional" desc="Guided setup, training, OAuth registration. Self-serve is free. Most firms don't need this." gold />
+                <RevenueRow label={`White-glove setup · $${LIST_PRICING.whiteGloveSetup.toLocaleString()} · Optional`} desc="Guided setup, training, OAuth registration. Self-serve is free. Most firms don't need this." gold />
               </div>
               <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '0.5rem', padding: '0.875rem 1rem', marginTop: '1rem' }}>
                 <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginBottom: '0.25rem', fontWeight: 600 }}>No-commitment terms</div>
@@ -191,7 +209,8 @@ export default function ExecSummary() {
 
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Revenue vs. Gross Margin</div>
-              <PricingRow seats="10 active seats · 1 connector" range="~$789 / mo" margin="~95% GM" />
+              <PricingRow seats="10 active seats · founding rate" range={`~$${ROI_10_SEAT.askToActFounding} / mo`} margin="~95% GM" />
+              <PricingRow seats="10 active seats · list pricing" range={`~$${ROI_10_SEAT.askToActList} / mo`} margin="~95% GM" />
               <PricingRow seats="25 active seats · 1 connector" range="~$1,200 / mo" margin="~95% GM" />
               <PricingRow seats="50 active seats · 2 connectors" range="~$2,200 / mo" margin="~95% GM" />
               <PricingRow seats="100 active seats · 3 connectors" range="~$4,000 / mo" margin="~96% GM" />
@@ -214,66 +233,84 @@ export default function ExecSummary() {
 
         <Divider />
 
-        {/* Section: Market */}
-        <Section title="Market Opportunity" index="05">
+        {/* Section: Market & whitespace */}
+        <Section title="Market Opportunity · Where the Whitespace Is" index="05">
           <p style={bodyStyle}>
-            The global staffing and recruiting market is a multi-hundred-billion dollar industry running on
-            legacy systems. Bullhorn alone serves over 10,000 staffing and recruiting firms worldwide.
-            Every desk that adds a ChatGPT or Claude subscription is a potential AskToAct customer — and AI
-            adoption in this sector is early but accelerating.
+            The global staffing and recruiting market runs on legacy ATS platforms — Bullhorn alone serves 10,000+ firms.
+            Every desk adopting ChatGPT or Claude creates a new fracture: powerful AI on one side, the system of record on the other,
+            and a human recruiter manually bridging the gap. No incumbent owns that middle layer.
           </p>
           <p style={bodyStyle}>
-            Near-term addressable market: the mid-market staffing firm (20–500 desks) that has adopted AI
-            tools but lacks the technical resources to build native integrations. These firms spend heavily
-            on recruitment technology and have clear line-of-sight to ROI from eliminating manual transfer work.
+            <strong style={{ color: '#38bdf8' }}>Whitespace #1 — The action layer.</strong> Horizontal iPaaS players (Zapier, Merge, Unified.to)
+            solve generic connectivity. They do not enforce per-recruiter Bullhorn permissions, duplicate-proof submission guards,
+            locked headline metrics, or recruiting-domain field validation. Bullhorn's own AI is captive to their stack and pricing.
+            AskToAct is purpose-built middleware for "bring your own AI" — the layer every staffing firm will need as AI adoption accelerates.
           </p>
           <p style={bodyStyle}>
-            Longer-term, AskToAct is positioned as required middleware for the recruiting stack — the layer every
-            AI tool in the vertical routes through. As the standard matures, switching cost compounds and the wedge
-            for additional connected systems expands automatically.
+            <strong style={{ color: '#38bdf8' }}>Whitespace #2 — Governance.</strong> When recruiters paste AI output into Bullhorn manually,
+            there is no record of the prompt, the model's reasoning, or the before/after state. Enterprise buyers and compliance teams
+            are starting to ask. AskToAct logs every tool call with firm and user attribution from day one.
+          </p>
+          <p style={bodyStyle}>
+            Near-term ICP: mid-market staffing firms (10–100 recruiters) on Bullhorn who already pay for ChatGPT Team or Enterprise
+            and lack engineering resources to build native integrations. Long-term: required middleware for the recruiting stack —
+            the open MCP standard (ChatGPT, Claude, Gemini) means the wedge compounds with every connected system.
           </p>
         </Section>
 
         <Divider />
 
         {/* Section: Live Deployment */}
-        <Section title="Customer Zero · Live in Production" index="06">
-          <div style={{ background: '#102541', border: '1px solid #4ade80', borderRadius: '0.75rem', padding: '2rem', marginBottom: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
-              <div style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#4ade80' }} />
-              <div style={{ fontSize: '0.7rem', color: '#4ade80', letterSpacing: '0.15em', textTransform: 'uppercase' }}>Live · Myticas Consulting · connect.asktoact.ai</div>
-            </div>
+        <Section title="Design Partners · Free Pilots in Production" index="06">
+          <p style={bodyStyle}>
+            The Bullhorn connector is deployed on Railway at connect.asktoact.ai with Supabase-backed multi-tenant data.
+            We are running <strong>complimentary pilots</strong> with our first two design-partner firms — not paying customers yet,
+            but live on production infrastructure with real recruiters:
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', margin: '1.5rem 0' }}>
+            {PILOT_FIRMS.map((f) => (
+              <div key={f.name} style={{ background: '#102541', border: '1px solid #4ade80', borderRadius: '0.75rem', padding: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <div style={{ width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#4ade80' }} />
+                  <span style={{ fontSize: '0.7rem', color: '#4ade80', letterSpacing: '0.15em', textTransform: 'uppercase' }}>Free pilot · Live</span>
+                </div>
+                <div style={{ fontFamily: '"Sora", system-ui, sans-serif', fontWeight: 700, fontSize: '1.1rem', marginBottom: '0.35rem' }}>{f.name}</div>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8' }}>{f.note}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.5rem', marginBottom: '1.5rem' }}>
             <p style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: 1.7, margin: 0 }}>
-              The Bullhorn connector is deployed and running in production. Myticas Consulting, a staffing firm
-              on Bullhorn ATS, is Customer Zero: 53 MCP tools live (33 read · 20 write), per-user OAuth enforced, full audit logging active.
-              Recruiters can search candidates, read profiles and résumés, create and advance submissions, add notes, manage jobs and
-              contacts, record placements, and upload résumés — directly from ChatGPT or Claude, with no elevated permissions and no manual copy-paste.
-              This is not a prototype. It is a functioning product on a real ATS with a real custom domain.
+              {TOOL_SUMMARY} on Bullhorn, per-user OAuth enforced, full audit logging active. Recruiters search candidates,
+              read profiles and résumés, create and advance submissions, add notes, manage jobs and contacts, record placements,
+              and upload résumés — directly from ChatGPT or Claude, with no elevated permissions and no manual copy-paste.
+              This is not a prototype. It is a functioning product on a real ATS with a production custom domain.
             </p>
           </div>
           <p style={bodyStyle}>
-            The path to revenue is converting this deployment from an internal proof of concept to a paid commercial
-            pilot — either with Myticas or a comparable firm. That pilot validates pricing, surfaces the field-mapping
-            requirements a second customer would need, and produces the case study that de-risks conversations with
-            the next ten firms.
+            The path to revenue is converting these pilots to paying founding customers, then using their usage data and
+            field-mapping learnings as the case study for the next ten firms. Pilots validate pricing, onboarding friction,
+            and the ROI narrative — not product feasibility.
           </p>
         </Section>
 
         <Divider />
 
         {/* Section: What We Need */}
-        <Section title="Next Steps · Start a Pilot" index="07">
+        <Section title="Next Steps · Convert Pilots, Expand Pipeline" index="07">
           <p style={bodyStyle}>
-            The product is live, billing is wired, and self-serve onboarding is deployed. There is no implementation blocker — the next action is a sales call, not a sprint. The ask is deliberately low-friction: a 30-day paid pilot, month-to-month, no long-term commitment. The customer walks away if it doesn't deliver.
+            The product is live on Railway, billing is wired in Stripe, and self-serve onboarding is deployed.
+            Myticas and STSI are running complimentary production pilots — the next actions are usage review,
+            founding-customer conversion, and pipeline expansion. No product sprint required.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', margin: '1.75rem 0' }}>
-            <AskCard number="1" title="Name a firm" body="Identify one mid-market staffing firm for first commercial outreach. We handle the demo, onboarding, and first month of support. One conversation to start." />
-            <AskCard number="2" title="Greenlight the pilot" body="A 30-day paid pilot — month-to-month, no contractual lock-in. If they don't see ROI in 30 days, they cancel. That's the whole ask." />
-            <AskCard number="3" title="30-day check-in" body="Review usage data, recruiter feedback, and the expansion motion 30 days after go-live. One meeting. Then decide on second connector and second customer." />
+            <AskCard number="1" title="Pilot check-ins" body="30-day reviews with Myticas and STSI: usage data, recruiter feedback, field-mapping gaps, and ROI signals. Decide founding-customer conversion timing." />
+            <AskCard number="2" title="Convert to founding pricing" body={`Offer ${FOUNDING_PRICING.label.toLowerCase()}: $${FOUNDING_PRICING.flatUpTo10Seats}/mo for up to 10 active seats, month-to-month. Walk away if ROI isn't there — but the math should be obvious.`} />
+            <AskCard number="3" title="Expand pipeline" body="Use dual-pilot proof to approach the next 3–5 mid-market Bullhorn firms. Customer brief at connect.asktoact.ai/exec-summary/customer is ready to send." />
           </div>
           <p style={bodyStyle}>
             AskToAct does not need more product to start selling. The connector is live, the billing layer is built,
-            and the customer portal is running. The next action is a sales call, not a sprint.
+            and two design-partner pilots are running in production. The next action is conversion and outbound — not a sprint.
           </p>
         </Section>
 
