@@ -90,7 +90,7 @@ function ConnectorCard({ mcpUrl }: { mcpUrl: string }) {
         </span>
         <button
           onClick={handleCopy}
-          className="shrink-0 px-4 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap"
+          className="shrink-0 px-4 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap hover-elevate active-elevate-2"
           style={copied
             ? { background: "rgba(16,185,129,.15)", color: "#34D399", border: "1px solid rgba(52,211,153,.3)" }
             : failed
@@ -140,8 +140,7 @@ export default function Dashboard() {
           </span>
           <button
             onClick={() => signOut({ redirectUrl: basePath || "/" })}
-            className="text-sm px-3 py-1.5 rounded-xl transition-colors"
-            style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+            className="ata-btn-ghost ata-btn-sm"
           >
             Sign out
           </button>

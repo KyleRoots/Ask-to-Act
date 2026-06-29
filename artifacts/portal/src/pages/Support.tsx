@@ -91,7 +91,7 @@ export default function Support() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/dashboard")}
-            className="flex items-center gap-1.5 text-sm transition-colors shrink-0"
+            className="flex items-center gap-1.5 text-sm transition-colors shrink-0 hover:text-[#94A3B8]"
             style={{ color: "#6B7A99" }}
           >
             ← <span className="hidden sm:inline">Dashboard</span>
@@ -106,8 +106,7 @@ export default function Support() {
         </div>
         <button
           onClick={() => signOut({ redirectUrl: basePath || "/" })}
-          className="text-sm px-3 py-1.5 rounded-xl transition-colors"
-          style={{ color: "#6B7A99", border: `1px solid ${BORDER}` }}
+          className="ata-btn-ghost ata-btn-sm"
         >
           Sign out
         </button>
@@ -138,7 +137,7 @@ export default function Support() {
                       key={t.value}
                       type="button"
                       onClick={() => setTicketType(t.value)}
-                      className="rounded-2xl p-4 text-left transition-all"
+                      className="rounded-2xl p-4 text-left transition-all hover-elevate active-elevate-2"
                       style={{
                         background: ticketType === t.value ? "rgba(79,70,229,.12)" : SURFACE,
                         border: ticketType === t.value ? "1.5px solid rgba(79,70,229,.5)" : `1px solid ${BORDER}`,
@@ -221,11 +220,7 @@ export default function Support() {
               <button
                 type="submit"
                 disabled={isSubmitting || !subject.trim() || !message.trim()}
-                className="w-full rounded-xl py-3.5 text-sm font-bold text-white transition-all disabled:opacity-50"
-                style={{
-                  background: "linear-gradient(135deg,#4F46E5,#0EA5E9)",
-                  boxShadow: "0 4px 14px rgba(79,70,229,0.3)",
-                }}
+                className="ata-btn-primary w-full"
               >
                 {isSubmitting ? "Sending…" : "Send Message"}
               </button>
@@ -263,15 +258,13 @@ export default function Support() {
             <div className="flex gap-3">
               <button
                 onClick={() => { setSubmitted(false); setSubject(""); setMessage(""); }}
-                className="px-5 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                style={{ background: SURFACE, color: "#6B7A99", border: `1px solid ${BORDER}` }}
+                className="ata-btn-secondary"
               >
                 Submit another
               </button>
               <button
                 onClick={() => navigate("/dashboard")}
-                className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-                style={{ background: "linear-gradient(135deg,#4F46E5,#0EA5E9)" }}
+                className="ata-btn-primary"
               >
                 Back to dashboard
               </button>

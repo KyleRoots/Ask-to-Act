@@ -63,31 +63,34 @@ const clerkAppearance = {
     borderRadius: "0.875rem",
   },
   elements: {
-    rootBox: "w-full flex justify-center",
-    cardBox: "w-[440px] max-w-full overflow-hidden rounded-2xl",
-    card: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    footer: "!shadow-none !border-0 !bg-transparent !rounded-none",
-    headerTitle: "text-white font-extrabold",
-    headerSubtitle: "text-[#6B7A99]",
-    socialButtonsBlockButtonText: "text-white font-medium",
-    socialButtonsBlockButton: "border border-[#1B2D47] bg-[#111D30] hover:bg-[#182540] transition-colors",
-    formFieldLabel: "text-[#6B7A99] text-xs font-semibold uppercase tracking-wider",
-    formFieldInput: "bg-[#111D30] border border-[#1B2D47] text-white rounded-xl",
-    formButtonPrimary: "bg-gradient-to-r from-indigo-600 to-sky-500 shadow-lg font-bold",
-    footerActionLink: "text-[#818CF8] hover:text-[#38BDF8] font-medium",
-    footerActionText: "text-[#3A4460]",
-    footerAction: "bg-[#0A111E] border-t border-[#1B2D47]",
-    dividerText: "text-[#3A4460]",
+    rootBox: "w-full",
+    cardBox: "w-full shadow-none",
+    card: "!shadow-none !border-0 !bg-transparent !rounded-none !p-0",
+    footer: "!shadow-none !border-0 !bg-transparent !rounded-none !p-0",
+    headerTitle: "text-white font-extrabold text-xl tracking-tight",
+    headerSubtitle: "text-[#94A3B8] text-sm",
+    socialButtonsBlockButtonText: "!text-white font-medium",
+    socialButtonsBlockButton:
+      "!text-white border border-[#2a3f5f] bg-[#111D30] hover:bg-[#182540] transition-colors rounded-xl h-11",
+    formFieldLabel: "text-[#94A3B8] text-xs font-semibold uppercase tracking-wider",
+    formFieldInput:
+      "bg-[#111D30] border border-[#1B2D47] text-white rounded-xl h-11 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20",
+    formButtonPrimary:
+      "bg-gradient-to-r from-indigo-600 to-sky-500 shadow-lg font-bold rounded-xl h-11",
+    footerActionLink: "text-[#818CF8] hover:text-[#38BDF8] font-medium transition-colors",
+    footerActionText: "text-[#6B7A99]",
+    footerAction: "!bg-transparent border-t border-[#1B2D47] pt-4 mt-2",
+    dividerText: "text-[#6B7A99] text-xs",
     dividerLine: "bg-[#1B2D47]",
     identityPreviewEditButton: "text-[#818CF8]",
     formFieldSuccessText: "text-emerald-400",
     alertText: "text-white",
-    alert: "bg-[#0A111E] border border-[#1B2D47]",
-    otpCodeFieldInput: "bg-[#111D30] border border-[#1B2D47] text-white",
-    logoBox: "flex justify-center py-2",
-    logoImage: "h-12 w-12",
-    main: "bg-[#0D1728]",
-    formFieldRow: "",
+    alert: "bg-[#0A111E] border border-[#1B2D47] rounded-xl",
+    otpCodeFieldInput: "bg-[#111D30] border border-[#1B2D47] text-white rounded-xl",
+    logoBox: "flex justify-center py-1",
+    logoImage: "h-11 w-11",
+    main: "gap-5",
+    formFieldRow: "gap-1.5",
   },
 };
 
@@ -142,7 +145,10 @@ function AuthBrandPanel({ heading, sub }: { heading: string; sub: string }) {
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
           Customer Portal
         </div>
-        <h2 className="text-3xl font-extrabold text-white mb-3" style={{ letterSpacing: "-0.03em", lineHeight: 1.25 }}>
+        <h2
+          className="text-3xl font-extrabold text-white mb-3 whitespace-pre-line"
+          style={{ letterSpacing: "-0.03em", lineHeight: 1.25 }}
+        >
           {heading}
         </h2>
         <p className="text-sm mb-10" style={{ color: "#6B7A99", lineHeight: 1.75 }}>{sub}</p>
@@ -171,7 +177,7 @@ function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: 
   return (
     <div className="flex min-h-[100dvh]" style={{ background: "hsl(220 50% 4%)" }}>
       <AuthBrandPanel heading={heading} sub={sub} />
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 relative">
+      <div className="flex flex-1 flex-col items-center justify-center px-4 sm:px-6 py-8 sm:py-12 relative">
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
           <div className="absolute top-0 right-0 w-[420px] h-[420px] rounded-full opacity-[0.07]"
             style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }} />
@@ -196,7 +202,9 @@ function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: 
             Ask<span style={{ color: "#38BDF8" }}>To</span>Act
           </span>
         </div>
-        <div className="relative w-full max-w-[420px]">{children}</div>
+        <div className="relative w-full max-w-[420px] ata-auth-shell">
+          <div className="px-5 py-6 sm:px-7 sm:py-8">{children}</div>
+        </div>
       </div>
     </div>
   );
