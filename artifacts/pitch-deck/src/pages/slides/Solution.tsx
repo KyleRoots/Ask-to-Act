@@ -79,7 +79,7 @@ export default function Solution() {
       </div>
 
       <div className="absolute bottom-[5vh] left-[6vw] right-[6vw] font-body text-[1.5vw] text-muted text-center">
-        The recruiter never sees us. They just type, the system responds, the work gets done.
+        62+ Bullhorn actions live · Myticas + STSI on complimentary pilots · The recruiter never sees us — they type, the system responds.
       </div>
     </div>
   );
