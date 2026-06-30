@@ -3,7 +3,7 @@ import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
 const ASKS = [
   {
     title: "Pilot check-ins",
-    body: "30-day reviews with Myticas and STSI — usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.",
+    body: "30-day reviews with Myticas and STSI: usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.",
     accent: "accent" as const,
   },
   {
@@ -13,7 +13,7 @@ const ASKS = [
   },
   {
     title: "Send the customer brief",
-    body: "connect.asktoact.ai/exec-summary/customer — share with the next 3–5 Bullhorn firms in pipeline.",
+    body: "connect.asktoact.ai/exec-summary/customer: share with the next 3–5 Bullhorn firms in pipeline.",
     accent: "gold" as const,
   },
 ];
@@ -32,7 +32,7 @@ export default function TheAsk() {
       }
       subtitle={
         <SlideSubtitle>
-          Myticas and STSI are running complimentary production pilots on connect.asktoact.ai — 62+ Bullhorn actions live.
+          Myticas and STSI are running complimentary production pilots on connect.asktoact.ai, with 62+ Bullhorn actions live.
           Next: 30-day check-ins, founding-customer conversion at $399/mo, and outbound to the next firms.
         </SlideSubtitle>
       }

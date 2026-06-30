@@ -31,7 +31,7 @@ html,
 body,
 #root {
   width: 100%;
-  height: 100%;
+  min-height: 100%;
   margin: 0;
 }
 
@@ -39,7 +39,26 @@ body {
   background: var(--slide-bg);
   color: var(--slide-text);
   font-family: var(--font-body-family);
+}
+
+/* Slide routes: scroll naturally on narrow viewports (matches exec-summary). */
+body.pd-scrollable,
+body.pd-scrollable #root {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Viewer shell at `/` keeps a fixed viewport. */
+body:not(.pd-scrollable) {
+  height: 100%;
   overflow: hidden;
+}
+
+body:not(.pd-scrollable) #root {
+  height: 100%;
 }
 
 .slide {
@@ -56,16 +75,16 @@ body {
 
 /* ─── Pitch deck responsive typography & spacing ─── */
 .pd-slide-x {
-  padding-left: clamp(1rem, 6vw, 4rem);
-  padding-right: clamp(1rem, 6vw, 4rem);
+  padding-left: max(clamp(1rem, 6vw, 4rem), env(safe-area-inset-left, 0px));
+  padding-right: max(clamp(1rem, 6vw, 4rem), env(safe-area-inset-right, 0px));
 }
 
 .pd-slide-pt {
-  padding-top: clamp(0.75rem, 3vh, 2rem);
+  padding-top: max(clamp(0.75rem, 3vh, 2rem), env(safe-area-inset-top, 0px));
 }
 
 .pd-slide-pb {
-  padding-bottom: clamp(1rem, 3vh, 2rem);
+  padding-bottom: max(clamp(1rem, 3vh, 2rem), env(safe-area-inset-bottom, 0px));
 }
 
 .pd-eyebrow {

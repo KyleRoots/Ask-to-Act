@@ -35,7 +35,7 @@ export default function Problem() {
           value="$789"
           label={
             <>
-              AskToAct list pricing for a 10-seat desk — per month, no commitment.{" "}
+              AskToAct list pricing for a 10-seat desk, per month, no commitment.{" "}
               <span className="text-text font-display font-semibold">Founding rate: $399/mo.</span>
             </>
           }

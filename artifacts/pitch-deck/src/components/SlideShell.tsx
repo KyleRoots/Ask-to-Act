@@ -29,7 +29,7 @@ export function SlideShell({
   const dot = accent === "gold" ? "bg-gold" : "bg-accent";
 
   return (
-    <div className={`pd-slide relative bg-bg text-text w-full min-h-full flex flex-col overflow-x-hidden overflow-y-auto ${className}`}>
+    <div className={`pd-slide relative bg-bg text-text w-full min-h-[100dvh] flex flex-col overflow-x-hidden ${className}`}>
       {glow ? (
         <div className="absolute inset-0 pointer-events-none" aria-hidden style={{ background: glow }} />
       ) : null}
@@ -46,7 +46,7 @@ export function SlideShell({
         ) : null}
       </header>
 
-      <main className="relative z-10 flex-1 pd-slide-x pd-slide-pb flex flex-col gap-[clamp(0.75rem,2vh,1.75rem)] min-h-0">
+      <main className="relative z-10 pd-slide-x pd-slide-pb flex flex-col gap-[clamp(0.75rem,2vh,1.75rem)]">
         {title ? <div className="shrink-0">{title}</div> : null}
         {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
         {children}

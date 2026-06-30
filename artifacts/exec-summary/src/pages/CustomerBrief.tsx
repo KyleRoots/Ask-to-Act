@@ -26,23 +26,23 @@ export default function CustomerBrief() {
         <Divider />
         <Section title="The whitespace we own" accent>
           <p style={body}>
-            Staffing firms already pay for <strong>Bullhorn</strong> and <strong>ChatGPT</strong> — but nothing connects them.
+            Staffing firms already pay for <strong>Bullhorn</strong> and <strong>ChatGPT</strong>, but nothing connects them.
             Recruiters copy, paste, tab-switch, and lose hours every week. There is no audit trail. No permission bridge.
             No recruiting-native intelligence layer.
           </p>
           <p style={body}>
             AskToAct is the <strong style={{ color: "#38bdf8" }}>AI action layer</strong> for staffing: model-agnostic middleware
-            that lets any MCP-compatible AI read and write Bullhorn under each recruiter's own OAuth session —
+            that lets any MCP-compatible AI read and write Bullhorn under each recruiter's own OAuth session,
             with duplicate guards, field validation, and full tool-call logging.
           </p>
         </Section>
         <Divider />
         <Section title="What ships today">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.875rem" }}>
-            <FeatureCard icon="⚡" title="62+ actions" body={TOOL_SUMMARY + " on Bullhorn — live in production"} />
-            <FeatureCard icon="🤖" title="Bring your AI" body="ChatGPT, Claude, Gemini — we don't sell the chatbot" />
+            <FeatureCard icon="⚡" title="62+ actions" body={TOOL_SUMMARY + " on Bullhorn, live in production"} />
+            <FeatureCard icon="🤖" title="Bring your AI" body="ChatGPT, Claude, Gemini: we don't sell the chatbot" />
             <FeatureCard icon="🔒" title="Their permissions" body="Every write runs under the recruiter's own Bullhorn login" />
-            <FeatureCard icon="🚀" title="30-minute setup" body="Self-serve OAuth enrollment — no IT project" />
+            <FeatureCard icon="🚀" title="30-minute setup" body="Self-serve OAuth enrollment, no IT project" />
           </div>
         </Section>
         <Divider />
@@ -58,7 +58,7 @@ export default function CustomerBrief() {
         <Section title="Pricing that clears the ROI bar">
           <p style={body}>
             A 10-recruiter desk loses <strong style={{ color: "#fbbf24" }}>~${ROI_10_SEAT.productivityLost.toLocaleString()}/mo</strong> to
-            manual AI↔ATS transfer. They're already spending <strong>$99–$165/user on Bullhorn</strong> plus <strong>$25–$30 on ChatGPT</strong> —
+            manual AI↔ATS transfer. They're already spending <strong>$99–$165/user on Bullhorn</strong> plus <strong>$25–$30 on ChatGPT</strong>.
             AskToAct is the missing bridge, not another platform replacement.
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1.25rem", margin: "1.75rem 0" }}>
@@ -137,7 +137,7 @@ function Hero() {
         <span style={gradientText}>not the chatbot.</span>
       </h1>
       <p style={{ fontSize: "clamp(1.05rem, 2.5vw, 1.25rem)", color: "#cbd5e1", lineHeight: 1.65, maxWidth: "620px", margin: 0 }}>
-        Your recruiters stay in ChatGPT. Work happens in Bullhorn — under their permissions, with an audit trail on every action.
+        Your recruiters stay in ChatGPT. Work happens in Bullhorn, under their permissions, with an audit trail on every action.
         <strong style={{ color: "#f8fafc" }}> No rip-and-replace. Live in 30 minutes.</strong>
       </p>
     </div>
@@ -148,7 +148,7 @@ function ValuePills() {
   const items = [
     { stat: "~40×", label: "ROI at founding rate vs copy-paste tax" },
     { stat: "62+", label: "Bullhorn recruiting actions in production" },
-    { stat: "$0", label: "AI cost to you — bring your own subscription" },
+    { stat: "$0", label: "AI cost to you: bring your own subscription" },
   ];
   return (
     <div style={{ position: "relative", zIndex: 1, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.875rem", margin: "2rem 0 1.5rem" }}>

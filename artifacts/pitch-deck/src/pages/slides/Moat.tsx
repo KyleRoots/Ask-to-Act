@@ -2,7 +2,7 @@ import { SlideShell, SlideTitle } from "@/components/SlideShell";
 
 const MOATS = [
   { n: "01", title: "Model-agnostic", body: "Works with whatever AI the customer already pays for. As models commoditize, the bridge becomes more valuable, not less." },
-  { n: "02", title: "Per-user permissions", body: "Every write runs under the recruiter's own Bullhorn session — not a shared admin account. IT can deploy without fear of privilege escalation." },
+  { n: "02", title: "Per-user permissions", body: "Every write runs under the recruiter's own Bullhorn session, not a shared admin account. IT can deploy without fear of privilege escalation." },
   { n: "03", title: "Data integrity layer", body: "Duplicate-proof writes, locked headline metrics, validation before every API call. Generic wrappers write whatever the AI says." },
   { n: "04", title: "First-mover on the standard", body: "Built on the open protocol adopted by ChatGPT, Claude, and Gemini. Domain vocabulary in place before horizontal players notice the vertical." },
   { n: "05", title: "Zero lock-in", body: "Built on open standards (MCP). If a better model drops tomorrow, it still works. Customers aren't betting on a proprietary platform.", gold: true },
@@ -15,14 +15,14 @@ export default function Moat() {
       glow="radial-gradient(ellipse at top right, rgba(56,189,248,0.12), transparent 55%)"
       title={
         <SlideTitle>
-          The moat is not the integration —
+          The moat is not the integration:
           <span className="text-accent"> it's what sits between the AI and the write.</span>
         </SlideTitle>
       }
       footer={
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <p className="font-body pd-small text-muted leading-snug">
-            <span className="text-text font-display font-semibold">Design partners:</span> Myticas Consulting + STSI — live at{" "}
+            <span className="text-text font-display font-semibold">Design partners:</span> Myticas Consulting + STSI, live at{" "}
             <span className="text-accent">connect.asktoact.ai</span>
           </p>
           <div className="font-display pd-eyebrow tracking-[0.2em] uppercase text-gold shrink-0">
