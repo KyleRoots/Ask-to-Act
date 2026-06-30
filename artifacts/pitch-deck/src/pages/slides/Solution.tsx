@@ -7,7 +7,7 @@ export default function Solution() {
       glow="radial-gradient(ellipse at center, rgba(56,189,248,0.08), transparent 60%)"
       title={
         <SlideTitle>
-          Plug in, not rip and replace —
+          Plug in, not rip and replace:
           <span className="text-accent"> keep your AI, keep your ATS.</span>
         </SlideTitle>
       }
@@ -18,7 +18,7 @@ export default function Solution() {
       }
       footer={
         <p className="font-body pd-small text-muted text-center leading-relaxed">
-          62+ Bullhorn actions live · Myticas + STSI on complimentary pilots · The recruiter never sees us — they type, the system responds.
+          62+ Bullhorn actions live · Myticas + STSI on complimentary pilots · The recruiter never sees us; they type, the system responds.
         </p>
       }
     >

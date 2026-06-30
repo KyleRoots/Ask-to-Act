@@ -39,9 +39,25 @@ function postAdvanceSlide(): void {
   window.parent.postMessage({ type: "advanceSlide" }, targetOrigin);
 }
 
+function useSlideScrollMode() {
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px), (orientation: portrait)");
+    const apply = () => {
+      document.body.classList.toggle("pd-scrollable", mq.matches);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => {
+      mq.removeEventListener("change", apply);
+      document.body.classList.remove("pd-scrollable");
+    };
+  }, []);
+}
+
 function SlideEditor() {
   const [location, navigate] = useLocation();
   const currentIndex = getSlideIndex(location);
+  useSlideScrollMode();
 
   // In the workspace, the slide iframe is nested inside another iframe,
   // so window.parent !== window.parent.parent. In the deployed SlideViewer,
@@ -140,11 +156,11 @@ function SlideEditor() {
   }, [currentIndex, navigate]);
 
   return (
-    <div className="select-none h-full min-h-[100dvh]">
+    <div className="select-none min-h-[100dvh]">
       {slides.map((slide, index) => (
         <div
           key={slide.id}
-          className="h-full min-h-[100dvh]"
+          className="min-h-[100dvh]"
           style={{ display: index === currentIndex ? "block" : "none" }}
         >
           <slide.Component />

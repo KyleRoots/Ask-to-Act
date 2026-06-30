@@ -71,7 +71,7 @@ export default function ExecSummary() {
         <div style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.3)', borderLeft: '3px solid #fbbf24', borderRadius: '0.75rem', padding: '1.25rem 1.75rem', maxWidth: '680px', marginBottom: '1.25rem' }}>
           <div style={{ fontSize: '0.7rem', color: '#fbbf24', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>The Cost of Not Subscribing</div>
           <p style={{ fontSize: '0.95rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0 }}>
-            copy-paste between AI and Bullhorn ({ROI_10_SEAT.hoursPerWeek}h/wk × ${ROI_10_SEAT.burdenedHourly}/hr burdened). Across a 10-seat desk that's <strong style={{ color: '#fbbf24' }}>~${ROI_10_SEAT.productivityLost.toLocaleString()}/month</strong> — and AskToAct at list pricing for that desk is <strong style={{ color: '#38bdf8' }}>${ROI_10_SEAT.askToActList}/month</strong> (founding rate: <strong style={{ color: '#38bdf8' }}>${ROI_10_SEAT.askToActFounding}/month</strong>). That's a <strong style={{ color: '#38bdf8' }}>~20× ROI</strong> at list — and ~40× at founding — before counting audit trail, error reduction, or governance. Month-to-month, cancel anytime.
+            copy-paste between AI and Bullhorn ({ROI_10_SEAT.hoursPerWeek}h/wk × ${ROI_10_SEAT.burdenedHourly}/hr burdened). Across a 10-seat desk that's <strong style={{ color: '#fbbf24' }}>~${ROI_10_SEAT.productivityLost.toLocaleString()}/month</strong>. AskToAct at list pricing for that desk is <strong style={{ color: '#38bdf8' }}>${ROI_10_SEAT.askToActList}/month</strong> (founding rate: <strong style={{ color: '#38bdf8' }}>${ROI_10_SEAT.askToActFounding}/month</strong>). That's a <strong style={{ color: '#38bdf8' }}>~20× ROI</strong> at list, and ~40× at founding, before counting audit trail, error reduction, or governance. Month-to-month, cancel anytime.
           </p>
         </div>
 
@@ -79,7 +79,7 @@ export default function ExecSummary() {
         <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.25)', borderLeft: '3px solid #38bdf8', borderRadius: '0.75rem', padding: '1.5rem 1.75rem', maxWidth: '680px' }}>
           <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>The 30-Second Version</div>
           <p style={{ fontSize: '1rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
-            "Your recruiters already pay for ChatGPT or Claude. AskToAct makes it actually do something inside their ATS — with their own Bullhorn permissions enforced server-side, duplicate-proof writes, and a full audit trail on every action. They don't replace the AI. They don't replace the ATS. We close the loop between them. Live in under 30 minutes. No IT department required."
+            "Your recruiters already pay for ChatGPT or Claude. AskToAct makes it actually do something inside their ATS, with their own Bullhorn permissions enforced server-side, duplicate-proof writes, and a full audit trail on every action. They don't replace the AI. They don't replace the ATS. We close the loop between them. Live in under 30 minutes. No IT department required."
           </p>
         </div>
       </div>
@@ -88,9 +88,9 @@ export default function ExecSummary() {
 
         {/* Key stats row */}
         <div className="es-grid-3" style={{ marginBottom: '4rem' }}>
-          <Stat number="~$1,560" label="Monthly productivity lost per recruiter seat to AI copy-paste (6h/wk × $60/hr burdened). A 10-seat desk loses ~$15,600/mo; AskToAct costs $789/mo for those 10 seats — a ~20× return." />
-          <Stat number="$0" label="Audit trail at competing firms — no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
-          <Stat number="62+" label={`Recruiting actions live in production: ${TOOL_SUMMARY} — search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload — directly from ChatGPT or Claude`} accent="#4ade80" />
+          <Stat number="~$1,560" label="Monthly productivity lost per recruiter seat to AI copy-paste (6h/wk × $60/hr burdened). A 10-seat desk loses ~$15,600/mo; AskToAct costs $789/mo for those 10 seats, a ~20× return." />
+          <Stat number="$0" label="Audit trail at competing firms: no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
+          <Stat number="62+" label={`Recruiting actions live in production: ${TOOL_SUMMARY}: search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload, directly from ChatGPT or Claude`} accent="#4ade80" />
         </div>
 
         {/* Section: The Problem */}
@@ -137,7 +137,7 @@ export default function ExecSummary() {
             candidate search and profile reads, contact and company lookup, résumé reads, and live reporting. On the write side:
             submissions and pipeline status changes, note writing, job/company/contact create and update, tasks and appointments,
             tearsheet curation, placement recording, and résumé/file upload with new-candidate creation. Every write tool
-            runs under the recruiter's own Bullhorn OAuth session — not a shared service account — so Bullhorn's own
+            runs under the recruiter's own Bullhorn OAuth session, not a shared service account, so Bullhorn's own
             permission gates enforce what each user can and cannot do, with server-side field validation and duplicate guards
             before every write. The implementation is live and in production.
           </p>
@@ -149,20 +149,20 @@ export default function ExecSummary() {
         <Section title="Why AskToAct Wins" index="03">
           <div className="es-grid-2" style={{ margin: '1rem 0 2rem' }}>
             <MoatCard number="01" title="Model-agnostic" body="Works with whichever AI the customer already pays for. No vendor dependency. As models commoditize, the connection layer becomes more valuable, not less." />
-            <MoatCard number="02" title="Per-user permission enforcement" body="Every write runs under the recruiter's own Bullhorn session — not a shared admin account. IT can approve deployment without granting the AI elevated access. This is the question enterprise security teams ask first." />
+            <MoatCard number="02" title="Per-user permission enforcement" body="Every write runs under the recruiter's own Bullhorn session, not a shared admin account. IT can approve deployment without granting the AI elevated access. This is the question enterprise security teams ask first." />
             <MoatCard number="03" title="Data integrity layer" body="Duplicate-proof submission guard, locked headline metrics validated on every call, server-side field validation before every write. Generic wrappers write whatever the AI says. We don't." />
             <MoatCard number="04" title="First-mover on the standard" body="MCP is the open protocol adopted by ChatGPT, Claude, and Gemini. Building the recruiting-domain vocabulary and workflow patterns now means we own the vertical before horizontal players notice it." />
           </div>
           <p style={bodyStyle}>
             The moat is not the integration. The moat is what sits between the AI and the write: permission inheritance,
-            data integrity enforcement, and audit trail capture — built into the architecture from day one, not bolted on later.
+            data integrity enforcement, and audit trail capture, built into the architecture from day one, not bolted on later.
             A generic API wrapper takes two days to build. This layer took months of recruiting-domain work, and it compounds
             with every customer added.
           </p>
           <p style={bodyStyle}>
             Horizontal players (Zapier, Unified.to, Merge.dev) solve generic connectivity and are strategically useful as
             backbone for commodity connectors. AskToAct composes on top of these where they cover a system well, and builds
-            custom connectors only where domain depth demands it — keeping infrastructure cost low while preserving
+            custom connectors only where domain depth demands it, keeping infrastructure cost low while preserving
             the differentiation layer horizontal players cannot replicate.
           </p>
         </Section>
@@ -173,10 +173,10 @@ export default function ExecSummary() {
         <div style={{ background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '1rem', padding: '2rem 2.25rem', marginBottom: '3rem' }}>
           <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Why It's a No-Brainer</div>
           <div className="es-grid-2">
-            <NoBrainerItem icon="✓" title="Zero lock-in" body="Built on MCP — the open standard adopted by ChatGPT, Claude, and Gemini. If a better model launches tomorrow, it still works. Customers aren't betting on a proprietary platform." />
+            <NoBrainerItem icon="✓" title="Zero lock-in" body="Built on MCP, the open standard adopted by ChatGPT, Claude, and Gemini. If a better model launches tomorrow, it still works. Customers aren't betting on a proprietary platform." />
             <NoBrainerItem icon="✓" title="Minimal setup" body="Self-serve onboarding: admin provisions seats, recruiters connect their own Bullhorn accounts via OAuth, paste a URL into ChatGPT. Live in under 30 minutes. No IT department, no implementation project." />
-            <NoBrainerItem icon="✓" title="Month-to-month, cancel anytime" body="No long-term commitment required. The product has to earn its place on the budget every month. That's the model — and it's by design." />
-            <NoBrainerItem icon="✓" title="Works with AI they already have" body="AskToAct doesn't sell an AI assistant. It connects to whatever the customer already pays for — ChatGPT, Claude, Gemini, or anything else MCP-compatible." />
+            <NoBrainerItem icon="✓" title="Month-to-month, cancel anytime" body="No long-term commitment required. The product has to earn its place on the budget every month. That's the model, and it's by design." />
+            <NoBrainerItem icon="✓" title="Works with AI they already have" body="AskToAct doesn't sell an AI assistant. It connects to whatever the customer already pays for: ChatGPT, Claude, Gemini, or anything else MCP-compatible." />
           </div>
         </div>
 
@@ -186,8 +186,8 @@ export default function ExecSummary() {
         <Section title="How It Makes Money" index="04">
           <p style={bodyStyle}>
             AskToAct runs on stacked recurring streams plus an optional onboarding fee. Infrastructure cost per seat is low;
-            the AI cost is borne entirely by the customer. Against a typical staffing stack — Bullhorn at $99–$165/user/month
-            plus ChatGPT at $25–$30/user — AskToAct is an incremental bridge, not another full platform license.
+            the AI cost is borne entirely by the customer. Against a typical staffing stack: Bullhorn at $99–$165/user/month
+            plus ChatGPT at $25–$30/user. AskToAct is an incremental bridge, not another full platform license.
           </p>
 
           <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.25)', borderRadius: '0.75rem', padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
@@ -202,14 +202,14 @@ export default function ExecSummary() {
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
               <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>List pricing · Wired in Stripe today</div>
               <RevenueRow label={`Platform · $${LIST_PRICING.platform} / mo`} desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
-              <RevenueRow label={`Per-active-seat · $${LIST_PRICING.perActiveSeat} / mo`} desc="Only billed when a seat makes at least one AI call that month — idle seats cost nothing" />
+              <RevenueRow label={`Per-active-seat · $${LIST_PRICING.perActiveSeat} / mo`} desc="Only billed when a seat makes at least one AI call that month; idle seats cost nothing" />
               <RevenueRow label={`Additional connectors · $${LIST_PRICING.additionalConnector} / mo`} desc="Each system beyond the first (roadmap: Salesforce, Workday, Greenhouse…)" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
                 <RevenueRow label={`White-glove setup · $${LIST_PRICING.whiteGloveSetup.toLocaleString()} · Optional`} desc="Guided setup, training, OAuth registration. Self-serve is free. Most firms don't need this." gold />
               </div>
               <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '0.5rem', padding: '0.875rem 1rem', marginTop: '1rem' }}>
                 <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginBottom: '0.25rem', fontWeight: 600 }}>No-commitment terms</div>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5 }}>Month-to-month on all plans. Annual available (onboarding waived). Cancel anytime — no termination fees, no data hostage situations.</div>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5 }}>Month-to-month on all plans. Annual available (onboarding waived). Cancel anytime. No termination fees, no data hostage situations.</div>
               </div>
             </div>
 
@@ -221,7 +221,7 @@ export default function ExecSummary() {
               <PricingRow seats="50 active seats · 2 connectors" range="~$2,200 / mo" margin="~95% GM" />
               <PricingRow seats="100 active seats · 3 connectors" range="~$4,000 / mo" margin="~96% GM" />
               <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.5 }}>
-                AI cost is borne entirely by the customer. Infrastructure cost per seat is $30–150/mo depending on firm size and falls with volume. Each new seat added is near-zero incremental cost — expansion revenue is effectively pure margin.
+                AI cost is borne entirely by the customer. Infrastructure cost per seat is $30–150/mo depending on firm size and falls with volume. Each new seat added is near-zero incremental cost, so expansion revenue is effectively pure margin.
               </p>
             </div>
           </div>
@@ -242,24 +242,24 @@ export default function ExecSummary() {
         {/* Section: Market & whitespace */}
         <Section title="Market Opportunity · Where the Whitespace Is" index="05">
           <p style={bodyStyle}>
-            The global staffing and recruiting market runs on legacy ATS platforms — Bullhorn alone serves 10,000+ firms.
+            The global staffing and recruiting market runs on legacy ATS platforms. Bullhorn alone serves 10,000+ firms.
             Every desk adopting ChatGPT or Claude creates a new fracture: powerful AI on one side, the system of record on the other,
             and a human recruiter manually bridging the gap. No incumbent owns that middle layer.
           </p>
           <p style={bodyStyle}>
-            <strong style={{ color: '#38bdf8' }}>Whitespace #1 — The action layer.</strong> Horizontal iPaaS players (Zapier, Merge, Unified.to)
+            <strong style={{ color: '#38bdf8' }}>Whitespace #1: The action layer.</strong> Horizontal iPaaS players (Zapier, Merge, Unified.to)
             solve generic connectivity. They do not enforce per-recruiter Bullhorn permissions, duplicate-proof submission guards,
             locked headline metrics, or recruiting-domain field validation. Bullhorn's own AI is captive to their stack and pricing.
-            AskToAct is purpose-built middleware for "bring your own AI" — the layer every staffing firm will need as AI adoption accelerates.
+            AskToAct is purpose-built middleware for "bring your own AI," the layer every staffing firm will need as AI adoption accelerates.
           </p>
           <p style={bodyStyle}>
-            <strong style={{ color: '#38bdf8' }}>Whitespace #2 — Governance.</strong> When recruiters paste AI output into Bullhorn manually,
+            <strong style={{ color: '#38bdf8' }}>Whitespace #2: Governance.</strong> When recruiters paste AI output into Bullhorn manually,
             there is no record of the prompt, the model's reasoning, or the before/after state. Enterprise buyers and compliance teams
             are starting to ask. AskToAct logs every tool call with firm and user attribution from day one.
           </p>
           <p style={bodyStyle}>
             Near-term ICP: mid-market staffing firms (10–100 recruiters) on Bullhorn who already pay for ChatGPT Team or Enterprise
-            and lack engineering resources to build native integrations. Long-term: required middleware for the recruiting stack —
+            and lack engineering resources to build native integrations. Long-term: required middleware for the recruiting stack:
             the open MCP standard (ChatGPT, Claude, Gemini) means the wedge compounds with every connected system.
           </p>
         </Section>
@@ -270,7 +270,7 @@ export default function ExecSummary() {
         <Section title="Design Partners · Free Pilots in Production" index="06">
           <p style={bodyStyle}>
             The Bullhorn connector is deployed on Railway at connect.asktoact.ai with Supabase-backed multi-tenant data.
-            We are running <strong>complimentary pilots</strong> with our first two design-partner firms — not paying customers yet,
+            We are running <strong>complimentary pilots</strong> with our first two design-partner firms, not paying customers yet,
             but live on production infrastructure with real recruiters:
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', margin: '1.5rem 0' }}>
@@ -289,14 +289,14 @@ export default function ExecSummary() {
             <p style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: 1.7, margin: 0 }}>
               {TOOL_SUMMARY} on Bullhorn, per-user OAuth enforced, full audit logging active. Recruiters search candidates,
               read profiles and résumés, create and advance submissions, add notes, manage jobs and contacts, record placements,
-              and upload résumés — directly from ChatGPT or Claude, with no elevated permissions and no manual copy-paste.
+              and upload résumés, directly from ChatGPT or Claude, with no elevated permissions and no manual copy-paste.
               This is not a prototype. It is a functioning product on a real ATS with a production custom domain.
             </p>
           </div>
           <p style={bodyStyle}>
             The path to revenue is converting these pilots to paying founding customers, then using their usage data and
             field-mapping learnings as the case study for the next ten firms. Pilots validate pricing, onboarding friction,
-            and the ROI narrative — not product feasibility.
+            and the ROI narrative, not product feasibility.
           </p>
         </Section>
 
@@ -306,17 +306,17 @@ export default function ExecSummary() {
         <Section title="Next Steps · Convert Pilots, Expand Pipeline" index="07">
           <p style={bodyStyle}>
             The product is live on Railway, billing is wired in Stripe, and self-serve onboarding is deployed.
-            Myticas and STSI are running complimentary production pilots — the next actions are usage review,
+            Myticas and STSI are running complimentary production pilots. The next actions are usage review,
             founding-customer conversion, and pipeline expansion. No product sprint required.
           </p>
           <div className="es-grid-3" style={{ margin: '1.75rem 0' }}>
             <AskCard number="1" title="Pilot check-ins" body="30-day reviews with Myticas and STSI: usage data, recruiter feedback, field-mapping gaps, and ROI signals. Decide founding-customer conversion timing." />
-            <AskCard number="2" title="Convert to founding pricing" body={`Offer ${FOUNDING_PRICING.label.toLowerCase()}: $${FOUNDING_PRICING.flatUpTo10Seats}/mo for up to 10 active seats, month-to-month. Walk away if ROI isn't there — but the math should be obvious.`} />
+            <AskCard number="2" title="Convert to founding pricing" body={`Offer ${FOUNDING_PRICING.label.toLowerCase()}: $${FOUNDING_PRICING.flatUpTo10Seats}/mo for up to 10 active seats, month-to-month. Walk away if ROI isn't there, but the math should be obvious.`} />
             <AskCard number="3" title="Expand pipeline" body="Use dual-pilot proof to approach the next 3–5 mid-market Bullhorn firms. Customer brief at connect.asktoact.ai/exec-summary/customer is ready to send." />
           </div>
           <p style={bodyStyle}>
             AskToAct does not need more product to start selling. The connector is live, the billing layer is built,
-            and two design-partner pilots are running in production. The next action is conversion and outbound — not a sprint.
+            and two design-partner pilots are running in production. The next action is conversion and outbound, not a sprint.
           </p>
         </Section>
 

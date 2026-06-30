@@ -7,7 +7,7 @@ description: Founding vs list pricing for staffing firms; validated against Bull
 
 ## Context
 - **List pricing in Stripe today:** $499 platform + $29/active seat/month
-- **Pilots:** Myticas + STSI — complimentary, not paying yet
+- **Pilots:** Myticas + STSI, complimentary, not paying yet
 - **COGS:** Near-zero (customer pays for AI; Railway + Supabase scale cheaply)
 
 ## What target customers already pay
@@ -30,21 +30,21 @@ description: Founding vs list pricing for staffing firms; validated against Bull
 
 ### Offer as **founding customer conversion** (Myticas, STSI, next ~3 firms)
 - **$399/mo flat** for up to **10 active seats**, 1 Bullhorn connector, month-to-month
-- Effective **~$40/seat** at full utilization — feels like an add-on, not a second ATS
-- Frame: "Founding customer rate through 2026 — locks in before list pricing"
+- Effective **~$40/seat** at full utilization; feels like an add-on, not a second ATS
+- Frame: "Founding customer rate through 2026. Locks in before list pricing."
 
 ### Why $399 flat beats lowering per-seat only
 - Small firms hate mental math on platform + seats
-- $399 is **<3%** of recovered productivity on a 10-seat desk — true no-brainer
+- $399 is **<3%** of recovered productivity on a 10-seat desk; true no-brainer
 - Still **~95% gross margin**
-- Avoid going below **$299/mo** — signals "toy" vs professional infrastructure
+- Avoid going below **$299/mo**; signals "toy" vs professional infrastructure
 
 ### Do NOT discount further without data
-- Pilots are free — conversion price should feel like a step-up, not a bargain bin
+- Pilots are free. Conversion price should feel like a step-up, not a bargain bin.
 - Gather from Myticas/STSI: "What would you expect to pay?" before changing Stripe
 
 ## When to update Stripe
-After first pilot agrees to convert — add a Stripe Price for founding flat plan OR coupon on existing products.
+After first pilot agrees to convert, add a Stripe Price for founding flat plan OR coupon on existing products.
 
 ## Customer-facing URL
 https://connect.asktoact.ai/exec-summary/customer

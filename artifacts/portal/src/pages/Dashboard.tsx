@@ -155,7 +155,7 @@ export default function Dashboard() {
             Welcome back, {firstName} 👋
           </h1>
           <p className="text-sm" style={{ color: "#4A5568" }}>
-            Your team's AI portal — manage access, view activity, and stay in control.
+            Your team's AI portal: manage access, view activity, and stay in control.
           </p>
         </div>
 

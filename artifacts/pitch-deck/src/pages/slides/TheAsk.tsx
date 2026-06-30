@@ -1,9 +1,10 @@
+import { LogoWordmark } from "@/components/Logo";
 import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
 
 const ASKS = [
   {
     title: "Pilot check-ins",
-    body: "30-day reviews with Myticas and STSI — usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.",
+    body: "30-day reviews with Myticas and STSI: usage, recruiter feedback, ROI signals. Decide when to convert to founding pricing.",
     accent: "accent" as const,
   },
   {
@@ -13,7 +14,7 @@ const ASKS = [
   },
   {
     title: "Send the customer brief",
-    body: "connect.asktoact.ai/exec-summary/customer — share with the next 3–5 Bullhorn firms in pipeline.",
+    body: "connect.asktoact.ai/exec-summary/customer: share with the next 3–5 Bullhorn firms in pipeline.",
     accent: "gold" as const,
   },
 ];
@@ -32,15 +33,15 @@ export default function TheAsk() {
       }
       subtitle={
         <SlideSubtitle>
-          Myticas and STSI are running complimentary production pilots on connect.asktoact.ai — 62+ Bullhorn actions live.
+          Myticas and STSI are running complimentary production pilots on connect.asktoact.ai, with 62+ Bullhorn actions live.
           Next: 30-day check-ins, founding-customer conversion at $399/mo, and outbound to the next firms.
         </SlideSubtitle>
       }
       footer={
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div className="font-display font-bold pd-h2 text-text leading-tight max-w-[36rem]">
-            AskToAct
-            <span className="text-muted font-display font-medium pd-body"> · We sell the rails, not the chatbot.</span>
+          <div className="flex flex-col gap-2 max-w-[36rem]">
+            <LogoWordmark vw={3} />
+            <span className="font-body pd-small text-muted leading-snug">We sell the rails, not the chatbot.</span>
           </div>
           <div className="font-body pd-small text-muted md:text-right shrink-0">
             <div className="text-accent font-display font-semibold">connect.asktoact.ai</div>

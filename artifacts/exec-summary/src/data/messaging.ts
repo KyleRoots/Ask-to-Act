@@ -1,4 +1,4 @@
-/** Shared GTM copy — keep pitch deck and exec-summary aligned manually for now. */
+/** Shared GTM copy. Keep pitch deck and exec-summary aligned manually for now. */
 
 export const TOOL_SUMMARY = "62+ recruiting actions (33 read · 29 write)";
 
