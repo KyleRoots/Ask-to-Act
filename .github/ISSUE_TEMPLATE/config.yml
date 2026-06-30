@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: AskToAct Portal — Support & Feedback
-    url: https://connect.asktoact.ai/support
+    url: https://connect.asktoact.ai/portal/support
     about: End users should submit bugs, features, and questions here (not GitHub).
-  - name: Support inbox
-    url: mailto:support@asktoact.ai
-    about: Customer emails land in SUPPORT_EMAIL. Triage them into GitHub issues using the templates below.
+  - name: Support inbox — triage guide
+    url: https://github.com/KyleRoots/Ask-to-Act/blob/main/docs/support-triage.md
+    about: Customer email arrives at support@asktoact.ai (SUPPORT_EMAIL). Read this guide, then file an issue using a template below.
