@@ -23,7 +23,7 @@ function LogoIcon({ size = 40 }: { size?: number }) {
 }
 
 const features = [
-  { icon: "🤖", title: "AI-powered ATS access", body: "Your team uses ChatGPT, Claude, or Gemini to search, read, and update Bullhorn directly from chat — no manual searching." },
+  { icon: "🤖", title: "AI-powered ATS access", body: "Your team uses ChatGPT, Claude, or Gemini to search, read, and update Bullhorn directly from chat, with no manual searching." },
   { icon: "🔒", title: "Permission-aware", body: "Every AI action respects each recruiter's existing Bullhorn permissions automatically." },
   { icon: "📊", title: "Team usage insights", body: "See who's using AI tools, how often, and where it's making the biggest impact." },
 ];
@@ -78,7 +78,7 @@ export default function Home() {
 
         <p className="text-lg mb-10" style={{ color: "#6B7A99", lineHeight: "1.7" }}>
           Manage your team's access to AI tools that connect directly
-          to your recruiting system — no IT setup required.
+          to your recruiting system. No IT setup required.
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-md sm:max-w-none mx-auto">

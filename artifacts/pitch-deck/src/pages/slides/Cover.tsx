@@ -1,4 +1,4 @@
-import { LogoIcon } from "@/components/Logo";
+import { LogoWordmark } from "@/components/Logo";
 
 export default function Cover() {
   return (
@@ -6,10 +6,10 @@ export default function Cover() {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(79,70,229,0.22),_transparent_55%)] pointer-events-none" aria-hidden />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(56,189,248,0.14),_transparent_50%)] pointer-events-none" aria-hidden />
 
-      <header className="relative z-10 pd-slide-x pd-slide-pt pb-4 flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <LogoIcon vw={3.2} />
-          <span className="font-display pd-eyebrow tracking-[0.25em] uppercase text-muted leading-snug max-w-[14rem] sm:max-w-none">
+      <header className="relative z-10 pd-slide-x pd-slide-pt pb-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-col gap-2 min-w-0">
+          <LogoWordmark vw={3} />
+          <span className="font-display pd-eyebrow tracking-[0.25em] uppercase text-muted leading-snug">
             Investor & Customer Briefing
           </span>
         </div>

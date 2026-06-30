@@ -1,6 +1,9 @@
+import { useId } from "react";
+
 export function LogoIcon({ vw = 3 }: { vw?: number }) {
+  const uid = useId().replace(/:/g, "");
   const size = `clamp(28px, ${vw}vw, 56px)`;
-  const id = `ata-pd-${vw}`;
+  const id = `ata-pd-${uid}`;
   return (
     <svg
       width={size}

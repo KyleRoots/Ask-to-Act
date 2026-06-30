@@ -41,7 +41,7 @@ export function SlideShell({
         </div>
         {!hideLogo ? (
           <div className="shrink-0 pd-logo-wrap">
-            <LogoWordmark vw={2.2} />
+            <LogoWordmark vw={3} />
           </div>
         ) : null}
       </header>

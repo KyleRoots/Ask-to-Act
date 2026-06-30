@@ -205,3 +205,49 @@ body:not(.pd-scrollable) #root {
 .pd-cover-tagline {
   font-size: clamp(1.25rem, 3.2vw, 2.75rem);
 }
+
+/* Side-by-side founding + list pricing on wider phones */
+.pd-pricing-highlight-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+@media (min-width: 480px) {
+  .pd-pricing-highlight-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Slide 3 (business model): tighter mobile layout, extra scroll room at bottom */
+@media (max-width: 767px) {
+  .pd-dense main {
+    gap: 0.65rem;
+    padding-bottom: max(clamp(2.5rem, 8vh, 4rem), env(safe-area-inset-bottom, 0px));
+  }
+
+  .pd-dense .pd-grid-2 {
+    gap: 0.75rem;
+  }
+
+  .pd-dense .pd-pricing-col {
+    gap: 0.65rem;
+  }
+
+  .pd-dense .pd-pricing-box {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .pd-dense .pd-margin-panel {
+    padding: 0.875rem 1rem;
+  }
+
+  .pd-dense .pd-margin-row {
+    margin-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .pd-dense .pd-margin-row-optional {
+    display: none;
+  }
+}

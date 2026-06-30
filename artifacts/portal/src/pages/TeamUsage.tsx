@@ -144,7 +144,7 @@ export default function TeamUsage() {
               <div>
                 <h3 className="text-base font-semibold text-white">Per-user activity</h3>
                 <p className="text-xs mt-1" style={{ color: "#3A4460" }}>
-                  Tool calls by team member — expand a row for the per-tool breakdown
+                  Tool calls by team member. Expand a row for the per-tool breakdown.
                 </p>
               </div>
               <select

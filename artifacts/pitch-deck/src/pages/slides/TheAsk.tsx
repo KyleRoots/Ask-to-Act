@@ -1,3 +1,4 @@
+import { LogoWordmark } from "@/components/Logo";
 import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
 
 const ASKS = [
@@ -38,9 +39,9 @@ export default function TheAsk() {
       }
       footer={
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div className="font-display font-bold pd-h2 text-text leading-tight max-w-[36rem]">
-            AskToAct
-            <span className="text-muted font-display font-medium pd-body"> · We sell the rails, not the chatbot.</span>
+          <div className="flex flex-col gap-2 max-w-[36rem]">
+            <LogoWordmark vw={3} />
+            <span className="font-body pd-small text-muted leading-snug">We sell the rails, not the chatbot.</span>
           </div>
           <div className="font-body pd-small text-muted md:text-right shrink-0">
             <div className="text-accent font-display font-semibold">connect.asktoact.ai</div>
