@@ -34,7 +34,7 @@ Customer email / Portal / MCP create_support_ticket
 ## Triage checklist (per email)
 
 1. Open the message in your `SUPPORT_EMAIL` inbox.
-2. In [GitHub Issues](https://github.com/kyleroots/ask-to-act/issues/new/choose), pick the matching template:
+2. In [GitHub Issues](https://github.com/KyleRoots/Ask-to-Act/issues/new/choose), pick the matching template:
    - **Bug report** — something broken
    - **Feature request** — enhancement idea
    - **Support question** — how-to / config (may not need code)
