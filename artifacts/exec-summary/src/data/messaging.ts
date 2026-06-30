@@ -1,5 +1,11 @@
 /** Shared GTM copy. Keep pitch deck and exec-summary aligned manually for now. */
 
+/** Primary AI platforms customers already pay for (use in body copy). */
+export const AI_TOOLS_SHORT = "ChatGPT, Claude, or Gemini";
+
+/** Stacking-cost line for ROI / pricing sections. */
+export const AI_SUBSCRIPTION_COST_RANGE = "$25–$30/user on ChatGPT, Claude, or Gemini";
+
 export const TOOL_SUMMARY = "62+ recruiting actions (33 read · 29 write)";
 
 export const PILOT_FIRMS = [

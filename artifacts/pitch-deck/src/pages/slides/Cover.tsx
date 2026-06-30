@@ -36,7 +36,7 @@ export default function Cover() {
           </span>
         </div>
         <p className="font-body pd-body text-muted max-w-[36rem] leading-relaxed">
-          The recruiter types in ChatGPT. The right thing happens in Bullhorn, with their own permissions enforced, every action audited, and no copy-paste in between.
+          The recruiter uses the AI they already pay for. The right thing happens in Bullhorn, with their own permissions enforced, every action audited, and no copy-paste in between.
         </p>
       </main>
 

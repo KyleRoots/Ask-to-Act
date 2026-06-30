@@ -14,7 +14,7 @@ description: Founding vs list pricing for staffing firms; validated against Bull
 | Layer | Typical cost |
 |---|---|
 | Bullhorn ATS | ~$99–$165/user/mo (often higher with CRM/automation add-ons) |
-| ChatGPT Team / Claude | ~$25–$30/user/mo |
+| ChatGPT Team / Claude / Gemini | ~$25–$30/user/mo |
 | **Stack without AskToAct** | **~$124–$195/user/mo** with no bridge |
 
 ## Copy-paste tax (ROI anchor)

@@ -1,4 +1,6 @@
 import {
+  AI_SUBSCRIPTION_COST_RANGE,
+  AI_TOOLS_SHORT,
   FOUNDING_PRICING,
   LIST_PRICING,
   PILOT_FIRMS,
@@ -79,7 +81,7 @@ export default function ExecSummary() {
         <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.25)', borderLeft: '3px solid #38bdf8', borderRadius: '0.75rem', padding: '1.5rem 1.75rem', maxWidth: '680px' }}>
           <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>The 30-Second Version</div>
           <p style={{ fontSize: '1rem', color: '#e2e8f0', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
-            "Your recruiters already pay for ChatGPT or Claude. AskToAct makes it actually do something inside their ATS, with their own Bullhorn permissions enforced server-side, duplicate-proof writes, and a full audit trail on every action. They don't replace the AI. They don't replace the ATS. We close the loop between them. Live in under 30 minutes. No IT department required."
+            {`"Your recruiters already pay for ${AI_TOOLS_SHORT}. AskToAct makes it actually do something inside their ATS, with their own Bullhorn permissions enforced server-side, duplicate-proof writes, and a full audit trail on every action. They don't replace the AI. They don't replace the ATS. We close the loop between them. Live in under 30 minutes. No IT department required."`}
           </p>
         </div>
       </div>
@@ -90,7 +92,7 @@ export default function ExecSummary() {
         <div className="es-grid-3" style={{ marginBottom: '4rem' }}>
           <Stat number="~$1,560" label="Monthly productivity lost per recruiter seat to AI copy-paste (6h/wk × $60/hr burdened). A 10-seat desk loses ~$15,600/mo; AskToAct costs $789/mo for those 10 seats, a ~20× return." />
           <Stat number="$0" label="Audit trail at competing firms: no system captures what the AI was asked to do, what it returned, or what changed" accent="#fbbf24" />
-          <Stat number="62+" label={`Recruiting actions live in production: ${TOOL_SUMMARY}: search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload, directly from ChatGPT or Claude`} accent="#4ade80" />
+          <Stat number="62+" label={`Recruiting actions live in production: ${TOOL_SUMMARY}: search, read, submit, note, status changes, jobs, companies, contacts, tasks, placements, résumé upload, directly from ${AI_TOOLS_SHORT}`} accent="#4ade80" />
         </div>
 
         {/* Section: The Problem */}
@@ -105,7 +107,7 @@ export default function ExecSummary() {
             response and a system of record. As AI usage scales across a desk, the copy-paste tax scales with it.
           </p>
           <p style={bodyStyle}>
-            There's a second problem: governance. When a recruiter uses ChatGPT to draft an outreach sequence and
+            There's a second problem: governance. When a recruiter uses their AI assistant to draft an outreach sequence and
             manually inputs candidates into Bullhorn, there is no record of what prompt produced what data,
             what the AI recommended, or who changed what. Enterprise buyers ask for this. No AI tooling today offers it.
           </p>
@@ -121,12 +123,12 @@ export default function ExecSummary() {
             AskToAct translates it into a validated, permissioned API call; the system of record does the work.
           </p>
           <p style={bodyStyle}>
-            From the recruiter's perspective: they type in ChatGPT. The right thing happens in Bullhorn.
+            From the recruiter's perspective: they use the AI they already pay for. The right thing happens in Bullhorn.
             They never leave the AI interface.
           </p>
 
           <div className="es-grid-3" style={{ margin: '2rem 0' }}>
-            <FlowBox label="AI" sub="ChatGPT, Claude, Gemini (whatever the customer uses)" highlight={false} />
+            <FlowBox label="AI" sub={`${AI_TOOLS_SHORT} (whatever the customer uses)`} highlight={false} />
             <FlowBox label="AskToAct" sub="Permissions · Translation · Audit" highlight={true} />
             <FlowBox label="Systems" sub="Bullhorn, Salesforce, Workday, ADP" highlight={false} />
           </div>
@@ -174,7 +176,7 @@ export default function ExecSummary() {
           <div style={{ fontSize: '0.7rem', color: '#38bdf8', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>Why It's a No-Brainer</div>
           <div className="es-grid-2">
             <NoBrainerItem icon="✓" title="Zero lock-in" body="Built on MCP, the open standard adopted by ChatGPT, Claude, and Gemini. If a better model launches tomorrow, it still works. Customers aren't betting on a proprietary platform." />
-            <NoBrainerItem icon="✓" title="Minimal setup" body="Self-serve onboarding: admin provisions seats, recruiters connect their own Bullhorn accounts via OAuth, paste a URL into ChatGPT. Live in under 30 minutes. No IT department, no implementation project." />
+            <NoBrainerItem icon="✓" title="Minimal setup" body={`Self-serve onboarding: admin provisions seats, recruiters connect their own Bullhorn accounts via OAuth, paste a URL into their AI tool (${AI_TOOLS_SHORT}). Live in under 30 minutes. No IT department, no implementation project.`} />
             <NoBrainerItem icon="✓" title="Month-to-month, cancel anytime" body="No long-term commitment required. The product has to earn its place on the budget every month. That's the model, and it's by design." />
             <NoBrainerItem icon="✓" title="Works with AI they already have" body="AskToAct doesn't sell an AI assistant. It connects to whatever the customer already pays for: ChatGPT, Claude, Gemini, or anything else MCP-compatible." />
           </div>
@@ -187,7 +189,7 @@ export default function ExecSummary() {
           <p style={bodyStyle}>
             AskToAct runs on stacked recurring revenue: a monthly platform fee, per-active-user fees, and optional connection add-ons.
             Customers pay for their own AI. Against a typical staffing stack: Bullhorn at $99–$165/user/month
-            plus ChatGPT at $25–$30/user. AskToAct is an incremental bridge, not another full platform license.
+            plus {AI_SUBSCRIPTION_COST_RANGE}. AskToAct is an incremental bridge, not another full platform license.
           </p>
 
           <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.25)', borderRadius: '0.75rem', padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
@@ -234,7 +236,7 @@ export default function ExecSummary() {
               <OnboardStep num="1" label="Firm signs up" desc="Admin account provisioned via subscription gate" />
               <OnboardStep num="2" label="Seats provisioned" desc="Admin creates recruiter accounts from their dashboard" />
               <OnboardStep num="3" label="Self-serve enrollment" desc="Each recruiter OAuth-connects their own Bullhorn account" />
-              <OnboardStep num="4" label="Paste and go" desc="Recruiter pastes their personal MCP URL into ChatGPT or Claude" />
+              <OnboardStep num="4" label="Paste and go" desc={`Recruiter pastes their personal MCP URL into their AI tool (${AI_TOOLS_SHORT})`} />
             </div>
           </div>
         </Section>
@@ -245,7 +247,7 @@ export default function ExecSummary() {
         <Section title="Market Opportunity · Where the Whitespace Is" index="05">
           <p style={bodyStyle}>
             The global staffing and recruiting market runs on legacy ATS platforms. Bullhorn alone serves 10,000+ firms.
-            Every desk adopting ChatGPT or Claude creates a new fracture: powerful AI on one side, the system of record on the other,
+            Every desk adopting AI tools creates a new fracture: powerful AI on one side, the system of record on the other,
             and a human recruiter manually bridging the gap. No incumbent owns that middle layer.
           </p>
           <p style={bodyStyle}>
@@ -260,7 +262,7 @@ export default function ExecSummary() {
             are starting to ask. AskToAct logs every tool call with firm and user attribution from day one.
           </p>
           <p style={bodyStyle}>
-            Near-term ICP: mid-market staffing firms (10–100 recruiters) on Bullhorn who already pay for ChatGPT Team or Enterprise
+            Near-term ICP: mid-market staffing firms (10–100 recruiters) on Bullhorn who already pay for ChatGPT Team, Claude Pro, or Gemini
             and lack engineering resources to build native integrations. Long-term: required middleware for the recruiting stack:
             the open MCP standard (ChatGPT, Claude, Gemini) means the wedge compounds with every connected system.
           </p>
@@ -291,7 +293,7 @@ export default function ExecSummary() {
             <p style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: 1.7, margin: 0 }}>
               {TOOL_SUMMARY} on Bullhorn, per-user OAuth enforced, full audit logging active. Recruiters search candidates,
               read profiles and résumés, create and advance submissions, add notes, manage jobs and contacts, record placements,
-              and upload résumés, directly from ChatGPT or Claude, with no elevated permissions and no manual copy-paste.
+              and upload résumés, directly from {AI_TOOLS_SHORT}, with no elevated permissions and no manual copy-paste.
               This is not a prototype. It is a functioning product on a real ATS with a production custom domain.
             </p>
           </div>
