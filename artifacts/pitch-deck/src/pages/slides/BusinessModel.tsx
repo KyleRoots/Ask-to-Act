@@ -52,7 +52,8 @@ export default function BusinessModel() {
           <MarginRow seats="50 seats · 2 connectors" infra="~$60–100 infra / mo" revenue="~$2.2k / mo" margin="~95% GM" />
           <MarginRow seats="100 seats · 3 connectors" infra="~$100–150 infra / mo" revenue="~$4k / mo" margin="~96% GM" last className="pd-margin-row-optional" />
           <p className="mt-4 pt-4 border-t border-line font-body pd-small text-muted leading-snug">
-            AI cost is borne by the customer. Infrastructure cost per seat falls with volume. Each new seat is near-zero incremental cost.
+            Customers pay for their own AI. We earn from the platform fee, active-user fees, and extra connections.
+            Hosting costs don't rise much as customers grow, so expansion is high-margin.
           </p>
         </div>
       </div>

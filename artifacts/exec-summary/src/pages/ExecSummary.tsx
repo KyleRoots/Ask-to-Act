@@ -185,8 +185,8 @@ export default function ExecSummary() {
         {/* Section: Business Model */}
         <Section title="How It Makes Money" index="04">
           <p style={bodyStyle}>
-            AskToAct runs on stacked recurring streams plus an optional onboarding fee. Infrastructure cost per seat is low;
-            the AI cost is borne entirely by the customer. Against a typical staffing stack: Bullhorn at $99–$165/user/month
+            AskToAct runs on stacked recurring revenue: a monthly platform fee, per-active-user fees, and optional connection add-ons.
+            Customers pay for their own AI. Against a typical staffing stack: Bullhorn at $99–$165/user/month
             plus ChatGPT at $25–$30/user. AskToAct is an incremental bridge, not another full platform license.
           </p>
 
@@ -220,8 +220,10 @@ export default function ExecSummary() {
               <PricingRow seats="25 active seats · 1 connector" range="~$1,200 / mo" margin="~95% GM" />
               <PricingRow seats="50 active seats · 2 connectors" range="~$2,200 / mo" margin="~95% GM" />
               <PricingRow seats="100 active seats · 3 connectors" range="~$4,000 / mo" margin="~96% GM" />
-              <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.5 }}>
-                AI cost is borne entirely by the customer. Infrastructure cost per seat is $30–150/mo depending on firm size and falls with volume. Each new seat added is near-zero incremental cost, so expansion revenue is effectively pure margin.
+              <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '1.5rem', lineHeight: 1.6 }}>
+                Customers pay for their own AI usage; that cost never sits on our books. We earn from the monthly platform fee,
+                fees for each active user, and additional system connections. Our hosting costs are largely fixed, so when a
+                customer adds users, our costs barely increase. Customer growth is high-margin for us.
               </p>
             </div>
           </div>
