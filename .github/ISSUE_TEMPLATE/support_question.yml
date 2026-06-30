@@ -1,0 +1,57 @@
+name: Support question (from support email)
+description: Triage a how-to or configuration question that may not need code changes
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for setup help, billing, permissions, or "how do I..." emails.
+        Many questions can be answered by email without a PR. If the answer reveals a product gap, convert to a bug or feature issue.
+
+  - type: input
+    id: reporter-email
+    attributes:
+      label: Reporter email
+    validations:
+      required: true
+
+  - type: input
+    id: reporter-name
+    attributes:
+      label: Reporter name
+
+  - type: input
+    id: email-subject
+    attributes:
+      label: Original email subject
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What does the customer need to know or do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: email-body
+    attributes:
+      label: Original email (paste)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: resolution
+    attributes:
+      label: Likely resolution
+      options:
+        - Reply by email only (no code change)
+        - Docs / portal copy update
+        - Bug — file separately
+        - Feature — file separately
+        - Needs engineering investigation
+    validations:
+      required: true

@@ -1,0 +1,76 @@
+name: Feature request (from support email)
+description: Triage a customer enhancement idea from the support inbox
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when a support email asks for new connector capability or a workflow improvement.
+        Product decisions belong here before an agent implements — confirm scope in a comment, then launch a Cloud Agent.
+
+  - type: input
+    id: reporter-email
+    attributes:
+      label: Reporter email
+    validations:
+      required: true
+
+  - type: input
+    id: reporter-name
+    attributes:
+      label: Reporter name
+
+  - type: input
+    id: firm
+    attributes:
+      label: Firm / tenant
+
+  - type: input
+    id: email-subject
+    attributes:
+      label: Original email subject
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What workflow pain does this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the connector do differently?
+    validations:
+      required: true
+
+  - type: textarea
+    id: email-body
+    attributes:
+      label: Original email (paste)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Suggested priority
+      options:
+        - High — multiple customers / revenue impact
+        - Medium — useful improvement
+        - Low — nice to have
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: agent-ready
+    attributes:
+      label: Ready for Cloud Agent?
+      options:
+        - label: Scope is agreed — agent may implement (remove `needs-triage` when checked)
+          required: false
