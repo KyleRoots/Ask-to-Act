@@ -651,14 +651,14 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate(`/firms/${firmId}/setup`)}
+            onClick={() => navigate(`/firms/${firmId}/setup?mode=reconnect`)}
             className="text-sm px-3 py-1.5 rounded-lg transition-colors"
             style={{ color: "#818CF8", border: "1px solid rgba(129,140,248,.3)" }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "#A5B4FC"; e.currentTarget.style.borderColor = "rgba(129,140,248,.55)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = "#818CF8"; e.currentTarget.style.borderColor = "rgba(129,140,248,.3)"; }}
           >
-            <span className="hidden sm:inline">Bullhorn setup</span>
-            <span className="sm:hidden">Setup</span>
+            <span className="hidden sm:inline">Reconnect Bullhorn</span>
+            <span className="sm:hidden">Reconnect</span>
           </button>
           <button
             onClick={() => { clearToken(); navigate("/login"); }}
@@ -698,7 +698,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
               </div>
               <button
                 type="button"
-                onClick={() => navigate(`/firms/${firmId}/setup`)}
+                onClick={() => navigate(`/firms/${firmId}/setup?mode=reconnect`)}
                 className="text-sm px-4 py-2 rounded-lg shrink-0 font-medium transition-colors"
                 style={{ background: "rgba(248,113,113,.15)", color: "#FECACA", border: "1px solid rgba(248,113,113,.35)" }}
               >
