@@ -28,6 +28,17 @@ const STEPS: { id: StepId; label: string }[] = [
   { id: "summary", label: "Done" },
 ];
 
+const RECONNECT_STEPS: { id: StepId; label: string }[] = [
+  { id: "connect", label: "Re-authorize" },
+  { id: "discover", label: "Re-discover fields" },
+  { id: "verify", label: "Verify" },
+];
+
+function isReconnectMode(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("mode") === "reconnect";
+}
+
 function inputStyle(): React.CSSProperties {
   return { background: INPUT_BG, border: `1.5px solid ${INPUT_BORDER}` };
 }
@@ -107,11 +118,11 @@ function ErrorNote({ message }: { message: string }) {
   );
 }
 
-function Stepper({ current }: { current: StepId }) {
-  const currentIdx = STEPS.findIndex((s) => s.id === current);
+function Stepper({ current, steps = STEPS }: { current: StepId; steps?: typeof STEPS }) {
+  const currentIdx = steps.findIndex((s) => s.id === current);
   return (
     <div className="flex items-center gap-1.5 sm:gap-2 mb-8 overflow-x-auto pb-1">
-      {STEPS.map((s, i) => {
+      {steps.map((s, i) => {
         const done = i < currentIdx;
         const active = i === currentIdx;
         return (
@@ -139,7 +150,7 @@ function Stepper({ current }: { current: StepId }) {
                 {s.label}
               </span>
             </div>
-            {i < STEPS.length - 1 && (
+            {i < steps.length - 1 && (
               <span className="w-3 sm:w-5 h-px shrink-0" style={{ background: BORDER }} />
             )}
           </div>
@@ -170,6 +181,8 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const reconnectMode = useMemo(() => isReconnectMode(), []);
+  const wizardSteps = reconnectMode ? RECONNECT_STEPS : STEPS;
 
   // null until a firm exists (created here or resumed). When resuming we begin in
   // a "resolving" state while we figure out which step the firm left off on.
@@ -191,6 +204,15 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
       } catch {
         /* name is best-effort */
       }
+
+      if (reconnectMode) {
+        if (!cancelled) {
+          setStep("connect");
+          setResolving(false);
+        }
+        return;
+      }
+
       try {
         const status = await api.bullhornStatus(firmIdProp);
         if (cancelled) return;
@@ -208,7 +230,7 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
       }
     })();
     return () => { cancelled = true; };
-  }, [firmIdProp]);
+  }, [firmIdProp, reconnectMode]);
 
   function goTo(next: StepId) {
     setStep(next);
@@ -222,7 +244,7 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
       >
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate("/firms")}
+            onClick={() => navigate(reconnectMode && firmId ? `/firms/${firmId}` : "/firms")}
             className="flex items-center gap-1.5 text-sm transition-colors shrink-0"
             style={{ color: "#6B7A99" }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "#E2E8F0"; }}
@@ -247,16 +269,24 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
       <main className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
         <div className="mb-7">
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-            {firmIdProp ? "Continue setup" : "New organization"}
+            {reconnectMode
+              ? "Reconnect Bullhorn"
+              : firmIdProp
+                ? "Continue setup"
+                : "New organization"}
           </h1>
           <p className="text-sm mt-1" style={{ color: "#6B7A99" }}>
-            {firmName
-              ? `Onboarding ${firmName} onto its own Bullhorn workspace.`
-              : "Onboard a customer firm onto its own Bullhorn workspace."}
+            {reconnectMode
+              ? firmName
+                ? `Re-authorize and verify ${firmName}'s Bullhorn connection.`
+                : "Re-authorize and verify this firm's Bullhorn connection."
+              : firmName
+                ? `Onboarding ${firmName} onto its own Bullhorn workspace.`
+                : "Onboard a customer firm onto its own Bullhorn workspace."}
           </p>
         </div>
 
-        <Stepper current={step} />
+        <Stepper current={step} steps={wizardSteps} />
 
         {resolving ? (
           <Card>
@@ -276,13 +306,38 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
               />
             )}
             {step === "connect" && firmId && (
-              <ConnectStep firmId={firmId} onBack={() => goTo("create")} onConnected={() => goTo("discover")} />
+              <ConnectStep
+                firmId={firmId}
+                reconnectMode={reconnectMode}
+                onBack={() => (reconnectMode ? navigate(`/firms/${firmId}`) : goTo("create"))}
+                onConnected={() => goTo("discover")}
+              />
             )}
             {step === "discover" && firmId && (
-              <DiscoverStep firmId={firmId} onBack={() => goTo("connect")} onDone={() => goTo("verify")} />
+              <DiscoverStep
+                firmId={firmId}
+                reconnectMode={reconnectMode}
+                onBack={() => goTo("connect")}
+                onDone={() => goTo("verify")}
+              />
             )}
             {step === "verify" && firmId && (
-              <VerifyStep firmId={firmId} onBack={() => goTo("discover")} onDone={() => goTo("admin")} />
+              <VerifyStep
+                firmId={firmId}
+                onBack={() => goTo("discover")}
+                doneLabel={reconnectMode ? "Finish →" : "Continue →"}
+                onDone={() => {
+                  if (reconnectMode) {
+                    queryClient.invalidateQueries({ queryKey: ["firms"] });
+                    queryClient.invalidateQueries({ queryKey: ["firm", firmId] });
+                    queryClient.invalidateQueries({ queryKey: ["bh-status", firmId] });
+                    navigate(`/firms/${firmId}`);
+                    toast({ title: "Bullhorn reconnected ✓" });
+                    return;
+                  }
+                  goTo("admin");
+                }}
+              />
             )}
             {step === "admin" && firmId && (
               <AdminStep
@@ -370,10 +425,12 @@ function CreateStep({
 
 function ConnectStep({
   firmId,
+  reconnectMode = false,
   onBack,
   onConnected,
 }: {
   firmId: string;
+  reconnectMode?: boolean;
   onBack: () => void;
   onConnected: () => void;
 }) {
@@ -407,8 +464,12 @@ function ConnectStep({
   return (
     <Card>
       <StepHeading
-        title="Connect Bullhorn"
-        subtitle="Authorize this firm's Bullhorn workspace. A new tab opens for the Bullhorn sign-in — this page detects the connection automatically."
+        title={reconnectMode ? "Re-authorize Bullhorn" : "Connect Bullhorn"}
+        subtitle={
+          reconnectMode
+            ? "Open Bullhorn sign-in to replace the stored OAuth token. Use this after a password change, revoked consent, or when verification fails."
+            : "Authorize this firm's Bullhorn workspace. A new tab opens for the Bullhorn sign-in — this page detects the connection automatically."
+        }
       />
 
       {healthy ? (
@@ -489,10 +550,12 @@ function ConnectStep({
 
 function DiscoverStep({
   firmId,
+  reconnectMode = false,
   onBack,
   onDone,
 }: {
   firmId: string;
+  reconnectMode?: boolean;
   onBack: () => void;
   onDone: () => void;
 }) {
@@ -511,8 +574,12 @@ function DiscoverStep({
   return (
     <Card>
       <StepHeading
-        title="Discover field configuration"
-        subtitle="Bullhorn custom fields differ per firm. This inspects the workspace and maps the 'Internal Department' field for each entity."
+        title={reconnectMode ? "Re-discover field configuration" : "Discover field configuration"}
+        subtitle={
+          reconnectMode
+            ? "Re-inspect the workspace after reconnecting. Custom field mappings are refreshed from live Bullhorn metadata."
+            : "Bullhorn custom fields differ per firm. This inspects the workspace and maps the 'Internal Department' field for each entity."
+        }
       />
 
       {!summary && (
@@ -583,10 +650,12 @@ function VerifyStep({
   firmId,
   onBack,
   onDone,
+  doneLabel = "Continue →",
 }: {
   firmId: string;
   onBack: () => void;
   onDone: () => void;
+  doneLabel?: string;
 }) {
   const [result, setResult] = useState<VerifyResult | null>(null);
 
@@ -633,7 +702,7 @@ function VerifyStep({
       <div className="flex justify-between pt-1">
         <GhostButton onClick={onBack}>← Back</GhostButton>
         <PrimaryButton onClick={onDone} disabled={!result?.ok}>
-          Continue →
+          {doneLabel}
         </PrimaryButton>
       </div>
     </Card>
@@ -660,6 +729,18 @@ function AdminStep({
     queryFn: () => api.getFirm(firmId),
   });
 
+  const usersQuery = useQuery({
+    queryKey: ["firm-users", firmId],
+    queryFn: () => api.listUsers(firmId),
+  });
+
+  const existingAdmins = useMemo(
+    () => (usersQuery.data ?? []).filter((u) => u.role === "admin"),
+    [usersQuery.data],
+  );
+  const hasExistingAdmin = existingAdmins.length > 0;
+  const canFinish = !!created || hasExistingAdmin;
+
   const status = firmQuery.data?.subscriptionStatus;
   const billingReady = status === "active" || status === "trialing";
 
@@ -683,7 +764,7 @@ function AdminStep({
         subtitle="Create the firm's first administrator. They can invite the rest of the team and manage the workspace."
       />
 
-      {firmQuery.isLoading ? (
+      {firmQuery.isLoading || usersQuery.isLoading ? (
         <p className="text-sm mb-6" style={{ color: "#6B7A99" }}>Checking firm status…</p>
       ) : created ? (
         <div className="space-y-4 mb-6">
@@ -712,6 +793,29 @@ function AdminStep({
                 Copy
               </button>
             </div>
+          </div>
+        </div>
+      ) : hasExistingAdmin ? (
+        <div className="space-y-4 mb-6">
+          <div
+            className="rounded-xl px-4 py-4"
+            style={{ background: "rgba(16,185,129,.08)", border: "1px solid rgba(52,211,153,.2)" }}
+          >
+            <p className="text-sm font-medium" style={{ color: "#6EE7B7" }}>
+              Admin already configured
+            </p>
+            <ul className="mt-2 space-y-1">
+              {existingAdmins.map((u) => (
+                <li key={u.id} className="text-xs" style={{ color: "#6B7A99" }}>
+                  {u.name ?? "Unnamed admin"}
+                  {u.email ? ` · ${u.email}` : ""}
+                  {u.enrolled ? " · enrolled" : " · invite pending"}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs mt-2" style={{ color: "#6B7A99" }}>
+              You can invite more users from the firm page after setup.
+            </p>
           </div>
         </div>
       ) : !billingReady ? (
@@ -774,7 +878,7 @@ function AdminStep({
 
       <div className="flex justify-between pt-1">
         <GhostButton onClick={onBack}>← Back</GhostButton>
-        <PrimaryButton onClick={onDone} disabled={!created}>
+        <PrimaryButton onClick={onDone} disabled={!canFinish}>
           Finish →
         </PrimaryButton>
       </div>
