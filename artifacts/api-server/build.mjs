@@ -138,6 +138,14 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     path.resolve(distDir, "migrations"),
     { recursive: true },
   );
+
+  // App schema migrations (drizzle journal + SQL). runAppMigrations() resolves
+  // these from dist/app-migrations next to the bundled index.mjs at startup.
+  await cp(
+    path.resolve(artifactDir, "../../lib/db/migrations"),
+    path.resolve(distDir, "app-migrations"),
+    { recursive: true },
+  );
 }
 
 buildAll().catch((err) => {

@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
+import { runAppMigrations } from "@workspace/db/run-migrations";
 import {
   getStripeSync,
   getUncachableStripeClient,
@@ -103,26 +104,59 @@ async function initStripe(): Promise<void> {
   }
 }
 
-// Retry ensureColumns up to 3 times with a short backoff to survive Neon
+// Retry DB setup up to 3 times with a short backoff to survive Neon
 // compute cold-starts (57P01 "terminating connection") during deployment.
+function isTransientDbError(err: unknown): boolean {
+  const code = (err as Record<string, unknown>)["code"];
+  return code === "57P01" || code === "ECONNRESET" || code === "ECONNREFUSED";
+}
+
+async function runAppMigrationsWithRetry(maxAttempts = 3, delayMs = 2000): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await runAppMigrations();
+      if (result.applied.length > 0) {
+        logger.info({ applied: result.applied }, "Database migrations applied");
+      } else {
+        logger.info("Database migrations up to date");
+      }
+      return;
+    } catch (err) {
+      if (attempt < maxAttempts && isTransientDbError(err)) {
+        logger.warn({ err, attempt }, `runAppMigrations attempt ${attempt} failed — retrying in ${delayMs}ms`);
+        await new Promise((res) => setTimeout(res, delayMs));
+        continue;
+      }
+      logger.error({ err }, "Database migrations failed");
+      if (process.env.NODE_ENV === "production") {
+        throw err;
+      }
+      logger.warn("Continuing without migrations (development only)");
+      return;
+    }
+  }
+}
+
 async function ensureColumnsWithRetry(maxAttempts = 3, delayMs = 2000): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       await ensureColumns();
       return;
     } catch (err) {
-      const code = (err as Record<string, unknown>)["code"];
-      if (attempt < maxAttempts && (code === "57P01" || code === "ECONNRESET" || code === "ECONNREFUSED")) {
+      if (attempt < maxAttempts && isTransientDbError(err)) {
         logger.warn({ err, attempt }, `ensureColumns attempt ${attempt} failed — retrying in ${delayMs}ms`);
         await new Promise((res) => setTimeout(res, delayMs));
       } else {
         logger.error({ err }, "ensureColumns failed after all attempts");
-        // Non-fatal: log and continue so the server can still start up.
+        if (process.env.NODE_ENV === "production") {
+          throw err;
+        }
       }
     }
   }
 }
 
+await runAppMigrationsWithRetry();
 await ensureColumnsWithRetry();
 await initStripe();
 
