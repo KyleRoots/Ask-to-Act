@@ -4,6 +4,10 @@
 # first-party SPAs (portal, admin) and static pages (exec-summary, pitch-deck),
 # all served on one origin under their path prefixes. Works on Railway, Render,
 # Fly.io, or any container host.
+#
+# Database migrations: applied automatically on api-server startup (see
+# artifacts/api-server/src/index.ts → runAppMigrations). SQL files are copied
+# into the bundle at build time (artifacts/api-server/build.mjs).
 
 # ---- Builder: install the workspace and build every piece ----
 FROM node:24-slim AS builder

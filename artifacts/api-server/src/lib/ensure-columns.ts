@@ -16,7 +16,10 @@ export async function ensureColumns(): Promise<void> {
 
     await client.query(`
       ALTER TABLE bullhorn_tokens
-        ADD COLUMN IF NOT EXISTS firm_id TEXT;
+        ADD COLUMN IF NOT EXISTS firm_id TEXT,
+        ADD COLUMN IF NOT EXISTS auth_healthy BOOLEAN NOT NULL DEFAULT true,
+        ADD COLUMN IF NOT EXISTS last_auth_error_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS last_auth_error TEXT;
     `);
 
     await client.query(`
@@ -28,6 +31,7 @@ export async function ensureColumns(): Promise<void> {
     console.info("[db] ensureColumns: schema columns verified/applied");
   } catch (err) {
     console.warn("[db] ensureColumns: migration warning —", (err as Error).message);
+    throw err;
   } finally {
     client.release();
   }
