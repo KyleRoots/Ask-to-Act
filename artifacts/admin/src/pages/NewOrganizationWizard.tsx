@@ -412,17 +412,35 @@ function ConnectStep({
       />
 
       {healthy ? (
-        <div
-          className="rounded-xl px-4 py-4 flex items-start gap-3 mb-6"
-          style={{ background: "rgba(16,185,129,.08)", border: "1px solid rgba(52,211,153,.2)" }}
-        >
-          <span>✓</span>
-          <div>
-            <p className="text-sm font-medium" style={{ color: "#6EE7B7" }}>Bullhorn connected</p>
-            <p className="text-xs mt-0.5" style={{ color: "#6B7A99" }}>
-              This firm's Bullhorn workspace is authorized and ready.
-            </p>
+        <div className="space-y-4 mb-6">
+          <div
+            className="rounded-xl px-4 py-4 flex items-start gap-3"
+            style={{ background: "rgba(16,185,129,.08)", border: "1px solid rgba(52,211,153,.2)" }}
+          >
+            <span>✓</span>
+            <div>
+              <p className="text-sm font-medium" style={{ color: "#6EE7B7" }}>Bullhorn connected</p>
+              <p className="text-xs mt-0.5" style={{ color: "#6B7A99" }}>
+                This firm's Bullhorn workspace is authorized and ready.
+                {needsReauth
+                  ? " If verification failed, use Re-authorize below — a stored token can look connected while being invalid."
+                  : null}
+              </p>
+            </div>
           </div>
+          <GhostButton onClick={openAuth} disabled={opening}>
+            {opening ? "Opening…" : "Re-authorize Bullhorn →"}
+          </GhostButton>
+          {launched && (
+            <div className="flex items-center gap-2 text-sm" style={{ color: "#6B7A99" }}>
+              <span
+                className="w-3.5 h-3.5 rounded-full border-2 border-t-transparent animate-spin shrink-0"
+                style={{ borderColor: "#818CF8", borderTopColor: "transparent" }}
+              />
+              Waiting for authorization to complete in the other tab…
+            </div>
+          )}
+          {openError && <ErrorNote message={openError} />}
         </div>
       ) : (
         <div className="space-y-4 mb-6">
