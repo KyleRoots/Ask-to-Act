@@ -660,6 +660,18 @@ function AdminStep({
     queryFn: () => api.getFirm(firmId),
   });
 
+  const usersQuery = useQuery({
+    queryKey: ["firm-users", firmId],
+    queryFn: () => api.listUsers(firmId),
+  });
+
+  const existingAdmins = useMemo(
+    () => (usersQuery.data ?? []).filter((u) => u.role === "admin"),
+    [usersQuery.data],
+  );
+  const hasExistingAdmin = existingAdmins.length > 0;
+  const canFinish = !!created || hasExistingAdmin;
+
   const status = firmQuery.data?.subscriptionStatus;
   const billingReady = status === "active" || status === "trialing";
 
@@ -683,7 +695,7 @@ function AdminStep({
         subtitle="Create the firm's first administrator. They can invite the rest of the team and manage the workspace."
       />
 
-      {firmQuery.isLoading ? (
+      {firmQuery.isLoading || usersQuery.isLoading ? (
         <p className="text-sm mb-6" style={{ color: "#6B7A99" }}>Checking firm status…</p>
       ) : created ? (
         <div className="space-y-4 mb-6">
@@ -712,6 +724,29 @@ function AdminStep({
                 Copy
               </button>
             </div>
+          </div>
+        </div>
+      ) : hasExistingAdmin ? (
+        <div className="space-y-4 mb-6">
+          <div
+            className="rounded-xl px-4 py-4"
+            style={{ background: "rgba(16,185,129,.08)", border: "1px solid rgba(52,211,153,.2)" }}
+          >
+            <p className="text-sm font-medium" style={{ color: "#6EE7B7" }}>
+              Admin already configured
+            </p>
+            <ul className="mt-2 space-y-1">
+              {existingAdmins.map((u) => (
+                <li key={u.id} className="text-xs" style={{ color: "#6B7A99" }}>
+                  {u.name ?? "Unnamed admin"}
+                  {u.email ? ` · ${u.email}` : ""}
+                  {u.enrolled ? " · enrolled" : " · invite pending"}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs mt-2" style={{ color: "#6B7A99" }}>
+              You can invite more users from the firm page after setup.
+            </p>
           </div>
         </div>
       ) : !billingReady ? (
@@ -774,7 +809,7 @@ function AdminStep({
 
       <div className="flex justify-between pt-1">
         <GhostButton onClick={onBack}>← Back</GhostButton>
-        <PrimaryButton onClick={onDone} disabled={!created}>
+        <PrimaryButton onClick={onDone} disabled={!canFinish}>
           Finish →
         </PrimaryButton>
       </div>
