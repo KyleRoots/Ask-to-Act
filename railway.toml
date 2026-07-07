@@ -8,5 +8,3 @@ dockerfilePath = "Dockerfile"
 # against a stale schema.
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
-healthcheckPath = "/api/healthz"
-healthcheckTimeout = 300

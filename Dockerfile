@@ -8,7 +8,6 @@
 # Database migrations: applied automatically on api-server startup (see
 # artifacts/api-server/src/index.ts → runAppMigrations). SQL files are copied
 # into the bundle at build time (artifacts/api-server/build.mjs).
-ARG BUILD_REVISION=gtm-gate-1
 
 # ---- Builder: install the workspace and build every piece ----
 FROM node:24-slim AS builder
@@ -17,6 +16,9 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.33.3 --activate
 
 COPY . .
+# Bust Docker layer cache on every Git deploy so api-server + frontends rebuild.
+ARG RAILWAY_GIT_COMMIT_SHA=local
+RUN echo "Railway build SHA=${RAILWAY_GIT_COMMIT_SHA}" > /tmp/build-sha
 RUN pnpm install --frozen-lockfile
 
 # API/MCP server → self-contained ESM bundle at artifacts/api-server/dist.
