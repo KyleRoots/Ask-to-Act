@@ -10,6 +10,9 @@
     "validate-slides": "pnpm exec tsx scripts/validate-slides.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "@workspace/gtm": "workspace:*"
+  },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "catalog:",
     "@replit/vite-plugin-dev-banner": "catalog:",

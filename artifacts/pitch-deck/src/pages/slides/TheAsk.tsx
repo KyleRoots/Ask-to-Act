@@ -1,5 +1,6 @@
 import { LogoWordmark } from "@/components/Logo";
 import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
+import { CONNECTOR_BUILD_PRICING, FOUNDING_PRICING, LIST_PRICING } from "@workspace/gtm";
 
 const ASKS = [
   {
@@ -9,7 +10,7 @@ const ASKS = [
   },
   {
     title: "Convert pilots",
-    body: "Founding rate: $399/mo for up to 10 active seats, month-to-month. List pricing ($499 + $29/seat) after founding cohort.",
+    body: `Founding rate: $${FOUNDING_PRICING.flatUpTo10Seats}/mo for up to 10 active seats, month-to-month. List pricing ($${LIST_PRICING.platform} + $${LIST_PRICING.perActiveSeat}/seat) after founding cohort. Non-Bullhorn firms: ${CONNECTOR_BUILD_PRICING.rangeLabel} connector build, then MRR.`,
     accent: "accent" as const,
   },
   {
@@ -34,7 +35,7 @@ export default function TheAsk() {
       subtitle={
         <SlideSubtitle>
           Myticas and STSI are running complimentary production pilots on connect.asktoact.ai, with 62+ Bullhorn actions live.
-          Next: 30-day check-ins, founding-customer conversion at $399/mo, and outbound to the next firms.
+          Next: 30-day check-ins, founding-customer conversion at ${FOUNDING_PRICING.flatUpTo10Seats}/mo, and outbound to the next firms.
         </SlideSubtitle>
       }
       footer={
@@ -50,14 +51,11 @@ export default function TheAsk() {
         </div>
       }
     >
-      <div className="pd-grid-3 mt-2 md:mt-4">
+      <div className="pd-grid-3 mt-2">
         {ASKS.map((a) => (
-          <div
-            key={a.title}
-            className={`flex flex-col gap-3 border-t-2 pt-4 md:pt-6 ${a.accent === "gold" ? "border-gold" : "border-accent"}`}
-          >
-            <div className="font-display font-extrabold pd-body text-text leading-tight">{a.title}</div>
-            <div className="font-body pd-small text-muted leading-snug">{a.body}</div>
+          <div key={a.title} className={`border-l-2 pl-4 ${a.accent === "gold" ? "border-gold" : "border-accent"}`}>
+            <div className={`font-display pd-eyebrow tracking-[0.15em] uppercase ${a.accent === "gold" ? "text-gold" : "text-accent"}`}>{a.title}</div>
+            <div className="mt-2 font-body pd-small text-muted leading-snug">{a.body}</div>
           </div>
         ))}
       </div>

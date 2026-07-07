@@ -8,6 +8,7 @@
 # Database migrations: applied automatically on api-server startup (see
 # artifacts/api-server/src/index.ts → runAppMigrations). SQL files are copied
 # into the bundle at build time (artifacts/api-server/build.mjs).
+ARG BUILD_REVISION=gtm-gate-1
 
 # ---- Builder: install the workspace and build every piece ----
 FROM node:24-slim AS builder

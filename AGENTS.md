@@ -35,3 +35,14 @@ custom fields with human-readable `label` and opaque Bullhorn `name` (e.g.
 Never put API keys in `.env` files committed to git. Use Cursor Secrets only.
 
 See also: `.agents/memory/asktoact-mcp-api-key.md`.
+
+## GTM materials access (exec-summary, pitch-deck)
+
+Customer Brief, Exec Summary, and Pitch Deck are **not public** in production unless explicitly opened.
+
+- Set **`GTM_MATERIALS_PASSWORD`** on Railway (required for access after deploy).
+- Optional **`GTM_MATERIALS_USER`** (default `asktoact`). Share both with anyone you grant access.
+- Without the password in production → `/exec-summary` and `/pitch-deck` return **404**.
+- GTM playbook (`.agents/memory/gtm-pricing-2026.md`, `lib/gtm/`) is **repo-only** — never web-served.
+
+See: `.agents/memory/gtm-pricing-2026.md` (access control section).

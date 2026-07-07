@@ -1,8 +1,10 @@
 import {
   AI_SUBSCRIPTION_COST_RANGE,
   AI_TOOLS_SHORT,
+  CONNECTOR_BUILD_PRICING,
   FOUNDING_PRICING,
   LIST_PRICING,
+  ONBOARDING,
   PILOT_FIRMS,
   ROI_10_SEAT,
   TOOL_SUMMARY,
@@ -202,16 +204,18 @@ export default function ExecSummary() {
 
           <div className="es-grid-2" style={{ margin: '2rem 0' }}>
             <div style={{ background: '#102541', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.75rem' }}>
-              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>List pricing · Wired in Stripe today</div>
-              <RevenueRow label={`Platform · $${LIST_PRICING.platform} / mo`} desc="Base access, admin dashboard, audit logs, 1 ATS connector included" />
+              <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1.25rem' }}>List pricing · Target catalog</div>
+              <RevenueRow label={`Platform · $${LIST_PRICING.platform} / mo`} desc="Base access, admin dashboard, audit logs, 1 ATS connector included — each new Bullhorn firm/instance, no connection fee" />
+              <RevenueRow label={`Platform · $${LIST_PRICING.platformAnnual.toLocaleString()} / yr`} desc="Annual prepay (~2 months free vs monthly)" />
               <RevenueRow label={`Per-active-seat · $${LIST_PRICING.perActiveSeat} / mo`} desc="Only billed when a seat makes at least one AI call that month; idle seats cost nothing" />
-              <RevenueRow label={`Additional connectors · $${LIST_PRICING.additionalConnector} / mo`} desc="Each system beyond the first (roadmap: Salesforce, Workday, Greenhouse…)" />
+              <RevenueRow label={`Additional connectors · $${LIST_PRICING.additionalConnector} / mo`} desc="Each live system beyond the first at the same firm (e.g. Bullhorn + Salesforce) — not another Bullhorn customer" />
               <div style={{ borderTop: '1px solid #1e3a5f', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
-                <RevenueRow label={`White-glove setup · $${LIST_PRICING.whiteGloveSetup.toLocaleString()} · Optional`} desc="Guided setup, training, OAuth registration. Self-serve is free. Most firms don't need this." gold />
+                <RevenueRow label={`${CONNECTOR_BUILD_PRICING.label} · ${CONNECTOR_BUILD_PRICING.rangeLabel} · One-time`} desc={`${ONBOARDING.bullhornLive}. Other ATS: scoped adapter build, then MRR at go-live.`} />
+                <RevenueRow label={`White-glove Bullhorn setup · $${LIST_PRICING.whiteGloveSetup.toLocaleString()} · Optional`} desc="Guided setup, training, OAuth registration. Self-serve Bullhorn enrollment is free." gold />
               </div>
               <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: '0.5rem', padding: '0.875rem 1rem', marginTop: '1rem' }}>
                 <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginBottom: '0.25rem', fontWeight: 600 }}>No-commitment terms</div>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5 }}>Month-to-month on all plans. Annual available (onboarding waived). Cancel anytime. No termination fees, no data hostage situations.</div>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5 }}>Month-to-month on recurring plans. Annual platform prepay available. Cancel anytime. No termination fees, no data hostage situations.</div>
               </div>
             </div>
 
@@ -227,6 +231,17 @@ export default function ExecSummary() {
                 fees for each active user, and additional system connections. Our hosting costs are largely fixed, so when a
                 customer adds users, our costs barely increase. Customer growth is high-margin for us.
               </p>
+            </div>
+          </div>
+
+          <div style={{ background: '#0d1f36', border: '1px solid #1e3a5f', borderRadius: '0.75rem', padding: '1.5rem', marginTop: '1rem' }}>
+            <div style={{ fontSize: '0.7rem', color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '1rem' }}>Connection pricing · Who pays what</div>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.65, margin: '0 0 1rem' }}>{ONBOARDING.bullhornIncluded}</p>
+            <div className="es-grid-2">
+              <OnboardStep num="✓" label="New Bullhorn firm" desc="Included in platform MRR — self-serve or optional white-glove" />
+              <OnboardStep num="+" label="Second system (same firm)" desc={`$${LIST_PRICING.additionalConnector}/mo per additional live connector`} />
+              <OnboardStep num="◇" label="New ATS type" desc={`${CONNECTOR_BUILD_PRICING.rangeLabel} one-time build, then MRR at go-live`} />
+              <OnboardStep num="?" label="Hands-on Bullhorn help" desc={`$${LIST_PRICING.whiteGloveSetup.toLocaleString()} optional — never required`} />
             </div>
           </div>
 

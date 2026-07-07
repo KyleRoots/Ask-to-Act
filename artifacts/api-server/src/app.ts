@@ -23,11 +23,21 @@ app.set("trust proxy", 1);
 // Clerk FAPI proxy — must be before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-// First-party SPAs (portal, admin) + static marketing pages, served under their
-// path prefixes on the same origin. Mounted BEFORE the strict nonce-based CSP
-// below because bundled SPA assets get a SPA-appropriate CSP of their own (see
-// serve-frontends.ts). No-op when builds aren't present (e.g. API-only dev).
+// First-party SPAs (portal, admin) + protected GTM pages (exec-summary, pitch-deck).
+// GTM mounts use HTTP Basic Auth in production — see gtm-materials-gate.ts.
 mountFrontends(app);
+
+app.get("/robots.txt", (_req, res) => {
+  res.type("text/plain");
+  res.send(
+    [
+      "User-agent: *",
+      "Disallow: /exec-summary",
+      "Disallow: /pitch-deck",
+      "",
+    ].join("\n"),
+  );
+});
 
 // Per-request CSP nonce — MUST run before helmet so res.locals.cspNonce exists
 // when helmet builds the Content-Security-Policy header, and so the downstream

@@ -1,4 +1,5 @@
 import { SlideShell, SlideStat, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
+import { FOUNDING_PRICING, ROI_10_SEAT } from "@workspace/gtm";
 
 export default function Problem() {
   return (
@@ -32,11 +33,11 @@ export default function Problem() {
           label="Audit trail of what an AI was asked, what it returned, what changed. Zero. At any firm."
         />
         <SlideStat
-          value="$789"
+          value={`$${ROI_10_SEAT.askToActList}`}
           label={
             <>
               AskToAct list pricing for a 10-seat desk, per month, no commitment.{" "}
-              <span className="text-text font-display font-semibold">Founding rate: $399/mo.</span>
+              <span className="text-text font-display font-semibold">Founding rate: ${FOUNDING_PRICING.flatUpTo10Seats}/mo.</span>
             </>
           }
           accentClass="text-gold"

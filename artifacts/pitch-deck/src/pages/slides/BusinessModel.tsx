@@ -1,4 +1,11 @@
 import { SlideShell, SlideSubtitle, SlideTitle } from "@/components/SlideShell";
+import {
+  CONNECTOR_BUILD_PRICING,
+  FOUNDING_PRICING,
+  LIST_PRICING,
+  ONBOARDING,
+  ROI_10_SEAT,
+} from "@workspace/gtm";
 
 export default function BusinessModel() {
   return (
@@ -15,31 +22,48 @@ export default function BusinessModel() {
       }
       subtitle={
         <SlideSubtitle>
-          Month-to-month. Cancel anytime. No long-term commitment required.
+          Month-to-month recurring on the bridge. One-time fees only for net-new ATS builds or optional white-glove.
           <span className="text-text font-display font-semibold"> ~95% gross margin at every tier.</span>
         </SlideSubtitle>
       }
     >
       <div className="pd-grid-2 mt-2">
         <div className="pd-pricing-col flex flex-col gap-4">
-          <PricingLine title="Platform · $499 / mo" body="Base access, admin tools, audit logs, 1 ATS connector included." />
-          <PricingLine title="Per-active-seat · $29 / mo" body="Only billed when a seat actually uses the bridge that month. Idle seats cost nothing." />
-          <PricingLine title="Additional connectors · $299 / mo" body="Each system beyond the first (Salesforce, Workday, Greenhouse, etc.)." />
-          <PricingLine title="White-glove setup · $3,500 · Optional" body="Guided setup, training, OAuth registration. Self-serve is free." muted />
+          <PricingLine
+            title={`Platform · $${LIST_PRICING.platform} / mo`}
+            body={`Base access, admin tools, audit logs, 1 ATS connector included. Each new Bullhorn firm/instance: no connection fee. Annual prepay $${LIST_PRICING.platformAnnual.toLocaleString()}/yr (~2 months free).`}
+          />
+          <PricingLine
+            title={`Per-active-seat · $${LIST_PRICING.perActiveSeat} / mo`}
+            body="Only billed when a seat actually uses the bridge that month. Idle seats cost nothing."
+          />
+          <PricingLine
+            title={`Additional connectors · $${LIST_PRICING.additionalConnector} / mo`}
+            body="Each live system beyond the first at the same firm (e.g. Bullhorn + Salesforce) — not another Bullhorn customer."
+          />
+          <PricingLine
+            title={`${CONNECTOR_BUILD_PRICING.label} · ${CONNECTOR_BUILD_PRICING.rangeLabel} · One-time`}
+            body={`Only when the ATS is not Bullhorn. Bullhorn onboarding is included in MRR. Other ATS: ${CONNECTOR_BUILD_PRICING.tiers.map((t) => `$${t.price.toLocaleString()} (${t.atsExamples})`).join("; ")}.`}
+          />
+          <PricingLine
+            title={`White-glove Bullhorn setup · $${LIST_PRICING.whiteGloveSetup.toLocaleString()} · Optional`}
+            body={`${ONBOARDING.bullhornLive}. Optional guided setup when self-serve is not enough — never mandatory.`}
+            muted
+          />
 
           <div className="pd-pricing-highlight-grid">
             <div className="pd-pricing-box bg-gold/10 border border-gold/30 rounded-lg px-4 py-3">
               <div className="font-display pd-eyebrow tracking-[0.15em] uppercase text-gold mb-1">Founding customer · post-pilot</div>
               <div className="font-body pd-small text-muted leading-snug">
-                <span className="text-text font-display font-semibold">$399 / mo</span> flat · up to 10 active seats · 1 connector · month-to-month
+                <span className="text-text font-display font-semibold">${FOUNDING_PRICING.flatUpTo10Seats} / mo</span> flat · up to 10 active seats · 1 connector · month-to-month
               </div>
             </div>
 
             <div className="pd-pricing-box bg-accent/8 border border-accent/30 rounded-lg px-4 py-3">
               <div className="font-display pd-eyebrow tracking-[0.15em] uppercase text-accent mb-1">List pricing · 10-seat desk</div>
               <div className="font-body pd-small text-muted leading-snug">
-                Cost: <span className="text-text font-display font-semibold">$789 / mo</span> · Value recovered:{" "}
-                <span className="text-gold font-display font-semibold">~$15,600 / mo</span>
+                Cost: <span className="text-text font-display font-semibold">${ROI_10_SEAT.askToActList} / mo</span> · Value recovered:{" "}
+                <span className="text-gold font-display font-semibold">~${ROI_10_SEAT.productivityLost.toLocaleString()} / mo</span>
               </div>
             </div>
           </div>
@@ -47,13 +71,14 @@ export default function BusinessModel() {
 
         <div className="pd-margin-panel bg-surface border border-line rounded-xl p-5 md:p-6">
           <div className="font-display pd-eyebrow tracking-[0.15em] uppercase text-muted">Monthly · Revenue vs. Margin</div>
-          <MarginRow seats="10 seats · 1 connector" infra="~$30–40 infra / mo" revenue="~$789 / mo" margin="~95% GM" />
+          <MarginRow seats="10 seats · 1 connector · founding" infra="~$30–40 infra / mo" revenue={`~$${ROI_10_SEAT.askToActFounding} / mo`} margin="~88% GM" />
+          <MarginRow seats="10 seats · 1 connector · list" infra="~$30–40 infra / mo" revenue={`~$${ROI_10_SEAT.askToActList} / mo`} margin="~95% GM" />
           <MarginRow seats="25 seats · 1 connector" infra="~$40–60 infra / mo" revenue="~$1.2k / mo" margin="~95% GM" className="pd-margin-row-optional" />
           <MarginRow seats="50 seats · 2 connectors" infra="~$60–100 infra / mo" revenue="~$2.2k / mo" margin="~95% GM" />
           <MarginRow seats="100 seats · 3 connectors" infra="~$100–150 infra / mo" revenue="~$4k / mo" margin="~96% GM" last className="pd-margin-row-optional" />
           <p className="mt-4 pt-4 border-t border-line font-body pd-small text-muted leading-snug">
-            Customers pay for their own AI. We earn from the platform fee, active-user fees, and extra connections.
-            Hosting costs don't rise much as customers grow, so expansion is high-margin.
+            Customers pay for their own AI. We earn from platform MRR, active-seat fees, and additional live connections.
+            Net-new ATS builds are one-time project revenue with high margin. Hosting scales slowly — seat growth is accretive.
           </p>
         </div>
       </div>

@@ -1,8 +1,10 @@
 import {
   AI_SUBSCRIPTION_COST_RANGE,
   AI_TOOLS_SHORT,
+  CONNECTOR_BUILD_PRICING,
   FOUNDING_PRICING,
   LIST_PRICING,
+  ONBOARDING,
   PILOT_FIRMS,
   ROI_10_SEAT,
   TOOL_SUMMARY,
@@ -79,6 +81,15 @@ export default function CustomerBrief() {
               footnote={`10 seats ≈ $${ROI_10_SEAT.askToActList}/mo · month-to-month`}
             />
           </div>
+          <p style={{ ...body, marginTop: "0.5rem", fontSize: "0.9rem", color: "#94a3b8" }}>
+            <strong style={{ color: "#e2e8f0" }}>Bullhorn firms:</strong> {ONBOARDING.bullhornLive} ·{" "}
+            <strong style={{ color: "#38bdf8" }}>no connection fee</strong> — each new Bullhorn instance is included in subscription MRR.
+            {" "}<strong style={{ color: "#e2e8f0" }}>Other ATS:</strong> one-time connector build{" "}
+            <strong style={{ color: "#38bdf8" }}>{CONNECTOR_BUILD_PRICING.rangeLabel}</strong> (scoped after a discovery call), then standard monthly pricing at go-live.
+            {" "}{ONBOARDING.additionalConnectorNote}{" "}
+            Optional white-glove Bullhorn onboarding{" "}
+            <strong style={{ color: "#e2e8f0" }}>${LIST_PRICING.whiteGloveSetup.toLocaleString()}</strong>.
+          </p>
         </Section>
         <Divider />
         <CtaBand />

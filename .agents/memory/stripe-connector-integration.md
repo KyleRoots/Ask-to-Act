@@ -55,10 +55,14 @@ Located at `artifacts/api-server/src/scripts/seed-stripe-products.ts` (canonical
 pnpm --filter @workspace/api-server run seed:stripe
 ```
 (A redundant duplicate previously lived at `scripts/src/seed-products.ts` + `scripts/src/stripeClient.ts` — both removed.)
-Idempotent — uses `stripe.products.search` before creating. Creates:
+Idempotent — uses `stripe.products.search` before creating. Target catalog (extend seed script as Stripe account goes live):
 - AskToAct Platform: $499/mo + $4,990/yr
 - AskToAct Active Seat: $29/mo
-- AskToAct Additional Connector: $299/mo
+- AskToAct Additional Connector: $299/mo (second *system* at same firm — not another Bullhorn customer)
+- Founding flat plan or coupon: $399/mo
+- One-time: white-glove Bullhorn $3,500 · new ATS connector build $7,500–$15,000
+
+**No Stripe product for "Bullhorn connection fee"** — new Bullhorn firms are included in platform MRR.
 
 ## Integration lifecycle
 

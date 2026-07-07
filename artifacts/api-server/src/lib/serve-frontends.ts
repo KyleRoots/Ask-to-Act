@@ -3,6 +3,7 @@ import helmet from "helmet";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gtmMaterialsGate } from "../middlewares/gtm-materials-gate.js";
 import { logger } from "./logger.js";
 
 /**
@@ -22,9 +23,13 @@ interface Frontend {
   dir: string;
 }
 
-const FRONTENDS: Frontend[] = [
+const PUBLIC_FRONTENDS: Frontend[] = [
   { prefix: "/portal", dir: "portal" },
   { prefix: "/admin", dir: "admin" },
+];
+
+/** Internal GTM — HTTP Basic Auth in production (see gtm-materials-gate.ts). */
+const PROTECTED_GTM_FRONTENDS: Frontend[] = [
   { prefix: "/exec-summary", dir: "exec-summary" },
   { prefix: "/pitch-deck", dir: "pitch-deck" },
 ];
@@ -66,13 +71,32 @@ function frontendsBaseDir(): string {
 export function mountFrontends(app: Express): void {
   const baseDir = frontendsBaseDir();
 
-  for (const { prefix, dir } of FRONTENDS) {
+  for (const { prefix, dir } of PUBLIC_FRONTENDS) {
+    mountOneFrontend(app, baseDir, prefix, dir);
+  }
+
+  for (const { prefix, dir } of PROTECTED_GTM_FRONTENDS) {
+    mountOneFrontend(app, baseDir, prefix, dir, gtmMaterialsGate);
+  }
+}
+
+function mountOneFrontend(
+  app: Express,
+  baseDir: string,
+  prefix: string,
+  dir: string,
+  beforeStatic?: (req: Request, res: Response, next: NextFunction) => void,
+): void {
     const root = path.join(baseDir, dir);
     const indexHtml = path.join(root, "index.html");
 
     if (!fs.existsSync(indexHtml)) {
       logger.warn({ prefix, root }, "Frontend build not found — skipping mount");
-      continue;
+      return;
+    }
+
+    if (beforeStatic) {
+      app.use(prefix, beforeStatic);
     }
 
     // Serve hashed static assets (long cache); index.html itself is revalidated.
@@ -99,6 +123,5 @@ export function mountFrontends(app: Express): void {
       res.sendFile(indexHtml);
     });
 
-    logger.info({ prefix, root }, "Mounted frontend");
-  }
+    logger.info({ prefix, root, gtmProtected: Boolean(beforeStatic) }, "Mounted frontend");
 }
