@@ -6,6 +6,7 @@ import {
   completeUserEnrollment,
   connectHeadless,
   isConnected,
+  getFirmBullhornHealthStatus,
   firmContext,
 } from "../lib/bullhorn-auth.js";
 import { countEntity } from "../lib/bullhorn-client.js";
@@ -226,8 +227,8 @@ router.get(
       return;
     }
     try {
-      const connected = await isConnected(firmId);
-      res.json({ connected });
+      const status = await getFirmBullhornHealthStatus(firmId);
+      res.json(status);
     } catch (err) {
       logger.error({ err, firmId }, "Bullhorn status check failed");
       res.status(500).json({ error: "Could not determine connection status" });

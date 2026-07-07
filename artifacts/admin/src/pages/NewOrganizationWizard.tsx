@@ -194,7 +194,7 @@ export default function NewOrganizationWizard({ firmId: firmIdProp }: { firmId?:
       try {
         const status = await api.bullhornStatus(firmIdProp);
         if (cancelled) return;
-        if (!status.connected) {
+        if (!status.connected || !status.healthy || status.needsReauthorization) {
           setStep("connect");
           return;
         }
@@ -384,10 +384,11 @@ function ConnectStep({
   const statusQuery = useQuery({
     queryKey: ["bh-status", firmId],
     queryFn: () => api.bullhornStatus(firmId),
-    refetchInterval: (query) => (query.state.data?.connected ? false : 4000),
+    refetchInterval: (query) => (query.state.data?.healthy ? false : 4000),
   });
 
-  const connected = statusQuery.data?.connected === true;
+  const healthy = statusQuery.data?.healthy === true;
+  const needsReauth = statusQuery.data?.needsReauthorization === true;
 
   async function openAuth() {
     setOpening(true);
@@ -410,21 +411,56 @@ function ConnectStep({
         subtitle="Authorize this firm's Bullhorn workspace. A new tab opens for the Bullhorn sign-in — this page detects the connection automatically."
       />
 
-      {connected ? (
-        <div
-          className="rounded-xl px-4 py-4 flex items-start gap-3 mb-6"
-          style={{ background: "rgba(16,185,129,.08)", border: "1px solid rgba(52,211,153,.2)" }}
-        >
-          <span>✓</span>
-          <div>
-            <p className="text-sm font-medium" style={{ color: "#6EE7B7" }}>Bullhorn connected</p>
-            <p className="text-xs mt-0.5" style={{ color: "#6B7A99" }}>
-              This firm's Bullhorn workspace is authorized and ready.
-            </p>
+      {healthy ? (
+        <div className="space-y-4 mb-6">
+          <div
+            className="rounded-xl px-4 py-4 flex items-start gap-3"
+            style={{ background: "rgba(16,185,129,.08)", border: "1px solid rgba(52,211,153,.2)" }}
+          >
+            <span>✓</span>
+            <div>
+              <p className="text-sm font-medium" style={{ color: "#6EE7B7" }}>Bullhorn connected</p>
+              <p className="text-xs mt-0.5" style={{ color: "#6B7A99" }}>
+                This firm's Bullhorn workspace is authorized and ready.
+                {needsReauth
+                  ? " If verification failed, use Re-authorize below — a stored token can look connected while being invalid."
+                  : null}
+              </p>
+            </div>
           </div>
+          <GhostButton onClick={openAuth} disabled={opening}>
+            {opening ? "Opening…" : "Re-authorize Bullhorn →"}
+          </GhostButton>
+          {launched && (
+            <div className="flex items-center gap-2 text-sm" style={{ color: "#6B7A99" }}>
+              <span
+                className="w-3.5 h-3.5 rounded-full border-2 border-t-transparent animate-spin shrink-0"
+                style={{ borderColor: "#818CF8", borderTopColor: "transparent" }}
+              />
+              Waiting for authorization to complete in the other tab…
+            </div>
+          )}
+          {openError && <ErrorNote message={openError} />}
         </div>
       ) : (
         <div className="space-y-4 mb-6">
+          {needsReauth && (
+            <div
+              className="rounded-xl px-4 py-4 flex items-start gap-3"
+              style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(248,113,113,.25)" }}
+            >
+              <span>⚠</span>
+              <div>
+                <p className="text-sm font-medium" style={{ color: "#FCA5A5" }}>
+                  Bullhorn re-authorization required
+                </p>
+                <p className="text-xs mt-1" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
+                  The stored OAuth token is no longer valid (password change, revoked consent, or expired refresh).
+                  Recruiters cannot use connector tools until you complete authorization below.
+                </p>
+              </div>
+            </div>
+          )}
           <PrimaryButton onClick={openAuth} disabled={opening}>
             {opening ? "Opening…" : launched ? "Re-open Bullhorn authorization" : "Open Bullhorn authorization →"}
           </PrimaryButton>
@@ -443,7 +479,7 @@ function ConnectStep({
 
       <div className="flex justify-between pt-1">
         <GhostButton onClick={onBack}>← Back</GhostButton>
-        <PrimaryButton onClick={onConnected} disabled={!connected}>
+        <PrimaryButton onClick={onConnected} disabled={!healthy}>
           Continue →
         </PrimaryButton>
       </div>

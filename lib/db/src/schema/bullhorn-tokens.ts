@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, unique, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { firmsTable } from "./firms";
@@ -30,6 +30,10 @@ export const bullhornTokensTable = pgTable(
     restUrl: text("rest_url"),
     loginUrl: text("login_url"),
     authMode: text("auth_mode").notNull().default("oauth"),
+    /** False when OAuth refresh fails for a customer firm — admin must re-authorize. */
+    authHealthy: boolean("auth_healthy").notNull().default(true),
+    lastAuthErrorAt: timestamp("last_auth_error_at"),
+    lastAuthError: text("last_auth_error"),
     connectedAt: timestamp("connected_at"),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

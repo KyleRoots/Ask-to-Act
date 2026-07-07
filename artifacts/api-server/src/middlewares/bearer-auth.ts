@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db, usersTable, firmsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
-import { isFirmConnected, firmContext } from "../lib/bullhorn-auth.js";
+import { getFirmBullhornHealthStatus, firmContext } from "../lib/bullhorn-auth.js";
 
 export type CallerIdentity =
   | { kind: "service" }
@@ -135,9 +135,8 @@ export async function requireBullhornFirm(req: Request, res: Response, next: Nex
   }
 
   try {
-    // The caller's firm must have its own Bullhorn workspace connected.
-    const connected = await isFirmConnected(callerFirmId);
-    if (!connected) {
+    const bhStatus = await getFirmBullhornHealthStatus(callerFirmId);
+    if (!bhStatus.connected) {
       logger.warn(
         { callerFirmId, userId: req.caller.userId },
         "requireBullhornFirm: caller's firm has no Bullhorn connection",
@@ -146,6 +145,18 @@ export async function requireBullhornFirm(req: Request, res: Response, next: Nex
         error:
           "Your firm's Bullhorn workspace is not connected yet. An administrator must complete " +
           "Bullhorn setup for your organization before you can use the AI tools.",
+      });
+      return;
+    }
+    if (!bhStatus.healthy) {
+      logger.warn(
+        { callerFirmId, userId: req.caller.userId },
+        "requireBullhornFirm: caller's firm Bullhorn token unhealthy",
+      );
+      res.status(403).json({
+        error:
+          "Your organization's Bullhorn connection needs to be refreshed by an AskToAct administrator. " +
+          "Our team has been notified — please try again after Bullhorn is reconnected, or email support@asktoact.ai.",
       });
       return;
     }
