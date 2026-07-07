@@ -1,4 +1,4 @@
-import { db, bullhornTokensTable, usersTable } from "@workspace/db";
+import { db, bullhornTokensTable, usersTable, firmsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -114,8 +114,8 @@ interface Session {
 export class BullhornNotAuthorizedError extends Error {
   constructor() {
     super(
-      "Bullhorn is not connected yet. An administrator must complete the " +
-        "one-time authorization by visiting /api/auth/bullhorn/login in a browser.",
+      "Your organization's Bullhorn connection needs to be refreshed by an AskToAct administrator. " +
+        "Our team has been notified — please try again after Bullhorn is reconnected, or email support@asktoact.ai.",
     );
     this.name = "BullhornNotAuthorizedError";
   }
@@ -176,6 +176,7 @@ interface FirmTokenRow {
   restUrl: string | null;
   loginUrl: string | null;
   authMode: string;
+  authHealthy: boolean;
 }
 
 /** Loads a firm's stored connection row (decrypting the refresh token). */
@@ -187,6 +188,7 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
       restUrl: bullhornTokensTable.restUrl,
       loginUrl: bullhornTokensTable.loginUrl,
       authMode: bullhornTokensTable.authMode,
+      authHealthy: bullhornTokensTable.authHealthy,
     })
     .from(bullhornTokensTable)
     .where(eq(bullhornTokensTable.firmId, firmId))
@@ -199,6 +201,101 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
     restUrl: row.restUrl ?? null,
     loginUrl: row.loginUrl ?? null,
     authMode: row.authMode ?? "oauth",
+    authHealthy: row.authHealthy,
+  };
+}
+
+async function markFirmAuthHealthy(firmId: string): Promise<void> {
+  await db
+    .update(bullhornTokensTable)
+    .set({
+      authHealthy: true,
+      lastAuthErrorAt: null,
+      lastAuthError: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(bullhornTokensTable.firmId, firmId));
+}
+
+async function markFirmAuthUnhealthy(firmId: string, err: unknown): Promise<void> {
+  const errorMessage = (err instanceof Error ? err.message : String(err)).slice(0, 2000);
+  const [existing] = await db
+    .select({ authHealthy: bullhornTokensTable.authHealthy })
+    .from(bullhornTokensTable)
+    .where(eq(bullhornTokensTable.firmId, firmId))
+    .limit(1);
+  const wasHealthy = existing?.authHealthy !== false;
+
+  await db
+    .update(bullhornTokensTable)
+    .set({
+      authHealthy: false,
+      lastAuthErrorAt: new Date(),
+      lastAuthError: errorMessage,
+      updatedAt: new Date(),
+    })
+    .where(eq(bullhornTokensTable.firmId, firmId));
+
+  if (!wasHealthy) return;
+
+  try {
+    const [firm] = await db
+      .select({ name: firmsTable.name })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, firmId))
+      .limit(1);
+    const { sendFirmAuthFailureAlert } = await import("./emailService.js");
+    await sendFirmAuthFailureAlert({
+      firmId,
+      firmName: firm?.name ?? firmId,
+      errorMessage,
+    });
+    logger.warn({ firmId }, "Bullhorn auth failure alert emailed to support");
+  } catch (alertErr) {
+    logger.error({ firmId, err: alertErr }, "Failed to send Bullhorn auth failure alert");
+  }
+}
+
+export type FirmBullhornHealthStatus = {
+  connected: boolean;
+  healthy: boolean;
+  needsReauthorization: boolean;
+  lastAuthErrorAt: string | null;
+  lastAuthError: string | null;
+};
+
+/** Admin-facing Bullhorn connection health for a firm. */
+export async function getFirmBullhornHealthStatus(firmId: string): Promise<FirmBullhornHealthStatus> {
+  const rows = await db
+    .select({
+      refreshToken: bullhornTokensTable.refreshToken,
+      authHealthy: bullhornTokensTable.authHealthy,
+      authMode: bullhornTokensTable.authMode,
+      lastAuthErrorAt: bullhornTokensTable.lastAuthErrorAt,
+      lastAuthError: bullhornTokensTable.lastAuthError,
+    })
+    .from(bullhornTokensTable)
+    .where(eq(bullhornTokensTable.firmId, firmId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row?.refreshToken) {
+    return {
+      connected: false,
+      healthy: false,
+      needsReauthorization: false,
+      lastAuthErrorAt: null,
+      lastAuthError: null,
+    };
+  }
+
+  const healthy = row.authHealthy;
+  return {
+    connected: true,
+    healthy,
+    needsReauthorization: row.authMode === "oauth" && !healthy,
+    lastAuthErrorAt: row.lastAuthErrorAt?.toISOString() ?? null,
+    lastAuthError: row.lastAuthError ?? null,
   };
 }
 
@@ -226,7 +323,13 @@ export async function getFirmAuthMode(firmId: string): Promise<string | null> {
 async function saveRotatedRefreshToken(firmId: string, refreshToken: string): Promise<void> {
   await db
     .update(bullhornTokensTable)
-    .set({ refreshToken: encryptToken(refreshToken), updatedAt: new Date() })
+    .set({
+      refreshToken: encryptToken(refreshToken),
+      authHealthy: true,
+      lastAuthErrorAt: null,
+      lastAuthError: null,
+      updatedAt: new Date(),
+    })
     .where(eq(bullhornTokensTable.firmId, firmId));
 }
 
@@ -258,6 +361,7 @@ async function saveFirmConnection(firmId: string, fields: FirmConnectionFields):
       restUrl: fields.restUrl,
       loginUrl: fields.loginUrl,
       authMode: fields.authMode,
+      authHealthy: true,
       connectedAt: now,
       updatedAt: now,
     })
@@ -268,6 +372,9 @@ async function saveFirmConnection(firmId: string, fields: FirmConnectionFields):
         oauthUrl: fields.oauthUrl,
         restUrl: fields.restUrl,
         loginUrl: fields.loginUrl,
+        authHealthy: true,
+        lastAuthErrorAt: null,
+        lastAuthError: null,
         connectedAt: now,
         updatedAt: now,
       },
@@ -759,6 +866,7 @@ async function reauthenticate(firmId: string): Promise<Session> {
         { firmId, err },
         "Bullhorn: refresh token failed for oauth firm; re-authorization required",
       );
+      await markFirmAuthUnhealthy(firmId, err);
       throw new BullhornNotAuthorizedError();
     }
   }
@@ -766,6 +874,7 @@ async function reauthenticate(firmId: string): Promise<Session> {
     logger.info({ firmId }, "Bullhorn: no usable refresh token; performing headless direct login (service firm)");
     return directLogin(firmId);
   }
+  await markFirmAuthUnhealthy(firmId, new Error("No Bullhorn refresh token"));
   throw new BullhornNotAuthorizedError();
 }
 
@@ -822,14 +931,14 @@ export async function invalidateSession(firmId?: string): Promise<void> {
   authInProgress.delete(fid);
 }
 
-/** Returns true if a refresh token is persisted for the firm (i.e. connected). */
+/** Returns true if a refresh token is persisted and auth is healthy for the firm. */
 export async function isConnected(firmId?: string): Promise<boolean> {
   const fid = currentFirmId(firmId);
   if (sessions.has(fid)) {
     return true;
   }
-  const row = await loadTokenRow(fid);
-  return !!row?.refreshToken;
+  const status = await getFirmBullhornHealthStatus(fid);
+  return status.connected && status.healthy;
 }
 
 // ── Per-user Bullhorn auth ─────────────────────────────────────────────────

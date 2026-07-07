@@ -402,6 +402,12 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
     queryFn: () => api.getFirm(firmId),
   });
 
+  const { data: bullhornStatus } = useQuery({
+    queryKey: ["bh-status", firmId],
+    queryFn: () => api.bullhornStatus(firmId),
+    refetchInterval: (query) => (query.state.data?.healthy ? 60_000 : 10_000),
+  });
+
   const { data: users, isLoading: usersLoading } = useQuery({
     queryKey: ["firm-users", firmId],
     queryFn: () => api.listUsers(firmId),
@@ -674,6 +680,32 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
 
       {firm && (
         <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+          {bullhornStatus?.needsReauthorization && (
+            <div
+              className="rounded-2xl px-4 py-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(248,113,113,.3)" }}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: "#FCA5A5" }}>
+                  Bullhorn re-authorization required
+                </p>
+                <p className="text-xs mt-1" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
+                  Recruiters (e.g. ChatGPT connector users) cannot access Bullhorn until you reconnect.
+                  {bullhornStatus.lastAuthErrorAt && (
+                    <> Last failure: {new Date(bullhornStatus.lastAuthErrorAt).toLocaleString()}.</>
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(`/firms/${firmId}/setup`)}
+                className="text-sm px-4 py-2 rounded-lg shrink-0 font-medium transition-colors"
+                style={{ background: "rgba(248,113,113,.15)", color: "#FECACA", border: "1px solid rgba(248,113,113,.35)" }}
+              >
+                Reconnect Bullhorn →
+              </button>
+            </div>
+          )}
           {/* Firm heading */}
           <div className="flex items-center gap-4 mb-7">
             {firm.logoUrl ? (

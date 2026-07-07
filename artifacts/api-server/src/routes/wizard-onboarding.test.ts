@@ -140,6 +140,8 @@ describe("Step 3 — GET /api/auth/bullhorn/status", () => {
       .set("Authorization", `Bearer ${SERVICE_TOKEN}`);
     expect(res.status).toBe(200);
     expect(res.body.connected).toBe(false);
+    expect(res.body.healthy).toBe(false);
+    expect(res.body.needsReauthorization).toBe(false);
   });
 
   it("returns 400 when firmId is absent", async () => {

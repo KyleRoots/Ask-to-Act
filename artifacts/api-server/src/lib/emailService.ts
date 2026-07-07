@@ -310,6 +310,47 @@ export async function sendSupportEmail(payload: SupportPayload): Promise<void> {
   });
 }
 
+/** Ops alert when a customer firm's Bullhorn OAuth refresh fails. */
+export async function sendFirmAuthFailureAlert(payload: {
+  firmId: string;
+  firmName: string;
+  errorMessage: string;
+}): Promise<void> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const dest = process.env.SUPPORT_EMAIL ?? "support@asktoact.ai";
+
+  if (!apiKey) {
+    logger.warn({ firmId: payload.firmId }, "SENDGRID_API_KEY not set — firm auth alert skipped");
+    return;
+  }
+
+  const adminSetupUrl = `https://connect.asktoact.ai/admin/firms/${payload.firmId}/setup`;
+  const subject = `[Action required] Bullhorn reconnect — ${payload.firmName}`;
+  const text = [
+    `Firm: ${payload.firmName} (${payload.firmId})`,
+    "",
+    "The firm's Bullhorn OAuth refresh token failed. Recruiters will see errors in ChatGPT until an admin re-authorizes.",
+    "",
+    `Error: ${payload.errorMessage}`,
+    "",
+    `Re-authorize: ${adminSetupUrl}`,
+    "Steps: Bullhorn setup → Open Bullhorn authorization → sign in as Bullhorn admin → complete consent.",
+  ].join("\n");
+
+  const sgMail = await import("@sendgrid/mail");
+  sgMail.default.setApiKey(apiKey);
+  await sgMail.default.send({
+    to: dest,
+    from: { name: FROM_NAME, email: FROM_EMAIL },
+    subject,
+    text,
+    html: `<p><strong>Firm:</strong> ${payload.firmName} (<code>${payload.firmId}</code>)</p>
+<p>The firm's Bullhorn OAuth refresh failed. Recruiters cannot use connector tools until you re-authorize.</p>
+<p><strong>Error:</strong> ${payload.errorMessage}</p>
+<p><a href="${adminSetupUrl}">Open Bullhorn setup →</a></p>`,
+  });
+}
+
 export async function sendBulkInvites(payloads: InvitePayload[]): Promise<{
   sent: number;
   skipped: number;

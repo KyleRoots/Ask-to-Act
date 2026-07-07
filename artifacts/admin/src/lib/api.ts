@@ -132,7 +132,13 @@ export type InviteResult = {
   message: string;
 };
 
-export type BullhornStatus = { connected: boolean };
+export type BullhornStatus = {
+  connected: boolean;
+  healthy: boolean;
+  needsReauthorization: boolean;
+  lastAuthErrorAt: string | null;
+  lastAuthError: string | null;
+};
 
 export type DiscoverySummary = {
   firmId: string;
