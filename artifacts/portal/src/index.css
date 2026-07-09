@@ -118,10 +118,11 @@
     width: 100% !important;
     max-width: 100% !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    gap: 0.5rem !important;
+    gap: 0.375rem !important;
   }
 
-  @media (min-width: 480px) {
+  /* Stack on phone; 3-up from sm (640px) for tablet+ */
+  @media (min-width: 640px) {
     .ata-auth-shell .cl-socialButtons {
       grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     }
@@ -131,6 +132,21 @@
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
+    min-height: 2.25rem !important;
+    height: auto !important;
+    padding-top: 0.375rem !important;
+    padding-bottom: 0.375rem !important;
+  }
+
+  .ata-auth-shell .cl-socialButtonsBlockButtonText {
+    font-size: 0.6875rem !important;
+    line-height: 1.2 !important;
+  }
+
+  @media (min-width: 640px) {
+    .ata-auth-shell .cl-socialButtonsBlockButtonText {
+      font-size: 0.75rem !important;
+    }
   }
 
   .cl-socialButtonsBlockButton,
@@ -184,13 +200,22 @@
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    border-radius: 1rem;
+    border-radius: 0.875rem;
     border: 1px solid hsl(217 35% 20%);
     background: linear-gradient(180deg, hsl(222 45% 9%) 0%, hsl(222 45% 7%) 100%);
     box-shadow:
-      0 12px 40px rgba(0, 0, 0, 0.45),
+      0 8px 28px rgba(0, 0, 0, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.04);
     overflow: hidden;
+  }
+
+  .ata-auth-shell .cl-footer,
+  .ata-auth-shell .cl-footerPages {
+    padding-top: 0.25rem !important;
+  }
+
+  .ata-auth-shell .cl-footerPagesLink {
+    font-size: 0.6875rem !important;
   }
 
   /* Shared page buttons — use on marketing + portal pages */

@@ -67,21 +67,21 @@ const clerkAppearance = {
     cardBox: "w-full shadow-none",
     card: "!shadow-none !border-0 !bg-transparent !rounded-none !p-0",
     footer: "!shadow-none !border-0 !bg-transparent !rounded-none !p-0",
-    headerTitle: "text-white font-extrabold text-xl tracking-tight",
-    headerSubtitle: "text-[#94A3B8] text-sm",
+    headerTitle: "text-white font-extrabold text-lg tracking-tight",
+    headerSubtitle: "text-[#94A3B8] text-xs leading-snug",
     socialButtonsRoot: "w-full max-w-full min-w-0",
     socialButtons: "w-full max-w-full min-w-0",
     socialButtonsBlockButtonText: "!text-white font-medium text-xs sm:text-sm truncate",
     socialButtonsBlockButton:
-      "!text-white border border-[#2a3f5f] bg-[#111D30] hover:bg-[#182540] transition-colors rounded-xl h-11 w-full min-w-0 max-w-full px-2 sm:px-3",
-    formFieldLabel: "text-[#94A3B8] text-xs font-semibold uppercase tracking-wider",
+      "!text-white border border-[#2a3f5f] bg-[#111D30] hover:bg-[#182540] transition-colors rounded-lg h-9 w-full min-w-0 max-w-full px-2 sm:px-2.5",
+    formFieldLabel: "text-[#94A3B8] text-[10px] font-semibold uppercase tracking-wider",
     formFieldInput:
-      "bg-[#111D30] border border-[#1B2D47] text-white rounded-xl h-11 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20",
+      "bg-[#111D30] border border-[#1B2D47] text-white rounded-lg h-9 text-sm focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20",
     formButtonPrimary:
-      "bg-gradient-to-r from-indigo-600 to-sky-500 shadow-lg font-bold rounded-xl h-11",
-    footerActionLink: "text-[#818CF8] hover:text-[#38BDF8] font-medium transition-colors",
-    footerActionText: "text-[#6B7A99]",
-    footerAction: "!bg-transparent border-t border-[#1B2D47] pt-4 mt-2",
+      "bg-gradient-to-r from-indigo-600 to-sky-500 shadow-lg font-bold rounded-lg h-9 text-sm",
+    footerActionLink: "text-[#818CF8] hover:text-[#38BDF8] font-medium transition-colors text-sm",
+    footerActionText: "text-[#6B7A99] text-sm",
+    footerAction: "!bg-transparent border-t border-[#1B2D47] pt-3 mt-1",
     dividerText: "text-[#6B7A99] text-xs",
     dividerLine: "bg-[#1B2D47]",
     identityPreviewEditButton: "text-[#818CF8]",
@@ -89,10 +89,12 @@ const clerkAppearance = {
     alertText: "text-white",
     alert: "bg-[#0A111E] border border-[#1B2D47] rounded-xl",
     otpCodeFieldInput: "bg-[#111D30] border border-[#1B2D47] text-white rounded-xl",
-    logoBox: "flex justify-center py-1",
-    logoImage: "h-11 w-11",
-    main: "gap-5",
-    formFieldRow: "gap-1.5",
+    logoBox: "flex justify-center py-0",
+    logoImage: "h-8 w-8",
+    main: "gap-3",
+    formFieldRow: "gap-1",
+    header: "gap-1",
+    dividerRow: "my-1",
   },
 };
 
@@ -105,7 +107,7 @@ const AUTH_FEATURES = [
 function AuthBrandPanel({ heading, sub }: { heading: string; sub: string }) {
   return (
     <div
-      className="hidden lg:flex lg:w-[48%] lg:shrink-0 flex-col justify-between p-12 relative overflow-hidden"
+      className="hidden lg:flex lg:w-[55%] xl:w-[58%] lg:shrink-0 flex-col justify-between p-10 xl:p-12 relative overflow-hidden"
       style={{
         background: "linear-gradient(155deg, #0f0c29 0%, #1a1060 50%, #0d1728 100%)",
         minHeight: "100dvh",
@@ -178,15 +180,15 @@ function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: 
   return (
     <div className="flex min-h-[100dvh] overflow-x-hidden" style={{ background: "hsl(220 50% 4%)" }}>
       <AuthBrandPanel heading={heading} sub={sub} />
-      <div className="flex min-w-0 w-full flex-1 flex-col items-center justify-center px-4 sm:px-6 lg:px-10 py-8 sm:py-12 relative">
+      <div className="flex min-w-0 w-full flex-1 flex-col items-center justify-center px-4 sm:px-6 md:px-8 py-6 sm:py-8 lg:py-10 relative">
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-          <div className="absolute top-0 right-0 w-[420px] h-[420px] rounded-full opacity-[0.07]"
+          <div className="absolute top-0 right-0 w-72 h-72 lg:w-96 lg:h-96 rounded-full opacity-[0.07]"
             style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }} />
-          <div className="absolute bottom-0 left-0 w-64 h-64 rounded-full opacity-[0.05]"
+          <div className="absolute bottom-0 left-0 w-48 h-48 lg:w-64 lg:h-64 rounded-full opacity-[0.05]"
             style={{ background: "radial-gradient(circle, #0EA5E9 0%, transparent 70%)" }} />
         </div>
-        {/* Mobile-only logo */}
-        <div className="lg:hidden flex items-center gap-2 mb-8">
+        {/* Logo: mobile + tablet (split layout is desktop-only) */}
+        <div className="lg:hidden flex items-center gap-2 mb-5 sm:mb-6 shrink-0">
           <svg width="30" height="30" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="mlg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
@@ -203,8 +205,8 @@ function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: 
             Ask<span style={{ color: "#38BDF8" }}>To</span>Act
           </span>
         </div>
-        <div className="relative w-full max-w-[420px] min-w-0 mx-auto ata-auth-shell">
-          <div className="px-4 py-6 sm:px-6 sm:py-8 overflow-hidden">{children}</div>
+        <div className="relative w-full max-w-[20rem] sm:max-w-[21rem] min-w-0 mx-auto ata-auth-shell">
+          <div className="px-4 py-4 sm:px-5 sm:py-5 overflow-hidden">{children}</div>
         </div>
       </div>
     </div>
