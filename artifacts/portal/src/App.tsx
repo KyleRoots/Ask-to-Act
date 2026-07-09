@@ -69,9 +69,11 @@ const clerkAppearance = {
     footer: "!shadow-none !border-0 !bg-transparent !rounded-none !p-0",
     headerTitle: "text-white font-extrabold text-xl tracking-tight",
     headerSubtitle: "text-[#94A3B8] text-sm",
-    socialButtonsBlockButtonText: "!text-white font-medium",
+    socialButtonsRoot: "w-full max-w-full min-w-0",
+    socialButtons: "w-full max-w-full min-w-0",
+    socialButtonsBlockButtonText: "!text-white font-medium text-xs sm:text-sm truncate",
     socialButtonsBlockButton:
-      "!text-white border border-[#2a3f5f] bg-[#111D30] hover:bg-[#182540] transition-colors rounded-xl h-11",
+      "!text-white border border-[#2a3f5f] bg-[#111D30] hover:bg-[#182540] transition-colors rounded-xl h-11 w-full min-w-0 max-w-full px-2 sm:px-3",
     formFieldLabel: "text-[#94A3B8] text-xs font-semibold uppercase tracking-wider",
     formFieldInput:
       "bg-[#111D30] border border-[#1B2D47] text-white rounded-xl h-11 focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20",
@@ -103,11 +105,10 @@ const AUTH_FEATURES = [
 function AuthBrandPanel({ heading, sub }: { heading: string; sub: string }) {
   return (
     <div
-      className="hidden lg:flex flex-col justify-between p-12 relative overflow-hidden"
+      className="hidden lg:flex lg:w-[48%] lg:shrink-0 flex-col justify-between p-12 relative overflow-hidden"
       style={{
         background: "linear-gradient(155deg, #0f0c29 0%, #1a1060 50%, #0d1728 100%)",
         minHeight: "100dvh",
-        width: "48%",
       }}
     >
       {/* Ambient glows */}
@@ -175,9 +176,9 @@ function AuthBrandPanel({ heading, sub }: { heading: string; sub: string }) {
 
 function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: string; sub: string }) {
   return (
-    <div className="flex min-h-[100dvh]" style={{ background: "hsl(220 50% 4%)" }}>
+    <div className="flex min-h-[100dvh] overflow-x-hidden" style={{ background: "hsl(220 50% 4%)" }}>
       <AuthBrandPanel heading={heading} sub={sub} />
-      <div className="flex flex-1 flex-col items-center justify-center px-4 sm:px-6 py-8 sm:py-12 relative">
+      <div className="flex min-w-0 w-full flex-1 flex-col items-center justify-center px-4 sm:px-6 lg:px-10 py-8 sm:py-12 relative">
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
           <div className="absolute top-0 right-0 w-[420px] h-[420px] rounded-full opacity-[0.07]"
             style={{ background: "radial-gradient(circle, #4F46E5 0%, transparent 70%)" }} />
@@ -202,8 +203,8 @@ function AuthLayout({ children, heading, sub }: { children: ReactNode; heading: 
             Ask<span style={{ color: "#38BDF8" }}>To</span>Act
           </span>
         </div>
-        <div className="relative w-full max-w-[420px] ata-auth-shell">
-          <div className="px-5 py-6 sm:px-7 sm:py-8">{children}</div>
+        <div className="relative w-full max-w-[420px] min-w-0 mx-auto ata-auth-shell">
+          <div className="px-4 py-6 sm:px-6 sm:py-8 overflow-hidden">{children}</div>
         </div>
       </div>
     </div>

@@ -101,6 +101,38 @@
 }
 
 @layer clerk {
+  /* Keep Clerk auth UI inside the card on all viewports */
+  .ata-auth-shell .cl-rootBox,
+  .ata-auth-shell .cl-cardBox,
+  .ata-auth-shell .cl-card,
+  .ata-auth-shell .cl-main,
+  .ata-auth-shell .cl-scrollBox {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
+
+  .ata-auth-shell .cl-socialButtons {
+    display: grid !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  @media (min-width: 480px) {
+    .ata-auth-shell .cl-socialButtons {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+  }
+
+  .ata-auth-shell .cl-socialButtonsBlockButton {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
   .cl-socialButtonsBlockButton,
   .cl-socialButtonsBlockButtonText {
     color: #f8fafc !important;
@@ -149,6 +181,9 @@
   /* Unified auth card shell wrapping Clerk sign-in/up */
   .ata-auth-shell {
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     border-radius: 1rem;
     border: 1px solid hsl(217 35% 20%);
     background: linear-gradient(180deg, hsl(222 45% 9%) 0%, hsl(222 45% 7%) 100%);
