@@ -1,5 +1,15 @@
 # Agent instructions (AskToAct repo)
 
+## Ship changes (GitHub + README)
+
+When completing fixes, adjustments, upgrades, enhancements, or issue corrections in this repo:
+
+1. **Commit** on a descriptively named branch (prefix `cursor/` when appropriate) with a concise message focused on *why*.
+2. **Push to GitHub** (`git push -u origin HEAD`) on that branch unless the user explicitly says not to push.
+3. **Update README(s)** for the area you changed — e.g. `artifacts/api-server/README.md` for API, MCP, deploy, or env-var changes; add or extend a package README when introducing a new workspace package. Document new behavior, setup steps, env vars, endpoints, or breaking changes.
+
+Do not leave production-relevant work committed-but-unpushed without telling the user. If Railway or another host auto-deploys from `main`, say so when pushing there.
+
 ## Live Bullhorn access via AskToAct MCP
 
 To query Bullhorn through the deployed connector (search, `describe_entity`, reports, writes), use the **AskToAct MCP API**, not direct Bullhorn credentials.
