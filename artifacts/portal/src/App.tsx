@@ -143,9 +143,8 @@ function AuthBrandPanel({ heading, sub }: { heading: string; sub: string }) {
 
       {/* Headline + features */}
       <div className="relative">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-6"
+        <div className="inline-flex items-center justify-center px-4 py-1.5 rounded-full text-xs font-semibold mb-6"
           style={{ background: "rgba(79,70,229,.18)", border: "1px solid rgba(79,70,229,.3)", color: "#818CF8" }}>
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
           Customer Portal
         </div>
         <h2

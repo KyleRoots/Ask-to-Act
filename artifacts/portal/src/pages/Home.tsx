@@ -59,9 +59,8 @@ export default function Home() {
 
       {/* Hero */}
       <main className="relative max-w-2xl mx-auto px-5 sm:px-8 pt-16 pb-10 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-8"
+        <div className="inline-flex items-center justify-center px-4 py-1.5 rounded-full text-xs font-semibold mb-8"
           style={{ background: "rgba(79,70,229,.12)", border: "1px solid rgba(79,70,229,.25)", color: "#818CF8" }}>
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#818CF8" }} />
           Customer Portal
         </div>
 
@@ -98,7 +97,7 @@ export default function Home() {
 
         {/* Auth options note */}
         <p className="mt-5 text-xs" style={{ color: "#3A4460" }}>
-          Sign in with Google, or use your work email
+          Sign in with your work email
         </p>
       </main>
 

@@ -1,0 +1,43 @@
+---
+description: Ship fixes to GitHub and keep READMEs in sync with code changes
+alwaysApply: true
+---
+
+# GitHub shipping and README hygiene
+
+When you fix, adjust, upgrade, or enhance anything in this repo:
+
+## 1. Push to GitHub
+
+- Do **not** leave completed work only on the local machine.
+- After changes are verified, **commit** with a clear message (why, not just what).
+- **Push** to `origin` on the appropriate branch (usually `main` for production fixes).
+- Production deploys from `main` via Railway (Dockerfile) — merging/pushing triggers deploy.
+
+Only skip push when the user explicitly asks to keep work local or review before push.
+
+## 2. Update READMEs in the same change
+
+Update documentation **in the same commit/PR** when behavior, setup, or ops change:
+
+| Area touched | Update |
+|--------------|--------|
+| Repo-wide / deploy / env | Root `README.md`, `AGENTS.md` |
+| API server, MCP, Bullhorn | `artifacts/api-server/README.md` |
+| Customer portal, Clerk auth | `artifacts/portal/README.md` |
+| Support / triage workflow | `docs/support-triage.md` |
+| New package or artifact | Add or extend a `README.md` in that package |
+
+If no README exists for the area, add a short one rather than only updating `AGENTS.md`.
+
+## 3. What to document
+
+- New or changed env vars (names only — never secrets)
+- Setup steps (Clerk, Railway, DNS, Bullhorn)
+- User-visible behavior (portal login, enrollment vs dashboard)
+- Breaking changes or migration notes
+
+## 4. Do not
+
+- Commit secrets (`.env`, API keys, tokens)
+- Create markdown files the user did not ask for unless they are the README for the code you changed

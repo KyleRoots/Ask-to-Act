@@ -34,6 +34,16 @@ Customer email / Portal / MCP create_support_ticket
    Merge → auto-deploy → reply to customer at reporter email
 ```
 
+## Shipping fixes (commit, push, docs)
+
+Every correction or enhancement should land on GitHub and stay documented:
+
+1. **Commit** with a clear message; **push** to `main` (or open a PR if the change is large).
+2. **Update READMEs** in the same change when setup or behavior changes (`README.md`, `artifacts/*/README.md`, `AGENTS.md`, or this file).
+3. **Verify deploy** on Railway after merge to `main` if the change affects production.
+
+See `.cursor/rules/github-and-readme.mdc` and `AGENTS.md` (Shipping changes).
+
 **Preferred runtime:** local Cursor with MCP connectors enabled. Cloud Agents remain an option when you need an isolated VM, but local sessions are faster for support because you can query production Bullhorn, Postgres, and Railway in one place without re-pasting context.
 
 ## Triage checklist (per email)

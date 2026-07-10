@@ -4,11 +4,14 @@
 
 When completing fixes, adjustments, upgrades, enhancements, or issue corrections in this repo:
 
-1. **Commit** on a descriptively named branch (prefix `cursor/` when appropriate) with a concise message focused on *why*.
-2. **Push to GitHub** (`git push -u origin HEAD`) on that branch unless the user explicitly says not to push.
-3. **Update README(s)** for the area you changed — e.g. `artifacts/api-server/README.md` for API, MCP, deploy, or env-var changes; add or extend a package README when introducing a new workspace package. Document new behavior, setup steps, env vars, endpoints, or breaking changes.
+1. **Commit** with a concise message focused on *why*.
+2. **Push to GitHub** (`git push`) — use `main` for production fixes (Railway auto-deploys from `main`). Use a branch + PR for larger changes unless the user asks to push directly.
+3. **Update README(s) in the same change** when behavior, setup, or ops change:
+   - Root: `README.md`, this file (`AGENTS.md`)
+   - Package: `artifacts/<name>/README.md` (e.g. `api-server`, `portal`)
+   - Runbooks: `docs/*.md` when support or triage workflow changes
 
-Do not leave production-relevant work committed-but-unpushed without telling the user. If Railway or another host auto-deploys from `main`, say so when pushing there.
+Do not leave production-relevant work local-only or committed-but-unpushed without telling the user. See `.cursor/rules/github-and-readme.mdc` for the full agent rule.
 
 ## Live Bullhorn access via AskToAct MCP
 
