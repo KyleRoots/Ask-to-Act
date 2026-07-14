@@ -58,18 +58,21 @@ isOpen:true AND title:"Software Engineer"
 
 ## Environment Variables
 
-Set all of these as secrets in Replit (never hardcode them):
+Set these as secrets on **Railway** for `@workspace/api-server` (production). Never hardcode them or commit them to git.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MCP_BEARER_TOKEN` | **Yes** | Shared secret that ChatGPT Enterprise sends with every request |
+| `MCP_BEARER_TOKEN` | **Yes** | Shared secret for MCP / admin API callers |
 | `BULLHORN_CLIENT_ID` | **Yes** | Bullhorn API client ID (from Bullhorn Support / partner portal) |
 | `BULLHORN_CLIENT_SECRET` | **Yes** | Bullhorn API client secret |
 | `BULLHORN_USERNAME` | **Yes** | Service account username for the password grant |
 | `BULLHORN_PASSWORD` | **Yes** | Service account password |
+| `SENDGRID_API_KEY` | **Yes** (for email) | SendGrid API key (`SG.…`). Required for invite, support, and firm-auth alert emails. If unset, those sends are skipped and the app may still report success. |
+| `FROM_EMAIL` | No | Sender address (default: `noreply@asktoact.ai`). Must be authenticated in SendGrid. |
+| `FROM_NAME` | No | Sender display name (default: `AskToAct`) |
 | `RATE_LIMIT_MAX` | No | Max requests per window (default: 120) |
 | `RATE_LIMIT_WINDOW_MS` | No | Rate limit window in milliseconds (default: 60000) |
-| `PORT` | Yes | Port to listen on (set automatically by Replit) |
+| `PORT` | Yes | Port to listen on (set automatically by the host) |
 
 ### Generating a secure bearer token
 
