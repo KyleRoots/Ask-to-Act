@@ -73,7 +73,7 @@ function ConnectorCard({ mcpUrl }: { mcpUrl: string }) {
         <div>
           <p className="text-sm font-semibold text-white mb-0.5">Your AI Connector is ready</p>
           <p className="text-xs" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
-            Paste this URL into ChatGPT, Claude, or Gemini under Settings → Connectors to connect your AI tool directly to Bullhorn.
+            Paste this URL into ChatGPT (Settings → Plugins; some accounts say Apps), Claude, or Gemini under Connectors to connect your AI tool directly to Bullhorn.
           </p>
         </div>
       </div>

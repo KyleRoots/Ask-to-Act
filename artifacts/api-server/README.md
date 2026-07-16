@@ -107,10 +107,10 @@ https://<your-replit-app-name>.replit.app/api/mcp
 
 ### Step 2 — Create a new App/Connector
 
-1. Log into [ChatGPT Enterprise admin portal](https://chatgpt.com) as an admin
-2. Navigate to **Settings → Apps** (previously called "Connectors")
-3. Click **Create custom app**
-4. Choose **MCP** as the app type
+1. Log into [ChatGPT](https://chatgpt.com) as an admin (Business / Enterprise) or Plus user with Developer mode
+2. Navigate to **Settings → Plugins** (some accounts label this **Apps** — same connector list)
+3. Click **Create app** / **Create custom app** (wording varies)
+4. Choose **MCP** / **Server URL** as the connection type
 
 ### Step 3 — Configure the app
 
@@ -131,12 +131,23 @@ https://<your-replit-app-name>.replit.app/api/mcp
 
 Users can now:
 1. Open a ChatGPT conversation
-2. Click the **Apps** icon (or "+" near the message box)
-3. Toggle **Bullhorn ATS** on
+2. Click the **Plugins** icon (or **Apps**, or type `@` near the message box)
+3. Toggle **Bullhorn ATS** / **AskToAct** on
 4. Start asking questions like:
    - *"Find me candidates in Chicago with 5+ years of .NET experience"*
    - *"What are the open jobs at Acme Corp?"*
    - *"Show me recent notes on candidate #12345"*
+
+---
+
+## Recruiter enrollment (Bullhorn connect)
+
+Invite links open `/api/auth/user/enroll?token=…` and show a **choice page**:
+
+1. **Connect manually** (recommended) — username/password once on AskToAct; server completes OAuth headless. Avoids Bullhorn’s first-time “Agree → login loop” bounce.
+2. **Continue with Bullhorn sign-in** — browser OAuth on Bullhorn. If consent bounces, re-open the link for recovery (manual first).
+
+After connect, the page shows the personal MCP URL and ChatGPT setup steps. In ChatGPT Settings look for **Plugins** (some plans still say **Apps**) — same connector list.
 
 ---
 
