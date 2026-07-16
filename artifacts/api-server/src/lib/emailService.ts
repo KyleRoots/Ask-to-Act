@@ -119,7 +119,7 @@ function inviteHtml(opts: {
                   <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">4</span>
                 </td>
                 <td style="padding-left:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
-                  In your preferred AI tool (ChatGPT, Claude, Gemini, etc.), go to <strong style="color:#f8fafc;">Settings → Apps or Plugins</strong> (ChatGPT labels this differently by plan) and paste the URL
+                  In your preferred AI tool (ChatGPT, Claude, Gemini, etc.), go to <strong style="color:#f8fafc;">Settings → Plugins</strong> (some ChatGPT accounts call this <strong style="color:#f8fafc;">Apps</strong>) and paste the URL
                 </td>
               </tr>
             </table>
@@ -199,7 +199,7 @@ export async function sendInviteEmail(payload: InvitePayload): Promise<void> {
       `1. Open the link below to connect your Bullhorn account`,
       `2. Sign in with your Bullhorn username and password`,
       `3. Copy your personal connector URL from the confirmation page`,
-      `4. In ChatGPT, go to Settings → Apps or Plugins (label varies by plan); in Claude/Gemini, use Connectors — then paste the URL`,
+      `4. In ChatGPT, go to Settings → Plugins (some accounts say Apps); in Claude/Gemini, use Connectors — then paste the URL`,
       ``,
       `Connect here (takes about 30 seconds):`,
       payload.enrollUrl,
