@@ -430,16 +430,16 @@ export function connectorSetupPage(displayName: string, mcpUrl: string | null, a
       tagline: "Recommended — full read &amp; write (notes, status updates, submittals) with your own Bullhorn identity.",
       steps: [
         "Go to <strong>chatgpt.com</strong>, click your profile icon (top-right), then <strong>Settings</strong>",
-        "Select <strong>Beta features</strong> from the left menu and turn on <strong>Developer mode</strong> — this unlocks the Apps section you need in the next steps. (If you already see <strong>Apps</strong> in the left menu, you can skip this step.)",
-        "Still in Settings, select <strong>Apps</strong> from the left menu",
-        "Scroll to the bottom of the page and click <strong>Create app</strong>",
+        "Select <strong>Beta features</strong> from the left menu and turn on <strong>Developer mode</strong> if you see it — this unlocks custom connectors. (If you already see <strong>Apps</strong> or <strong>Plugins</strong> in the left menu, you can skip this step.)",
+        "Still in Settings, select <strong>Apps</strong> <em>or</em> <strong>Plugins</strong> from the left menu — ChatGPT labels this differently by plan and account. Both open the same connector list.",
+        "Scroll to the bottom of the page and click <strong>Create app</strong> (or the equivalent create / add connector control)",
         "<strong>Name:</strong> We recommend <strong>AskToAct</strong> — but you can use any name you like. You will activate the connector in chat by typing <strong>@</strong> followed by the name, so choose something easy to remember",
         "<strong>Description</strong> (optional, but recommended): copy and paste — <em>Bullhorn ATS connector — search candidates, manage jobs and placements, read résumés, and update records directly from chat</em> — or write your own",
         "Under <strong>Connection</strong>, confirm <strong>Server URL</strong> is selected, then paste your connector URL (above) into the URL field",
         "Set <strong>Authentication</strong> to <strong>No authentication</strong> — your personal key is already embedded in the URL",
         "Check <strong>I understand and want to continue</strong>, then click <strong>Create</strong>",
-        "<strong>Enable write access:</strong> Back on the Apps page, click on <strong>AskToAct</strong> (or your chosen name). Under <strong>Permissions</strong>, open the dropdown and select <strong>Allow all actions</strong> — this lets AskToAct update Bullhorn records without a confirmation prompt each time. You may see a <strong>DEV</strong> badge next to the app name — this is normal for custom connectors and does not affect functionality",
-        "Open a new chat. Type <strong>@</strong> and start typing the name you chose (e.g. <strong>@AskToAct</strong>) — select it from the <strong>Plugins</strong> dropdown that appears, and your Bullhorn tools are now active for that conversation",
+        "<strong>Enable write access:</strong> Back on the Apps/Plugins page, click on <strong>AskToAct</strong> (or your chosen name). Under <strong>Permissions</strong>, open the dropdown and select <strong>Allow all actions</strong> (or your plan's equivalent) — this lets AskToAct update Bullhorn records without a confirmation prompt each time. You may see a <strong>DEV</strong> badge next to the app name — this is normal for custom connectors and does not affect functionality",
+        "Open a new chat. Type <strong>@</strong> and start typing the name you chose (e.g. <strong>@AskToAct</strong>) — select it from the plugins/apps picker that appears, and your Bullhorn tools are now active for that conversation",
       ],
     },
     claude: {
@@ -757,11 +757,52 @@ ${err}
 }
 
 /**
+ * First-visit enroll landing: choose Bullhorn browser OAuth or server-side
+ * manual connect. Token-gated so crawlers never see the password form without
+ * a valid one-time enroll link. Manual is offered up front because Bullhorn's
+ * first-time consent screen often bounces recruiters back to login.
+ */
+function enrollChoicePage(token: string, userName: string, firmName?: string | null): string {
+  const e = escapeHtml;
+  const firmLine = firmName ? ` for <strong>${e(firmName)}</strong>` : "";
+  const oauthUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&go=1`;
+  const manualUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&manual=1`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect Bullhorn | AskToAct</title>
+<style${nonceAttr()}>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
+main{max-width:480px;width:100%}
+.logo{display:flex;align-items:center;gap:8px;margin-bottom:24px}
+.logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}
+.logo-text span{color:#38BDF8}
+.card{background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:32px}
+h1{font-size:20px;font-weight:800;margin:0 0 10px;letter-spacing:-0.02em}
+.sub{font-size:14px;color:#94a3b8;margin:0 0 24px;line-height:1.6}
+.btn{display:block;width:100%;text-align:center;padding:13px;border-radius:9px;font-size:14px;font-weight:600;text-decoration:none;margin-bottom:12px}
+.btn-primary{background:#4F46E5;color:#fff}
+.btn-primary:hover{background:#4338ca}
+.btn-secondary{background:#0f1622;color:#a5b4fc;border:1px solid rgba(79,70,229,.35)}
+.btn-secondary:hover{border-color:#4F46E5;background:rgba(79,70,229,.12)}
+.hint{font-size:12px;color:#64748b;line-height:1.6;margin:18px 0 0}
+</style></head>
+<body><main>
+<div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div>
+<div class="card">
+  <h1>Connect your Bullhorn account</h1>
+  <p class="sub">Hi ${e(userName)} — choose how to link Bullhorn${firmLine}. If Bullhorn's sign-in sends you back to its login screen after you click Agree, use <strong>Connect manually</strong> instead.</p>
+  <a class="btn btn-primary" href="${manualUrl}">Connect manually</a>
+  <a class="btn btn-secondary" href="${oauthUrl}">Continue with Bullhorn sign-in</a>
+  <p class="hint"><strong>Connect manually</strong> is the most reliable path: enter your Bullhorn username and password once here; we finish the connection on the server. <strong>Bullhorn sign-in</strong> uses Bullhorn's own login page (no password on this site), but Bullhorn sometimes interrupts first-time consent.</p>
+</div>
+</main></body></html>`;
+}
+
+/**
  * Recovery page shown when we detect Bullhorn's first-time consent bounce: the
  * user started the OAuth redirect but landed back on the enroll link without
- * completing. Offers a one-click retry and a self-serve manual fallback. This
- * page is reachable ONLY with a valid one-time enroll token, so crawlers can
- * never see it (the manual credential form stays behind a further click).
+ * completing. Offers manual connect first (most reliable) plus an OAuth retry.
+ * Reachable ONLY with a valid one-time enroll token.
  */
 function bounceRecoveryPage(token: string, userName: string, firmName?: string | null): string {
   const e = escapeHtml;
@@ -791,9 +832,9 @@ h1{font-size:20px;font-weight:800;margin:0 0 10px;letter-spacing:-0.02em}
 <div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div>
 <div class="card">
   <h1>Let's finish connecting Bullhorn</h1>
-  <p class="sub">Hi ${e(userName)} — it looks like the Bullhorn connection${firmLine} didn't complete. Bullhorn sometimes interrupts the very first sign-in and sends you back to its own login screen. Pick an option below to finish:</p>
-  <a class="btn btn-primary" href="${retryUrl}">Try the Bullhorn sign-in again</a>
-  <a class="btn btn-secondary" href="${manualUrl}">Connect manually instead</a>
+  <p class="sub">Hi ${e(userName)} — it looks like the Bullhorn connection${firmLine} didn't complete. Bullhorn often interrupts the very first sign-in and sends you back to its own login screen. Use <strong>Connect manually</strong> to finish:</p>
+  <a class="btn btn-primary" href="${manualUrl}">Connect manually</a>
+  <a class="btn btn-secondary" href="${retryUrl}">Try the Bullhorn sign-in again</a>
   <p class="hint">"Connect manually" lets you enter your Bullhorn username and password once on this page — we complete the connection securely on the server, which avoids Bullhorn's first-time interruption entirely.</p>
 </div>
 </main></body></html>`;
@@ -868,11 +909,9 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       return;
     }
 
-    // Escape hatch: ?manual=1 renders the legacy server-side credential form.
-    // This is intentionally NOT linked from any page so search-engine crawlers
-    // never see a Bullhorn password field on this domain (the pattern that got
-    // the domain flagged as a "deceptive site"). Only used if Bullhorn's
-    // first-time browser consent screen bounces for a given user.
+    // ?manual=1 — server-side credential form (headless OAuth). Token-gated so
+    // crawlers without a valid enroll link never see a Bullhorn password field
+    // (that pattern previously got the domain flagged as a "deceptive site").
     if (req.query["manual"] === "1") {
       res.send(enrollForm(token, rows[0].name, firmName));
       return;
@@ -880,11 +919,8 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
 
     // Bounce recovery: Bullhorn's first-time consent screen sometimes bounces a
     // brand-new user back to its own login page instead of returning to our
-    // callback, so the connection silently never completes. We detect the
-    // return: if this browser already started an attempt for this user (cookie
-    // set on the previous redirect) and they're back here still unconnected,
-    // show a recovery page with a retry + manual fallback. ?go=1 forces the
-    // redirect (the "try again" button on that page).
+    // callback. If this browser already started an OAuth attempt (cookie) and
+    // they're back still unconnected, show recovery (manual first).
     const forceRedirect = req.query["go"] === "1";
     if (!forceRedirect && readCookie(req, ENROLL_ATTEMPT_COOKIE) === rows[0].id) {
       res.set("Cache-Control", "no-store");
@@ -892,27 +928,29 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       return;
     }
 
-    // Default flow: redirect the recruiter to Bullhorn's own login page. The
-    // user authenticates and approves consent on bullhorn.com — no password is
-    // ever entered on this domain. Bullhorn redirects back to the shared
-    // /api/auth/bullhorn/callback with an authorization code; the embedded
-    // userId in the state routes it to completeUserEnrollment.
-    const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
-    rememberState(state);
-    const authorizeUrl = await getAuthorizeUrl(state);
-    // Record that an OAuth attempt started for this user so a bounce is
-    // detectable on return. SameSite=Lax so it survives the top-level redirect
-    // back from Bullhorn; scoped to the enroll path; expires with the link's
-    // realistic completion window.
-    res.cookie(ENROLL_ATTEMPT_COOKIE, rows[0].id, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      maxAge: 15 * 60 * 1000,
-      path: "/api/auth/user/enroll",
-    });
+    // ?go=1 — recruiter chose Bullhorn browser OAuth from the choice page.
+    // Redirect to Bullhorn; plant attempt cookie so a bounce can be recovered.
+    if (forceRedirect) {
+      const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
+      rememberState(state);
+      const authorizeUrl = await getAuthorizeUrl(state);
+      res.cookie(ENROLL_ATTEMPT_COOKIE, rows[0].id, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000,
+        path: "/api/auth/user/enroll",
+      });
+      res.set("Cache-Control", "no-store");
+      res.redirect(authorizeUrl);
+      return;
+    }
+
+    // Default: show choice page (manual recommended; OAuth optional). Auto-
+    // redirecting to Bullhorn first caused most new users to hit the consent
+    // bounce with no obvious way out until they re-opened the link.
     res.set("Cache-Control", "no-store");
-    res.redirect(authorizeUrl);
+    res.send(enrollChoicePage(token, rows[0].name, firmName));
   } catch (err) {
     logger.error({ err }, "Enrollment form failed");
     res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));

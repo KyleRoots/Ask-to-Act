@@ -85,38 +85,41 @@ describe("GET /api/auth/user/enroll — first-time consent bounce recovery", () 
       .set("Cookie", `${COOKIE}=${USER}`);
 
     expect(res.status).toBe(200);
-    // Offers both a retry of the OAuth flow and the manual fallback…
+    // Manual is primary after a bounce; OAuth retry still available.
     expect(res.text).toContain(`token=${TOKEN}&go=1`);
     expect(res.text).toContain(`token=${TOKEN}&manual=1`);
     expect(res.text).toContain("Connect manually");
-    // …and does NOT redirect to Bullhorn.
+    expect(res.text).toContain("Let's finish connecting Bullhorn");
     expect(res.headers["location"]).toBeUndefined();
   });
 
-  it("redirects to Bullhorn AND sets the attempt cookie on first visit (no cookie yet)", async () => {
+  it("shows the choice page on first visit (no cookie) — does not auto-redirect to Bullhorn", async () => {
     const res = await request(app).get(`/api/auth/user/enroll?token=${TOKEN}`);
-    expect(res.status).toBe(302);
-    expect(res.headers["location"]).toContain("auth.bullhorn.example");
-    // The attempt cookie is planted so a later bounce return is detectable.
-    const setCookie = res.headers["set-cookie"];
-    const cookieHeader = Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "");
-    expect(cookieHeader).toContain(`${COOKIE}=`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Connect your Bullhorn account");
+    expect(res.text).toContain(`token=${TOKEN}&manual=1`);
+    expect(res.text).toContain(`token=${TOKEN}&go=1`);
+    expect(res.headers["location"]).toBeUndefined();
   });
 
-  it("does NOT show recovery for a mismatched cookie (different user's attempt)", async () => {
+  it("shows the choice page for a mismatched cookie (different user's attempt)", async () => {
     const res = await request(app)
       .get(`/api/auth/user/enroll?token=${TOKEN}`)
       .set("Cookie", `${COOKIE}=some-other-user-id`);
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Connect your Bullhorn account");
     expect(res.text).not.toContain("Let's finish connecting Bullhorn");
   });
 
-  it("forces the redirect with ?go=1 even when the cookie matches (retry bypasses recovery)", async () => {
+  it("redirects to Bullhorn with ?go=1 and sets the attempt cookie", async () => {
     const res = await request(app)
       .get(`/api/auth/user/enroll?token=${TOKEN}&go=1`)
       .set("Cookie", `${COOKIE}=${USER}`);
     expect(res.status).toBe(302);
     expect(res.headers["location"]).toContain("auth.bullhorn.example");
     expect(res.text).not.toContain("Let's finish connecting Bullhorn");
+    const setCookie = res.headers["set-cookie"];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "");
+    expect(cookieHeader).toContain(`${COOKIE}=`);
   });
 });
