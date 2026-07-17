@@ -60,6 +60,10 @@ import {
   updatePlacement,
   uploadFileToRecord,
   createCandidateFromResume,
+  softDeleteEntity,
+  restoreEntity,
+  archiveOrCancelPlacement,
+  SOFT_DELETABLE_ENTITIES,
 } from "./bullhorn-client.js";
 import { getUserSession, currentFirmContextId } from "./bullhorn-auth.js";
 import { sendSupportEmail } from "./emailService.js";
@@ -309,6 +313,22 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     schema: Args,
     cb: ToolCallback<Args>,
   ) => server["tool"](name, description, schema, WRITE_ANNOTATIONS, cb);
+
+  // Destructive writes (soft-delete/restore/placement archive) carry
+  // destructiveHint:true so MCP clients can require explicit user approval.
+  // idempotentHint:true — repeating the same call converges on the same state.
+  const DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: true,
+    openWorldHint: false,
+  };
+  const destructiveTool = <Args extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    schema: Args,
+    cb: ToolCallback<Args>,
+  ) => server["tool"](name, description, schema, DESTRUCTIVE_ANNOTATIONS, cb);
 
   /**
    * Resolves the calling user's Bullhorn session for write operations.
@@ -1935,6 +1955,72 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       runWriteTool("create_candidate_from_resume", { fileName }, async () => {
         const session = await resolveWriteSession();
         return createCandidateFromResume(session, { fileName, fileContentBase64, contentType, overrideFields });
+      }),
+  );
+
+  const softDeletableEnum = z.enum(
+    SOFT_DELETABLE_ENTITIES as unknown as [string, ...string[]],
+  );
+
+  destructiveTool(
+    "delete_entity",
+    "WRITE (DESTRUCTIVE): Soft-deletes a Bullhorn record, as YOU (sets isDeleted=true). " +
+      "The record disappears from normal searches and lists but is NOT permanently destroyed — it stays in Bullhorn and can be brought back with restore_entity. Hard/permanent deletion is not available through this connector. " +
+      "Whether the delete succeeds depends on YOUR Bullhorn role: if your account lacks delete rights for this entity, Bullhorn refuses and you get a permission_denied message to relay to the user. " +
+      `Supported entities: ${SOFT_DELETABLE_ENTITIES.join(", ")}. ` +
+      "Placements canNOT be deleted (they drive billing) — use archive_placement to cancel/archive one via a status change. " +
+      "BEFORE CALLING: look up the record first (get_candidate / get_entity etc.) and confirm with the user the exact entity type, ID, AND the record's name/title so the wrong record is never deleted. Never delete more than one record per user confirmation.",
+    {
+      entityType: softDeletableEnum.describe(
+        "Entity type of the record to soft-delete.",
+      ),
+      id: z.number().int().positive().describe("Bullhorn record ID to soft-delete."),
+    },
+    async ({ entityType, id }) =>
+      runWriteTool("delete_entity", { entityType, id }, async () => {
+        const session = await resolveWriteSession();
+        return softDeleteEntity(session, entityType, id);
+      }),
+  );
+
+  destructiveTool(
+    "restore_entity",
+    "WRITE (DESTRUCTIVE): Restores a previously soft-deleted Bullhorn record, as YOU (sets isDeleted=false), making it visible in searches again. " +
+      `Counterpart to delete_entity. Supported entities: ${SOFT_DELETABLE_ENTITIES.join(", ")}. ` +
+      "Requires delete/edit rights on YOUR Bullhorn role; a refusal returns permission_denied. " +
+      "Confirm the entity type and ID with the user before restoring.",
+    {
+      entityType: softDeletableEnum.describe(
+        "Entity type of the record to restore.",
+      ),
+      id: z.number().int().positive().describe("Bullhorn record ID to restore."),
+    },
+    async ({ entityType, id }) =>
+      runWriteTool("restore_entity", { entityType, id }, async () => {
+        const session = await resolveWriteSession();
+        return restoreEntity(session, entityType, id);
+      }),
+  );
+
+  destructiveTool(
+    "archive_placement",
+    "WRITE (DESTRUCTIVE, SENSITIVE): Cancels or archives a Placement by changing its status, as YOU. " +
+      "Placements drive billing/payroll and are NEVER soft-deleted or removed — this is the only sanctioned way to take a placement out of play. " +
+      'The status must be a value from this firm\'s Placement status picklist: call list_field_options("Placement", "status") first and have the user pick the cancel/terminate/archive value (invalid values are rejected with the valid list). ' +
+      "BEFORE CALLING: confirm with the user the placement ID, the candidate/job it belongs to, and the exact target status — this can affect billing.",
+    {
+      placementId: z.number().int().positive().describe("Bullhorn Placement ID to cancel/archive."),
+      status: z
+        .string()
+        .min(1)
+        .describe(
+          'Target status from the Placement status picklist (e.g. "Terminated", "Falloff" — confirm via list_field_options).',
+        ),
+    },
+    async ({ placementId, status }) =>
+      runWriteTool("archive_placement", { placementId, status }, async () => {
+        const session = await resolveWriteSession();
+        return archiveOrCancelPlacement(session, placementId, status);
       }),
   );
 

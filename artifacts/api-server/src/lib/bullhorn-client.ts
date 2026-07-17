@@ -3130,6 +3130,17 @@ export async function validateWriteFields(
   body: Record<string, unknown>,
   opts: { mode: "create" | "update" } = { mode: "create" },
 ): Promise<void> {
+  // Soft-deletion must go through the dedicated delete/restore tools (which
+  // carry destructive annotations and their own confirmation copy) — never
+  // through an open create/update `fields` map. Checked BEFORE the meta
+  // lookup so the rejection is deterministic even when meta is unavailable.
+  const deletedKey = Object.keys(body).find((k) => k.toLowerCase() === "isdeleted");
+  if (deletedKey !== undefined) {
+    throw new BullhornFieldValidationError(
+      `"${deletedKey}" cannot be set through a generic ${opts.mode} — deleting or restoring a record is a separate, destructive action. ` +
+        `Use the delete_entity tool to soft-delete a record (or restore_entity to un-delete it) after confirming with the user.`,
+    );
+  }
   // Accept the dotted address notation some AI clients emit (e.g.
   // `address.countryName`) by folding it into the nested composite BEFORE
   // validation, so the write proceeds via the normal address pipeline.
@@ -4159,6 +4170,105 @@ export async function updatePlacement(
   await validateWriteFields("Placement", fields, { mode: "update" });
   await updateEntityRecord(session, "Placement", placementId, fields);
   return { updated: true, placementId };
+}
+
+// ── Soft delete / restore ─────────────────────────────────────────────────
+//
+// Bullhorn "deletion" is a soft delete: `POST entity/{Entity}/{id}` with
+// `{ isDeleted: true }`. The record disappears from normal searches (our read
+// tools already filter `isDeleted:false`) but remains in the database and can
+// be restored. Hard `DELETE entity/...` is intentionally NOT implemented.
+// Placement is excluded: its lifecycle is billing-sensitive and status-driven,
+// so it is archived/cancelled via a status change instead (see
+// archiveOrCancelPlacement below).
+
+/** Canonical entity names the dedicated delete/restore tools accept. */
+export const SOFT_DELETABLE_ENTITIES = [
+  "Candidate",
+  "ClientContact",
+  "ClientCorporation",
+  "JobOrder",
+  "JobSubmission",
+  "Lead",
+  "Opportunity",
+] as const;
+
+const SOFT_DELETABLE_SET = new Set<string>(SOFT_DELETABLE_ENTITIES);
+
+async function setEntityDeleted(
+  session: BullhornWriteSession,
+  entityType: string,
+  id: number,
+  isDeleted: boolean,
+): Promise<{ entity: string; id: number; isDeleted: boolean; action: string }> {
+  const entry = resolveEntity(entityType);
+  if (!SOFT_DELETABLE_SET.has(entry.canonical)) {
+    const hint =
+      entry.canonical === "Placement"
+        ? "Placements are billing-sensitive and are never soft-deleted — cancel or archive the placement with a status change instead (use archive_placement)."
+        : `Only these entities can be soft-deleted: ${SOFT_DELETABLE_ENTITIES.join(", ")}.`;
+    throw new BullhornFieldValidationError(
+      `Soft-delete is not supported for ${entry.canonical}. ${hint}`,
+    );
+  }
+  // Deliberately bypasses validateWriteFields (which rejects isDeleted on the
+  // generic paths) — this is THE sanctioned soft-delete path. Bullhorn enforces
+  // the caller's own delete ACL under their session; a 403 surfaces as
+  // BullhornPermissionError -> permission_denied.
+  await writeFetch(session, "POST", `entity/${entry.canonical}/${id}`, {
+    isDeleted,
+  });
+  return {
+    entity: entry.canonical,
+    id,
+    isDeleted,
+    action: isDeleted ? "soft_deleted" : "restored",
+  };
+}
+
+/**
+ * Soft-deletes a record (`isDeleted: true`). The record is hidden from normal
+ * searches but NOT permanently destroyed; restoreEntity can bring it back.
+ */
+export async function softDeleteEntity(
+  session: BullhornWriteSession,
+  entityType: string,
+  id: number,
+): Promise<{ entity: string; id: number; isDeleted: boolean; action: string }> {
+  return setEntityDeleted(session, entityType, id, true);
+}
+
+/** Restores a previously soft-deleted record (`isDeleted: false`). */
+export async function restoreEntity(
+  session: BullhornWriteSession,
+  entityType: string,
+  id: number,
+): Promise<{ entity: string; id: number; isDeleted: boolean; action: string }> {
+  return setEntityDeleted(session, entityType, id, false);
+}
+
+/**
+ * Archives or cancels a Placement by changing its status to a value from this
+ * firm's configured Placement status picklist (e.g. "Terminated", "Falloff").
+ * Placements are never soft-deleted: they drive billing/payroll, and this
+ * instance documents Placement `isDeleted` as unreliable on search paths.
+ */
+export async function archiveOrCancelPlacement(
+  session: BullhornWriteSession,
+  placementId: number,
+  status: string,
+): Promise<{ placementId: number; status: string; action: string }> {
+  const trimmed = status.trim();
+  if (trimmed === "") {
+    throw new BullhornFieldValidationError(
+      'A target status is required to archive/cancel a placement. Call list_field_options("Placement", "status") and ask the user to pick the cancel/archive value.',
+    );
+  }
+  await assertPicklistValue("Placement", "status", trimmed);
+  await writeFetch(session, "POST", `entity/Placement/${placementId}`, {
+    status: trimmed,
+  });
+  return { placementId, status: trimmed, action: "status_changed" };
 }
 
 // ── Sendout (Client Submission) create ────────────────────────────────────

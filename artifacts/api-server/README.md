@@ -27,17 +27,19 @@ All requests from ChatGPT must include a shared bearer token. Requests without t
 
 ---
 
-## Available Tools (33 Read + 20 Write)
+## Available Tools (33 Read + 32 Write)
 
 **Read — 33 tools**
 - Search, fetch, and list: `search_candidates`, `search_jobs`, `search_companies`, `search_contacts`, `get_candidate`, `get_job`, `get_company`, `get_contact`, `list_submissions_for_job`, `list_placements`, `get_notes`, `get_candidate_resume`, `list_candidate_attachments`, `read_candidate_attachment`, `count_entity`, `get_report`, `get_leaderboard`, `get_candidate_scorecard`, and 15 more.
 - Reports: scorecards, leaderboards, open-job counts, confirmed-placement counts, and custom breakdowns.
 
-**Write — 20 Bullhorn write tools** (per-user; each action runs as the recruiter's own Bullhorn identity)
-- Candidate actions: `add_note`, `update_candidate_status`, `create_job_submission`, `bulk_create_submissions`, `update_submission_status`, `create_candidate_from_resume`
+**Write — 32 Bullhorn write tools** (per-user; each action runs as the recruiter's own Bullhorn identity)
+- Candidate actions: `add_note`, `update_candidate`, `update_candidate_status`, `create_job_submission`, `bulk_create_submissions`, `update_submission_status`, `create_candidate_from_resume`
 - Job & company: `create_job`, `update_job`, `create_company`, `update_company`, `create_contact`, `update_contact`
-- Workflow: `create_task`, `create_appointment`, `create_tearsheet`, `add_candidates_to_tearsheet`, `remove_candidates_from_tearsheet`
-- Placements & files: `create_placement`, `update_placement`, `upload_file_to_record`
+- Sales: `create_lead`, `update_lead`, `create_opportunity`, `update_opportunity`
+- Workflow: `create_task`, `update_task`, `create_appointment`, `update_appointment`, `notify_users`, `create_tearsheet`, `add_candidates_to_tearsheet`, `remove_candidates_from_tearsheet`
+- Placements & files: `create_placement`, `update_placement`, `create_sendout`, `upload_file_to_record`
+- Destructive (soft-delete; `destructiveHint:true`, gated by the user's own Bullhorn delete rights): `delete_entity` (soft-deletes a Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Lead, or Opportunity — sets `isDeleted`, reversible, never a hard delete), `restore_entity` (un-deletes), `archive_placement` (cancels/archives a Placement via a status change — placements are billing-sensitive and are never soft-deleted). Generic `update_*` tools reject `isDeleted` so deletion only happens through these dedicated tools.
 
 **Internal:** `create_support_ticket` (AskToAct support team)
 
@@ -124,7 +126,7 @@ https://<your-replit-app-name>.replit.app/api/mcp
 ### Step 4 — Set access controls
 
 1. Under **Access**, choose which users or groups can enable this app
-2. Set write permissions to **Enabled** (the 20 write tools require per-user Bullhorn enrollment; each recruiter writes under their own Bullhorn identity)
+2. Set write permissions to **Enabled** (the 32 write tools require per-user Bullhorn enrollment; each recruiter writes under their own Bullhorn identity)
 3. Click **Save and publish**
 
 ### Step 5 — User enablement
@@ -199,7 +201,7 @@ curl -X POST http://localhost:5000/api/mcp \
 ## Available features
 
 - **v1 — Read tools**: 33 search, fetch, report, and résumé-reading tools
-- **v2 — Write tools (live)**: 20 write tools for notes, submissions, placements, jobs, companies, tasks, tearsheets, and file uploads
+- **v2 — Write tools (live)**: 32 write tools for notes, submissions, placements, jobs, companies, tasks, tearsheets, file uploads, and permission-aware soft-delete/restore/archive
 - **v2 — Per-user OAuth (live)**: Each recruiter authenticates as their own Bullhorn user (not a shared service account), so every write is properly attributed
 
 ## Roadmap
