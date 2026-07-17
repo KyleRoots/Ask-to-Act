@@ -65,7 +65,8 @@ async function buildAll() {
       "@swc/*",
       "@aws-sdk/*",
       "@azure/*",
-      "@opentelemetry/*",
+      // NOTE: do NOT externalize @opentelemetry/* — @sentry/node imports
+      // @opentelemetry/api, and the runtime image ships only dist/ (no node_modules).
       "@google-cloud/*",
       "@google/*",
       "googleapis",
