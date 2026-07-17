@@ -39,3 +39,9 @@ Use that provider's "restore to new instance" flow the same way: new instance �
 
 ## Record the result
 After a successful drill, note date + provider + who ran it in this file or a short ops note. Until that happens, treat backups as unverified.
+
+## Drill log
+- **2026-07-17 — PASS (provider: Supabase, project `mtyxynfacpuwziwgdwfq` "Ask-to-Act MCP", org plan: Pro).**
+  `DATABASE_URL` host is `aws-1-us-east-1.pooler.supabase.com` (Supabase pooler), NOT Neon — the Neon-first section above is kept only as generic guidance.
+  Method: read-only `pg_dump -Fc` of production → `pg_restore` into a local scratch DB (`asktoact_restore_drill` on Homebrew Postgres 16) → verified all 7 app tables restored with plausible row counts (firms=2, users=13, bullhorn_tokens=2, firm_config=2, seat_activity=7, tool_usage=51) → dropped scratch DB and deleted the dump.
+  Notes: 4 ignored restore errors were Supabase-internal (`supabase_vault` extension / `vault.secrets`) — irrelevant to app data. Supabase Pro also provides daily automated backups + PITR in the dashboard (Database → Backups) as the managed layer on top of this manual path.
