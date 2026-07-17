@@ -29,6 +29,10 @@ const NEW_WRITE_TOOLS = [
   "create_candidate_from_resume",
 ];
 
+// Destructive tools (soft-delete surface) must additionally carry
+// destructiveHint:true so MCP clients can gate them behind explicit approval.
+const DESTRUCTIVE_TOOLS = ["delete_entity", "restore_entity", "archive_placement"];
+
 function registeredTools(): Record<string, { annotations?: Record<string, unknown> }> {
   const server = createMcpServer({ kind: "user", userId: "test-user", firmId: "test-firm" });
   const reg = (server as unknown as { _registeredTools?: Record<string, { annotations?: Record<string, unknown> }> })
@@ -59,6 +63,27 @@ describe("MCP write-back surface", () => {
     expect(reg["search_candidates"]?.annotations?.readOnlyHint).toBe(true);
     expect(reg["count_entity"]?.annotations?.readOnlyHint).toBe(true);
   });
+
+  it("registers every destructive tool with destructiveHint:true", () => {
+    const reg = registeredTools();
+    for (const name of DESTRUCTIVE_TOOLS) {
+      const ann = reg[name]?.annotations ?? {};
+      expect(reg[name], `expected destructive tool "${name}" to be registered`).toBeDefined();
+      expect(ann.readOnlyHint, `${name} must NOT be readOnly`).toBe(false);
+      expect(ann.destructiveHint, `${name} must declare destructiveHint:true`).toBe(true);
+      expect(ann.openWorldHint, `${name} must declare openWorldHint:false`).toBe(false);
+    }
+  });
+
+  it("keeps non-destructive write tools at destructiveHint:false", () => {
+    const reg = registeredTools();
+    for (const name of NEW_WRITE_TOOLS) {
+      expect(
+        reg[name]?.annotations?.destructiveHint,
+        `${name} must NOT be flagged destructive`,
+      ).toBe(false);
+    }
+  });
 });
 
 describe("public OpenAPI door stays read-only", () => {
@@ -73,7 +98,7 @@ describe("public OpenAPI door stays read-only", () => {
 
     const doc = JSON.stringify(res.body).toLowerCase();
     // No write operation ids / paths should appear in the public schema.
-    for (const name of NEW_WRITE_TOOLS) {
+    for (const name of [...NEW_WRITE_TOOLS, ...DESTRUCTIVE_TOOLS]) {
       expect(doc.includes(name)).toBe(false);
     }
     // Every declared path must be GET-only or the read-only POST /count.
