@@ -8,7 +8,7 @@ import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
-import { isFirmConnected, getFirmAuthMode } from "../lib/bullhorn-auth.js";
+import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses } from "../lib/bullhorn-auth.js";
 
 const router: IRouter = Router();
 
@@ -229,15 +229,29 @@ router.get("/firms", bearerAuth, requireService, async (req: Request, res: Respo
     .groupBy(usersTable.firmId);
   const countByFirm = new Map(counts.map((c) => [c.firmId, c.total]));
 
-  const rows = firms.map((f) => ({
-    id: f.id,
-    name: f.name,
-    subscriptionStatus: f.subscriptionStatus ?? "none",
-    status: f.status,
-    enrolledSeats: countByFirm.get(f.id) ?? 0,
-    seatLimit: f.seatLimit,
-    logoUrl: f.logoUrl ?? null,
-  }));
+  // One Bullhorn-health query for the whole list (avoids N status round-trips).
+  const bhByFirm = await listFirmBullhornHealthStatuses();
+  const notConnected = {
+    connected: false,
+    healthy: false,
+    needsReauthorization: false,
+    lastAuthErrorAt: null,
+    lastAuthError: null,
+  } as const;
+
+  const rows = firms.map((f) => {
+    const bullhorn = bhByFirm.get(f.id) ?? notConnected;
+    return {
+      id: f.id,
+      name: f.name,
+      subscriptionStatus: f.subscriptionStatus ?? "none",
+      status: f.status,
+      enrolledSeats: countByFirm.get(f.id) ?? 0,
+      seatLimit: f.seatLimit,
+      logoUrl: f.logoUrl ?? null,
+      bullhorn,
+    };
+  });
   res.json({ data: rows });
 });
 

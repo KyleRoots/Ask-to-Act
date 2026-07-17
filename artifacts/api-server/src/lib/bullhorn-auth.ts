@@ -264,6 +264,32 @@ export type FirmBullhornHealthStatus = {
   lastAuthError: string | null;
 };
 
+function healthFromTokenRow(row: {
+  refreshToken: string | null;
+  authHealthy: boolean;
+  authMode: string;
+  lastAuthErrorAt: Date | null;
+  lastAuthError: string | null;
+} | undefined): FirmBullhornHealthStatus {
+  if (!row?.refreshToken) {
+    return {
+      connected: false,
+      healthy: false,
+      needsReauthorization: false,
+      lastAuthErrorAt: null,
+      lastAuthError: null,
+    };
+  }
+  const healthy = row.authHealthy;
+  return {
+    connected: true,
+    healthy,
+    needsReauthorization: row.authMode === "oauth" && !healthy,
+    lastAuthErrorAt: row.lastAuthErrorAt?.toISOString() ?? null,
+    lastAuthError: row.lastAuthError ?? null,
+  };
+}
+
 /** Admin-facing Bullhorn connection health for a firm. */
 export async function getFirmBullhornHealthStatus(firmId: string): Promise<FirmBullhornHealthStatus> {
   const rows = await db
@@ -278,25 +304,34 @@ export async function getFirmBullhornHealthStatus(firmId: string): Promise<FirmB
     .where(eq(bullhornTokensTable.firmId, firmId))
     .limit(1);
 
-  const row = rows[0];
-  if (!row?.refreshToken) {
-    return {
-      connected: false,
-      healthy: false,
-      needsReauthorization: false,
-      lastAuthErrorAt: null,
-      lastAuthError: null,
-    };
-  }
+  return healthFromTokenRow(rows[0]);
+}
 
-  const healthy = row.authHealthy;
-  return {
-    connected: true,
-    healthy,
-    needsReauthorization: row.authMode === "oauth" && !healthy,
-    lastAuthErrorAt: row.lastAuthErrorAt?.toISOString() ?? null,
-    lastAuthError: row.lastAuthError ?? null,
-  };
+/**
+ * Batch Bullhorn health for the admin firms list (one query, keyed by firmId).
+ * Firms with no token row are omitted from the map — callers treat missing as
+ * not connected via healthFromTokenRow(undefined).
+ */
+export async function listFirmBullhornHealthStatuses(): Promise<
+  Map<string, FirmBullhornHealthStatus>
+> {
+  const rows = await db
+    .select({
+      firmId: bullhornTokensTable.firmId,
+      refreshToken: bullhornTokensTable.refreshToken,
+      authHealthy: bullhornTokensTable.authHealthy,
+      authMode: bullhornTokensTable.authMode,
+      lastAuthErrorAt: bullhornTokensTable.lastAuthErrorAt,
+      lastAuthError: bullhornTokensTable.lastAuthError,
+    })
+    .from(bullhornTokensTable);
+
+  const map = new Map<string, FirmBullhornHealthStatus>();
+  for (const row of rows) {
+    if (!row.firmId) continue;
+    map.set(row.firmId, healthFromTokenRow(row));
+  }
+  return map;
 }
 
 /**
