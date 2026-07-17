@@ -16,6 +16,7 @@ import router from "./routes";
 import legalRouter from "./routes/legal";
 import { logger } from "./lib/logger";
 import { mountFrontends } from "./lib/serve-frontends";
+import { isSentryEnabled, Sentry } from "./lib/sentry.js";
 
 const app: Express = express();
 app.set("trust proxy", 1);
@@ -273,6 +274,13 @@ app.get("/", (_req, res) => {
 app.use(legalRouter);
 
 app.use("/api", router);
+
+// Sentry Express error handler — MUST sit before our own handler so it can
+// capture the exception while still letting the next middleware format the
+// client response. No-op when SENTRY_DSN is unset.
+if (isSentryEnabled()) {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // Global error handler. Express 5 forwards rejected async handlers here, which
 // keeps the process alive and prevents stack traces from leaking to clients.

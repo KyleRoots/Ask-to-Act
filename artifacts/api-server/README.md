@@ -71,6 +71,7 @@ Set all of these as secrets in Replit (never hardcode them):
 | `BULLHORN_PASSWORD` | **Yes** | Service account password |
 | `RATE_LIMIT_MAX` | No | Max requests per window (default: 120) |
 | `RATE_LIMIT_WINDOW_MS` | No | Rate limit window in milliseconds (default: 60000) |
+| `SENTRY_DSN` | No (recommended in production) | Sentry project DSN. When set, unhandled Express errors and process crashes are reported to Sentry. When unset, the app runs normally with local logs only. |
 | `PORT` | Yes | Port to listen on (set automatically by Replit) |
 
 ### Generating a secure bearer token
