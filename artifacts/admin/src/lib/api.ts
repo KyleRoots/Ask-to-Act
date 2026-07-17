@@ -64,6 +64,14 @@ export type FirmRow = {
   enrolledSeats: number;
   seatLimit: number | null;
   logoUrl: string | null;
+  /** Present on list responses after the Bullhorn-health join shipped. */
+  bullhorn?: {
+    connected: boolean;
+    healthy: boolean;
+    needsReauthorization: boolean;
+    lastAuthErrorAt: string | null;
+    lastAuthError: string | null;
+  };
 };
 
 export type FirmDetail = {

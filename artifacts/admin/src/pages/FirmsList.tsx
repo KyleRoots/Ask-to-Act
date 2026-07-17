@@ -63,6 +63,67 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+type BullhornListState = "connected" | "not_connected" | "reconnect_required" | "unhealthy";
+
+function bullhornState(firm: FirmRow): BullhornListState {
+  const bh = firm.bullhorn;
+  if (!bh?.connected) return "not_connected";
+  if (bh.needsReauthorization) return "reconnect_required";
+  if (!bh.healthy) return "unhealthy";
+  return "connected";
+}
+
+function firmNeedsAttention(firm: FirmRow): boolean {
+  const state = bullhornState(firm);
+  return state === "not_connected" || state === "reconnect_required" || state === "unhealthy";
+}
+
+function BullhornBadge({
+  firm,
+  onReconnect,
+}: {
+  firm: FirmRow;
+  onReconnect: (firmId: string) => void;
+}) {
+  const state = bullhornState(firm);
+  const styles: Record<BullhornListState, React.CSSProperties> = {
+    connected: { background: "rgba(16,185,129,.12)", color: "#34D399", border: "1px solid rgba(52,211,153,.25)" },
+    not_connected: { background: "rgba(148,163,184,.08)", color: "#94A3B8", border: "1px solid rgba(148,163,184,.25)" },
+    reconnect_required: { background: "rgba(245,158,11,.12)", color: "#FCD34D", border: "1px solid rgba(252,211,77,.25)" },
+    unhealthy: { background: "rgba(239,68,68,.12)", color: "#FCA5A5", border: "1px solid rgba(252,165,165,.25)" },
+  };
+  const labels: Record<BullhornListState, string> = {
+    connected: "Connected",
+    not_connected: "Not connected",
+    reconnect_required: "Reconnect required",
+    unhealthy: "Unhealthy",
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium" style={styles[state]}>
+        {state === "connected" && (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "#34D399" }} />
+        )}
+        {labels[state]}
+      </span>
+      {(state === "reconnect_required" || state === "not_connected" || state === "unhealthy") && (
+        <button
+          type="button"
+          className="text-xs font-semibold underline-offset-2 hover:underline"
+          style={{ color: state === "not_connected" ? "#818CF8" : "#FCD34D" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onReconnect(firm.id);
+          }}
+        >
+          {state === "not_connected" ? "Connect →" : "Reconnect →"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CreateFirmModal({
   onClose,
   onCreated,
@@ -180,7 +241,12 @@ export default function FirmsList() {
   }
 
   const totalSeats = firms?.reduce((s, f) => s + f.enrolledSeats, 0) ?? 0;
-  const activeFirms = firms?.filter((f) => f.subscriptionStatus === "active").length ?? 0;
+  const activeFirms = firms?.filter((f) => f.status === "active").length ?? 0;
+  const needsAttention = firms?.filter(firmNeedsAttention).length ?? 0;
+
+  function goReconnect(firmId: string) {
+    navigate(`/firms/${firmId}/setup?mode=reconnect`);
+  }
 
   return (
     <div className="min-h-screen min-h-dvh" style={{ background: BG }}>
@@ -246,34 +312,59 @@ export default function FirmsList() {
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-1 xs:grid-cols-3 sm:grid-cols-3 gap-3 sm:gap-4 mb-8 sm:mb-10">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-8 sm:mb-10">
           {[
-            { label: "Total firms", value: firms?.length ?? "—" },
-            { label: "Active firms", value: activeFirms || "—" },
-            { label: "Enrolled seats", value: totalSeats || "—" },
-          ].map(({ label, value }) => (
+            { label: "Total firms", value: firms?.length ?? "—", accent: false },
+            { label: "Active firms", value: activeFirms || "—", accent: false },
+            { label: "Enrolled seats", value: totalSeats || "—", accent: false },
+            {
+              label: "Needs attention",
+              value: firms ? needsAttention : "—",
+              accent: needsAttention > 0,
+            },
+          ].map(({ label, value, accent }) => (
             <div
               key={label}
               className="rounded-xl p-4 sm:p-5 flex sm:block items-center gap-4"
-              style={{ background: SURFACE, border: `1px solid ${BORDER}` }}
+              style={{
+                background: SURFACE,
+                border: accent
+                  ? "1px solid rgba(252,211,77,.35)"
+                  : `1px solid ${BORDER}`,
+              }}
             >
-              <p className="text-xs font-semibold uppercase tracking-wider sm:mb-2" style={{ color: "#3A4460" }}>
+              <p className="text-xs font-semibold uppercase tracking-wider sm:mb-2" style={{ color: accent ? "#FCD34D" : "#3A4460" }}>
                 {label}
               </p>
               <p
                 className="text-2xl sm:text-3xl font-extrabold tracking-tight ml-auto sm:ml-0"
-                style={{
-                  background: "linear-gradient(135deg, #818CF8 0%, #38BDF8 100%)",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                }}
+                style={
+                  accent
+                    ? { color: "#FCD34D" }
+                    : {
+                        background: "linear-gradient(135deg, #818CF8 0%, #38BDF8 100%)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        backgroundClip: "text",
+                      }
+                }
               >
                 {value}
               </p>
             </div>
           ))}
         </div>
+
+        {needsAttention > 0 && (
+          <div
+            className="mb-6 rounded-xl px-4 py-3 text-sm"
+            style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(252,211,77,.25)", color: "#FDE68A" }}
+          >
+            {needsAttention === 1
+              ? "1 firm needs a Bullhorn connect or reconnect — recruiters there may see auth errors until it’s fixed."
+              : `${needsAttention} firms need a Bullhorn connect or reconnect — recruiters there may see auth errors until they’re fixed.`}
+          </div>
+        )}
 
         {/* Table header */}
         <div className="flex items-center justify-between mb-4 gap-3">
@@ -357,6 +448,9 @@ export default function FirmsList() {
                     </div>
                     <span className="text-xs" style={{ color: "#3A4460" }}>→</span>
                   </div>
+                  <div className="mb-3" onClick={(e) => e.stopPropagation()}>
+                    <BullhornBadge firm={firm} onReconnect={goReconnect} />
+                  </div>
                   <div className="flex gap-4 text-xs" style={{ color: "#6B7A99" }}>
                     <span>
                       <span className="font-semibold text-white">{firm.enrolledSeats}</span> seats
@@ -383,7 +477,7 @@ export default function FirmsList() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${BORDER}`, background: "rgba(255,255,255,.015)" }}>
-                      {["Firm", "Status", "Seats", "Limit"].map((h) => (
+                      {["Firm", "Status", "Bullhorn", "Seats", "Limit"].map((h) => (
                         <th
                           key={h}
                           className="text-left px-5 py-3.5 text-xs font-semibold uppercase tracking-wider"
@@ -420,6 +514,9 @@ export default function FirmsList() {
                             {firm.status !== "active" && <StatusBadge status={firm.status} />}
                           </div>
                         </td>
+                        <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                          <BullhornBadge firm={firm} onReconnect={goReconnect} />
+                        </td>
                         <td className="px-5 py-4 text-white font-mono">{firm.enrolledSeats}</td>
                         <td className="px-5 py-4 font-mono" style={{ color: "#6B7A99" }}>
                           {firm.seatLimit ?? "∞"}
@@ -432,7 +529,7 @@ export default function FirmsList() {
                     {firms.length === 0 && (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                           className="px-5 py-14 text-center text-sm"
                           style={{ color: "#3A4460", background: SURFACE }}
                         >
