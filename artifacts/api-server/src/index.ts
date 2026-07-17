@@ -1,3 +1,7 @@
+// Sentry must init before other imports that might throw at load time.
+// ESM evaluates static imports in source order of this file's dependency graph.
+import "./lib/sentry-bootstrap.js";
+import { captureException } from "./lib/sentry.js";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runMigrations } from "stripe-replit-sync";
@@ -47,10 +51,15 @@ if (missingEnv.length > 0) {
 
 process.on("unhandledRejection", (reason) => {
   logger.error({ reason }, "Unhandled promise rejection");
+  captureException(reason, { kind: "unhandledRejection" });
 });
 process.on("uncaughtException", (err) => {
   logger.error({ err }, "Uncaught exception — exiting");
-  process.exit(1);
+  captureException(err, { kind: "uncaughtException" });
+  // Give Sentry a brief window to flush before we die.
+  void import("./lib/sentry.js")
+    .then(({ Sentry }) => Sentry.close(2000))
+    .finally(() => process.exit(1));
 });
 
 async function initStripe(): Promise<void> {

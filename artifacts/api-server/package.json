@@ -17,6 +17,7 @@
     "@clerk/shared": "^4.20.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@sendgrid/mail": "^8.1.6",
+    "@sentry/node": "^10.66.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "cookie-parser": "^1.4.7",
