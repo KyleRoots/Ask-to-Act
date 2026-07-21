@@ -82,6 +82,7 @@ import {
 } from "./reports.js";
 import { matchCandidatesForJob } from "./matching.js";
 import { findCandidates } from "./find-candidates.js";
+import { scoutQualifiedByDepartment } from "./scout-screen.js";
 
 // Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
 // a human, so whitespace is pure overhead — and multi-record reads are large
@@ -1163,6 +1164,105 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     async ({ startDate, endDate }) =>
       rt("recruiter_leaderboard", { startDate, endDate }, () =>
         recruiterLeaderboard({ startDate, endDate }),
+      ),
+  );
+
+  tool(
+    "scout_qualified_by_department",
+    "PRE-BUILT WORKFLOW (one call). Unique candidates who have a Scout Screen note (default action 'Scout Screen - Qualified') among inbound APPLICANTS to jobs in an Internal Department. " +
+      "Department is parameterized — pass any value such as STS-STSI, MYT-Ottawa, MYT-Chicago (stored on JobOrder as correlatedCustomText1). " +
+      "USE THIS for 'how many Scout Screen - Qualified candidates for department X' style questions. " +
+      "It works around Bullhorn's empty Note Lucene index: (1) open jobs in that department (default), (2) Response-bucket JobSubmissions (New Lead / Online Applicant — NOT recruiter submissions), (3) get_notes per candidate, (4) keep notes whose action matches and that reference a scanned job via jobOrder or comment 'Job ID: N'. " +
+      "Returns uniqueCandidateCount + candidates[]. Caps (maxJobs default 25, maxCandidatesToScan default 100) may mark incomplete:true — raise caps or add date filters; never treat the count as firm-wide all-time without noting limits. " +
+      "DISPLAY RULE: render each candidate NAME as a markdown link to bullhornUrl when present.",
+    {
+      department: z
+        .string()
+        .min(1)
+        .describe(
+          'Internal Department exact value, e.g. "STS-STSI" or "MYT-Ottawa" (JobOrder.correlatedCustomText1).',
+        ),
+      noteAction: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Exact Note.action to match (default: 'Scout Screen - Qualified'). Custom actions are allowed even if missing from list_field_options.",
+        ),
+      openJobsOnly: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true (default), only open jobs (isOpen + not Archive + not soft-deleted). Set false to include closed jobs in the department.",
+        ),
+      applicantPool: z
+        .enum(["responses", "all"])
+        .optional()
+        .describe(
+          "'responses' (default) = inbound applicants only (New Lead / Online Applicant). 'all' = every JobSubmission on those jobs.",
+        ),
+      maxJobs: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Max department jobs to scan (default 25, max 100)."),
+      maxCandidatesToScan: z
+        .number()
+        .int()
+        .min(1)
+        .max(400)
+        .optional()
+        .describe(
+          "Max unique applicants to load notes for (default 100, max 400).",
+        ),
+      dateAddedStart: z
+        .string()
+        .optional()
+        .describe(
+          "Optional JobSubmission dateAdded start (YYYY-MM-DD or ISO), UTC inclusive.",
+        ),
+      dateAddedEnd: z
+        .string()
+        .optional()
+        .describe(
+          "Optional JobSubmission dateAdded end (YYYY-MM-DD or ISO), UTC exclusive.",
+        ),
+    },
+    async ({
+      department,
+      noteAction,
+      openJobsOnly,
+      applicantPool,
+      maxJobs,
+      maxCandidatesToScan,
+      dateAddedStart,
+      dateAddedEnd,
+    }) =>
+      rt(
+        "scout_qualified_by_department",
+        {
+          department,
+          noteAction,
+          openJobsOnly,
+          applicantPool,
+          maxJobs,
+          maxCandidatesToScan,
+          dateAddedStart,
+          dateAddedEnd,
+        },
+        () =>
+          scoutQualifiedByDepartment({
+            department,
+            noteAction,
+            openJobsOnly,
+            applicantPool,
+            maxJobs,
+            maxCandidatesToScan,
+            dateAddedStart,
+            dateAddedEnd,
+          }),
       ),
   );
 

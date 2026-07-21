@@ -735,6 +735,20 @@ export const REPORTS_CATALOG = [
       endDate: "optional YYYY-MM-DD inclusive (default: today)",
     },
   },
+  {
+    name: "scout_qualified_by_department",
+    title: "Scout Screen Qualified by Department",
+    description:
+      "Unique candidates with a Scout Screen (or custom) note action among inbound applicants to jobs in an Internal Department. Works around the empty Note Lucene index by scanning Response-bucket applicants then per-candidate notes.",
+    parameters: {
+      department: "required Internal Department, e.g. STS-STSI or MYT-Ottawa",
+      noteAction: "optional; default 'Scout Screen - Qualified'",
+      openJobsOnly: "optional boolean; default true",
+      applicantPool: "'responses' (default) or 'all' JobSubmission rows on those jobs",
+      maxJobs: "optional cap (default 25, max 100)",
+      maxCandidatesToScan: "optional cap (default 100, max 400)",
+    },
+  },
 ] as const;
 
 export function listReports(): unknown {
