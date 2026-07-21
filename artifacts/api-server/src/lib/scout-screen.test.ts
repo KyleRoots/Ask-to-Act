@@ -5,6 +5,7 @@ import {
   incompleteGuidanceNote,
   pickDepartmentMatch,
   resolveScoutStopReason,
+  upsertApplicantPreferRecent,
   EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
   EXHAUSTIVE_MAX_WINDOWS,
   EXHAUSTIVE_WALL_MS,
@@ -149,5 +150,43 @@ describe("resolveScoutStopReason", () => {
     expect(resolveScoutStopReason({ jobsTruncated: true })).toBe(
       "job_safety_cap",
     );
+  });
+});
+
+describe("upsertApplicantPreferRecent", () => {
+  function hit(
+    id: number,
+    submissionMs: number,
+  ): {
+    candidateId: number;
+    appliedJobIds: Set<number>;
+    latestSubmissionMs: number;
+  } {
+    return {
+      candidateId: id,
+      appliedJobIds: new Set([1]),
+      latestSubmissionMs: submissionMs,
+    };
+  }
+
+  it("keeps newer applicants when the budget is full", () => {
+    const map = new Map();
+    expect(upsertApplicantPreferRecent(map, hit(1, 100), 2).incomplete).toBe(
+      false,
+    );
+    expect(upsertApplicantPreferRecent(map, hit(2, 200), 2).incomplete).toBe(
+      false,
+    );
+    const r = upsertApplicantPreferRecent(map, hit(3, 300), 2);
+    expect(r.incomplete).toBe(true);
+    expect([...map.keys()].sort()).toEqual([2, 3]);
+  });
+
+  it("rejects older applicants once full", () => {
+    const map = new Map();
+    upsertApplicantPreferRecent(map, hit(1, 300), 2);
+    upsertApplicantPreferRecent(map, hit(2, 200), 2);
+    upsertApplicantPreferRecent(map, hit(3, 100), 2);
+    expect([...map.keys()].sort()).toEqual([1, 2]);
   });
 });

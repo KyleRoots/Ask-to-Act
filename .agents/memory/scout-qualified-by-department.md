@@ -53,6 +53,7 @@ Server behavior:
 - Auto-pages jobs until exhausted or ~75s gateway wall (safety valve, not a “give up” signal for the model when results are incomplete).
 - Matches notes across the full association-loaded note set (not just a 50-row display page).
 - Returns top-level `stopReason` + `confirmedComplete`.
+- Applicant note-scan budget prefers **newest JobSubmissions** (ordered query + eviction of older applicants when capped) so "most recent" asks stay accurate under the wall.
 
 ### Modes
 

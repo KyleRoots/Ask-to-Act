@@ -193,7 +193,7 @@ function actionsSpec(baseUrl: string) {
               in: "query",
               required: false,
               description: "Optional per job-page applicant cap. Do not ask the user for this.",
-              schema: { type: "integer", minimum: 1, maximum: 400 },
+              schema: { type: "integer", minimum: 1, maximum: 800 },
             },
             dateParam("dateAddedStart", "Optional JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive."),
             dateParam("dateAddedEnd", "Optional JobSubmission dateAdded end (YYYY-MM-DD), UTC exclusive."),

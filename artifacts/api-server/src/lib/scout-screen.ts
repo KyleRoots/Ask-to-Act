@@ -28,6 +28,7 @@ import {
   noteReferencesJob,
   parseJobIdsFromNoteComments,
   countEntity,
+  queryJobSubmissions,
 } from "./bullhorn-client.js";
 import { classifySubmissionStage } from "./submission-status.js";
 
@@ -50,7 +51,7 @@ export const scoutReportQuerySchema = z.object({
   /** Top-N most recent by matching note dateAdded (natural-language "list 5 most recent"). */
   limit: z.coerce.number().int().min(1).max(50).optional(),
   maxJobs: z.coerce.number().int().min(1).max(2000).optional(),
-  maxCandidatesToScan: z.coerce.number().int().min(1).max(400).optional(),
+  maxCandidatesToScan: z.coerce.number().int().min(1).max(800).optional(),
   dateAddedStart: z.string().optional(),
   dateAddedEnd: z.string().optional(),
 });
@@ -58,8 +59,9 @@ export const scoutReportQuerySchema = z.object({
 const DEFAULT_NOTE_ACTION = "Scout Screen - Qualified";
 const HARD_MAX_JOBS_EXHAUSTIVE = 2000;
 const DEFAULT_MAX_JOBS_EXHAUSTIVE = 500;
-const HARD_MAX_CANDIDATES = 400;
-const JOB_ID_BATCH = 20;
+/** Note-scan budget ceiling (get_notes is the expensive step). */
+const HARD_MAX_CANDIDATES = 800;
+const JOB_ID_BATCH = 10;
 const NOTE_SCAN_CONCURRENCY = 8;
 const SUBMISSION_PAGE = 50;
 /** Per job-id batch: page JobSubmissions until total or this safety depth. */
@@ -68,16 +70,17 @@ const SUBMISSION_PAGE_DEPTH = 5_000;
 export const EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS = 30;
 const EXHAUSTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const EXHAUSTIVE_MAX_WINDOWS = 6;
-const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 400;
+const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 500;
 /** Soft wall budget for exhaustive / auto-widen scans (ms). */
 export const EXHAUSTIVE_WALL_MS = 75_000;
-const AUTO_WIDEN_JOB_PAGE = 40;
+/** Fewer jobs per page → fuller newest-first applicant coverage before the note-scan budget. */
+const AUTO_WIDEN_JOB_PAGE = 20;
 /**
  * Bounded auto-widen pages until jobs are exhausted or the wall hits.
  * Hard ceiling only as a safety valve (gateway/timeout protection).
  */
 const AUTO_WIDEN_MAX_JOBS = 2000;
-const AUTO_WIDEN_CANDIDATES_PER_PAGE = 400;
+const AUTO_WIDEN_CANDIDATES_PER_PAGE = 500;
 
 /** Machine-readable why a scout call stopped — caps vs connector vs complete. */
 export type ScoutStopReason =
@@ -353,6 +356,55 @@ type MatchCandidate = {
   latestNoteDate?: number;
 };
 
+type ApplicantHit = {
+  candidateId: number;
+  firstName?: string;
+  lastName?: string;
+  appliedJobIds: Set<number>;
+  /** Newest JobSubmission.dateAdded seen for this candidate (ms). */
+  latestSubmissionMs: number;
+};
+
+/**
+ * Keep a bounded applicant set biased toward the newest submissions.
+ * When full, newer applicants displace the oldest; older ones are skipped.
+ * Returns whether the pool is incomplete relative to the full applicant universe.
+ */
+export function upsertApplicantPreferRecent(
+  map: Map<number, ApplicantHit>,
+  hit: ApplicantHit,
+  maxSize: number,
+): { incomplete: boolean } {
+  const existing = map.get(hit.candidateId);
+  if (existing) {
+    if (hit.latestSubmissionMs > existing.latestSubmissionMs) {
+      existing.latestSubmissionMs = hit.latestSubmissionMs;
+    }
+    for (const jid of hit.appliedJobIds) existing.appliedJobIds.add(jid);
+    if (!existing.firstName && hit.firstName) existing.firstName = hit.firstName;
+    if (!existing.lastName && hit.lastName) existing.lastName = hit.lastName;
+    return { incomplete: false };
+  }
+  if (map.size < maxSize) {
+    map.set(hit.candidateId, hit);
+    return { incomplete: false };
+  }
+  let oldestId: number | null = null;
+  let oldestMs = Infinity;
+  for (const [id, a] of map) {
+    if (a.latestSubmissionMs < oldestMs) {
+      oldestMs = a.latestSubmissionMs;
+      oldestId = id;
+    }
+  }
+  if (oldestId !== null && hit.latestSubmissionMs > oldestMs) {
+    map.delete(oldestId);
+    map.set(hit.candidateId, hit);
+  }
+  // Cap was binding either way — we could not retain every applicant.
+  return { incomplete: true };
+}
+
 function latestNoteMs(m: MatchCandidate): number {
   if (typeof m.latestNoteDate === "number") return m.latestNoteDate;
   let max = 0;
@@ -494,52 +546,35 @@ async function runScoutScanPass(args: {
     };
   }
 
-  type ApplicantHit = {
-    candidateId: number;
-    firstName?: string;
-    lastName?: string;
-    appliedJobIds: Set<number>;
-  };
   const applicants = new Map<number, ApplicantHit>();
   let applicantsTruncated = false;
   let submissionDepthTruncated = false;
   let submissionRowsSeen = 0;
 
-  const statusClause =
+  const jobIdSet = new Set(jobIds);
+  const statusWhere =
     args.applicantPool === "responses"
-      ? ` AND (status:"New Lead" OR status:"Online Applicant")`
+      ? " AND (status='New Lead' OR status='Online Applicant')"
       : "";
-  let dateClause = "";
-  if (args.dateAddedStartMs !== undefined || args.dateAddedEndMs !== undefined) {
-    const lo =
-      args.dateAddedStartMs !== undefined ? String(args.dateAddedStartMs) : "*";
-    const hi =
-      args.dateAddedEndMs !== undefined
-        ? String(args.dateAddedEndMs - 1)
-        : "*";
-    dateClause = ` AND dateAdded:[${lo} TO ${hi}]`;
+  let dateWhere = "";
+  if (args.dateAddedStartMs !== undefined) {
+    dateWhere += ` AND dateAdded>=${args.dateAddedStartMs}`;
+  }
+  if (args.dateAddedEndMs !== undefined) {
+    dateWhere += ` AND dateAdded<${args.dateAddedEndMs}`;
   }
 
-  const jobIdSet = new Set(jobIds);
-
+  // Newest-first JobSubmission query so the note-scan budget keeps recent applicants.
   for (const batch of chunk(jobIds, JOB_ID_BATCH)) {
-    if (applicants.size >= args.maxCandidatesToScan) {
-      applicantsTruncated = true;
-      break;
-    }
-    const idClause = batch.join(" OR ");
+    const idWhere = batch.map((id) => `jobOrder.id=${id}`).join(" OR ");
     let start = 0;
     for (;;) {
-      if (applicants.size >= args.maxCandidatesToScan) {
-        applicantsTruncated = true;
-        break;
-      }
-      const page = (await searchAnyEntity({
-        entityType: "JobSubmission",
-        query: `jobOrder.id:(${idClause})${statusClause}${dateClause}`,
+      const page = (await queryJobSubmissions({
+        where: `(${idWhere})${statusWhere}${dateWhere}`,
         fields: "id,status,candidate,jobOrder,dateAdded",
         count: SUBMISSION_PAGE,
         start,
+        orderBy: "-dateAdded",
       })) as {
         total?: number;
         data?: Array<Record<string, unknown>>;
@@ -558,23 +593,21 @@ async function runScoutScanPass(args: {
         const candId = candidateIdFromRow(row);
         const jid = jobIdFromRow(row);
         if (candId === null) continue;
-        const existing = applicants.get(candId);
         const names = personName(row.candidate);
-        if (!existing) {
-          if (applicants.size >= args.maxCandidatesToScan) {
-            applicantsTruncated = true;
-            break;
-          }
-          applicants.set(candId, {
+        const submissionMs =
+          typeof row.dateAdded === "number" ? row.dateAdded : 0;
+        const { incomplete } = upsertApplicantPreferRecent(
+          applicants,
+          {
             candidateId: candId,
             ...names,
             appliedJobIds: new Set(jid !== null ? [jid] : []),
-          });
-        } else if (jid !== null) {
-          existing.appliedJobIds.add(jid);
-        }
+            latestSubmissionMs: submissionMs,
+          },
+          args.maxCandidatesToScan,
+        );
+        if (incomplete) applicantsTruncated = true;
       }
-      if (applicantsTruncated) break;
       const total = typeof page.total === "number" ? page.total : undefined;
       start += rows.length;
       if (rows.length < SUBMISSION_PAGE) break;
@@ -587,7 +620,10 @@ async function runScoutScanPass(args: {
     }
   }
 
-  const applicantList = [...applicants.values()];
+  // Scan notes for newest applicants first (better "most recent" under budget).
+  const applicantList = [...applicants.values()].sort(
+    (a, b) => b.latestSubmissionMs - a.latestSubmissionMs,
+  );
   const jobIdsArr = [...jobIdSet];
   const matches: MatchCandidate[] = [];
 
