@@ -949,6 +949,34 @@ export async function listPlacements(args: {
   return enrichWithProfileUrls("Placement", result);
 }
 
+/**
+ * Builds a Bullhorn `/query/Note` where clause for curated note lookups.
+ * Candidate notes may be linked via `personReference` (primary) and/or the
+ * `candidates` association — filter with OR so neither path is missed.
+ * Exported for unit tests.
+ */
+export function buildNotesWhereClause(args: {
+  candidateId?: number;
+  jobId?: number;
+  dateAddedStart?: string;
+  dateAddedEnd?: string;
+}): string {
+  const conditions: string[] = [];
+  if (args.candidateId !== undefined) {
+    conditions.push(
+      `(personReference.id=${args.candidateId} OR candidates.id=${args.candidateId})`,
+    );
+  }
+  if (args.jobId !== undefined) {
+    conditions.push(`jobOrder.id=${args.jobId}`);
+  }
+  conditions.push(
+    ...queryDateConditions("dateAdded", args.dateAddedStart, args.dateAddedEnd),
+  );
+  // Unfiltered note dumps are rare; id>0 is a valid open where for /query.
+  return conditions.length > 0 ? conditions.join(" AND ") : "id>0";
+}
+
 export async function getNotes(args: {
   candidateId?: number;
   jobId?: number;
@@ -958,23 +986,20 @@ export async function getNotes(args: {
   count?: number;
   start?: number;
 }) {
-  const conditions: string[] = [];
-  if (args.candidateId) conditions.push(`candidates.id:${args.candidateId}`);
-  if (args.jobId) conditions.push(`jobOrder.id:${args.jobId}`);
-  const dateClause = searchDateClause(
-    "dateAdded",
-    args.dateAddedStart,
-    args.dateAddedEnd,
-  );
-  if (dateClause) conditions.push(dateClause);
-  const query =
-    conditions.length > 0 ? conditions.join(" AND ") : "id:[1 TO *]";
+  const where = buildNotesWhereClause(args);
   const fields =
     args.fields ??
-    "id,action,comments,commentingPerson,candidates,jobOrder,dateAdded";
-  // Note is an indexed entity in Bullhorn — it must be read via /search (Lucene),
-  // not /query.
-  return searchEntity("Note", query, fields, args.count ?? 50, args.start ?? 0);
+    "id,action,comments,commentingPerson,personReference,candidates,jobOrder,dateAdded";
+  // Prefer /query over Lucene /search — on several Bullhorn instances
+  // /search/Note returns total 0 for every query while /query and /entity work.
+  return queryEntity(
+    "Note",
+    where,
+    fields,
+    args.count ?? 50,
+    args.start ?? 0,
+    "-dateAdded",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1663,9 +1688,11 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
   },
   note: {
     canonical: "Note",
-    route: "search",
+    // Prefer /query: Lucene /search/Note returns total 0 on some Bullhorn
+    // instances even when notes exist and are readable via /entity + /query.
+    route: "both",
     defaultFields:
-      "id,action,comments,commentingPerson,candidates,jobOrder,dateAdded",
+      "id,action,comments,commentingPerson,personReference,candidates,jobOrder,dateAdded",
   },
   lead: {
     canonical: "Lead",
@@ -1771,13 +1798,30 @@ export async function searchAnyEntity(args: {
     );
   }
   const fields = args.fields ?? entry.defaultFields;
-  return searchEntity(
+  const result = await searchEntity(
     entry.canonical,
     args.query,
     fields,
     args.count ?? 20,
     args.start ?? 0,
   );
+  // Note Lucene index is often empty while /query still works — steer callers away
+  // from a silent zero without breaking instances where search does return hits.
+  if (
+    entry.canonical === "Note" &&
+    result &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    (result as { total?: unknown }).total === 0
+  ) {
+    return {
+      ...(result as Record<string, unknown>),
+      note:
+        "Lucene /search/Note returned 0 matches. On this Bullhorn instance Notes are usually readable via query_entity " +
+        "(e.g. where: action='Scout Screen - Qualified') or get_notes — not search_entity/count_entity.",
+    };
+  }
+  return result;
 }
 
 const MAX_GROUP_VALUES = 50;
@@ -2225,8 +2269,16 @@ export async function countEntity(args: {
   if (entry.route === "query") {
     throw new Error(
       `count_entity supports only full-text searchable entities (Candidate, ClientContact, ` +
-        `ClientCorporation, JobOrder, JobSubmission, Placement, Lead, Opportunity, Note). ` +
+        `ClientCorporation, JobOrder, JobSubmission, Placement, Lead, Opportunity). ` +
         `"${entry.canonical}" is query-only — use query_entity instead.`,
+    );
+  }
+  // Note is catalogued as searchable, but Lucene /search/Note often returns total 0
+  // even when notes exist. Refuse rather than report a false zero.
+  if (entry.canonical === "Note") {
+    throw new Error(
+      `count_entity does not support Note: Lucene /search/Note returns no matches on this Bullhorn instance ` +
+        `even when notes exist. Use query_entity(Note, where: "action='…'") or get_notes and page results.`,
     );
   }
   const baseRaw = (args.query ?? "").trim();
@@ -2445,6 +2497,7 @@ export async function listFieldOptions(args: {
 }): Promise<{
   entity: string;
   fields: Array<{ name: string; label?: string; options: Array<{ value: string; label: string }> }>;
+  note?: string;
 }> {
   const entry = resolveEntity(args.entityType);
   const meta = (await bullhornFetch(`meta/${entry.canonical}`, {
@@ -2482,6 +2535,9 @@ export async function listFieldOptions(args: {
     targetFields = [match];
   }
 
+  const includesNoteAction = targetFields.some(
+    (f) => (f.name as string).toLowerCase() === "action",
+  );
   return {
     entity: (meta.entity as string | undefined) ?? entry.canonical,
     fields: targetFields.map((f) => ({
@@ -2492,6 +2548,18 @@ export async function listFieldOptions(args: {
         label: String(o.label ?? o.value ?? ""),
       })),
     })),
+    // Integrations (e.g. ScoutGenius) may write Note.action values that are NOT in
+    // the Bullhorn dropdown. The picklist is authoritative for UI writes, not for
+    // whether a note with that action exists or can be filtered on read.
+    ...(entry.canonical === "Note" && includesNoteAction
+      ? {
+          note:
+            "Note.action picklist is NOT exhaustive for reads. Custom/integration action strings " +
+            "(e.g. 'Scout Screen - Qualified') may exist on notes even when absent from this list. " +
+            "Never reject a user-supplied action for filtering/querying solely because it is missing here. " +
+            "Prefer listed values when writing via add_note unless the firm intentionally uses a custom action.",
+        }
+      : {}),
   };
 }
 
