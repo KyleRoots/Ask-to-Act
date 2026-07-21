@@ -71,17 +71,21 @@ Check: `get_notes(4672021)` → `parsedJobOrderIds: [35501]`.
 
 ## ChatGPT MCP visibility
 
-Production `tools/list` includes ~69 tools. ChatGPT may **truncate** long MCP inventories — if `scout_dept_report` is missing after reconnect:
+Production `tools/list` exposes the **full universal** tool set (reads + writes) on one connector URL. ChatGPT may still truncate long inventories — mitigation is **registration priority** (scout/reports early) + **description budget CI**, not a second read-only connector. See [mcp-universal-inventory.md](./mcp-universal-inventory.md).
 
-1. Prefer **REST** Custom GPT Action for this report.
+If `scout_dept_report` is missing after reconnect:
+
+1. Prefer **REST** Custom GPT Action for this report as a temporary workaround.
 2. Or use manual workflow: department job count → `list_submissions_for_job` (response stage) → `get_notes` per candidate.
 
 ## Related memory
 
 - [bullhorn-response-vs-submission.md](./bullhorn-response-vs-submission.md) — Response vs true submission
 - [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) — Lucene Note index ticket
+- [mcp-universal-inventory.md](./mcp-universal-inventory.md) — one connector; priority + budget
 
 ## Deferred improvements
 
+- **Generic screening alias** + firm-configurable default note action(s) (decouple ScoutGenius branding; same plumbing).
 - **ScoutGenius write-side**: populate `jobOrder` on notes at creation (easier filtering; does **not** fix Lucene).
-- **MCP core/full tiers** + CI token budget for tool descriptions.
+- Bullhorn Support Note Lucene ticket (upstream).
