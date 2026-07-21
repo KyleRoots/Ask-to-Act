@@ -29,24 +29,30 @@ See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhor
 **Keep it simple. Do not block accurate answers.**
 
 - Users must **not** learn backend knobs (`maxJobs`, `mode`, Lucene, wall budgets). Those stay server-side.
-- It **is** okay — and expected — for the AI to ask the user for **business clarification** when that improves accuracy (e.g. which department if ambiguous, open jobs vs all, “most recent 5” vs a full count, a rough time window). That is normal universal-agent behavior.
-- Prefer: try a sensible default → return what you found → ask one clarifying question if the ask was ambiguous. Do not refuse or stall because a knob is missing.
+- It **is** okay — and expected — for the AI to ask the user for **business clarification** when that improves accuracy.
+- The assistant should **keep working** until either:
+  1. `confirmedComplete: true` (scan finished under the chosen filters), or
+  2. `stopReason` is a **real** connector/platform limit it cannot work around (`wall_time`, `no_matching_jobs`, Bullhorn Note Lucene unavailable), or
+  3. the user clarifies a different ask.
+- It must **not** stop solely because of an arbitrary search/page cap. Caps are server-side pacing; incomplete results mean “continue / clarify / one broader call,” not “give up.”
 
 When parameters are clear enough, the model should:
 
 1. Pass the spoken department or nickname (`STSI`, `Ottawa`, `STS-STSI`).
 2. For “list / show **N** most recent”, pass **`limit=N`**.
 3. Make **one** call. Then:
-   - **Results + `incomplete`:** present the partial list / lower bound — never fan out date windows. Ask a clarifying question only if the user needs a fuller answer.
-   - **`0` + `incomplete`:** **do not conclude zero.** Say the first pass found none in the scanned portion, clarify (department / open vs closed / responses vs all), and/or call once more with broader business filters. Never date-window fan-out.
-   - **`0` + complete scan:** then it is safe to say none matched under those filters.
+   - **`confirmedComplete: true`:** answer confidently under those filters.
+   - **Results + `incomplete`:** present the partial list; check `stopReason`. One follow-up with `mode=exhaustive` or broader filters is OK for totals — never multi-call date-window fan-out.
+   - **`0` + `confirmedComplete: false`:** **do not conclude zero.** Clarify and/or retry once broader.
+   - **`0` + `confirmedComplete: true`:** safe to say none matched under those filters.
 
 Server behavior:
 
 - Resolves nicknames via live Internal Department values (`STSI` → `STS-STSI`).
 - Defaults to **open** jobs.
-- With `limit`, auto-pages jobs in **one** call (~75s wall, up to ~2000 jobs), ranks by latest matching note `dateAdded`, returns top N.
-- Without `limit` (count-style), stops after the first job page that finds matches (lower bound); if still empty, keeps paging until jobs/wall.
+- Auto-pages jobs until exhausted or ~75s gateway wall (safety valve, not a “give up” signal for the model when results are incomplete).
+- Matches notes across the full association-loaded note set (not just a 50-row display page).
+- Returns top-level `stopReason` + `confirmedComplete`.
 
 ### Modes
 

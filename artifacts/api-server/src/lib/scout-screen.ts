@@ -49,55 +49,65 @@ export const scoutReportQuerySchema = z.object({
   mode: z.enum(["bounded", "exhaustive"]).optional(),
   /** Top-N most recent by matching note dateAdded (natural-language "list 5 most recent"). */
   limit: z.coerce.number().int().min(1).max(50).optional(),
-  maxJobs: z.coerce.number().int().min(1).max(200).optional(),
+  maxJobs: z.coerce.number().int().min(1).max(2000).optional(),
   maxCandidatesToScan: z.coerce.number().int().min(1).max(400).optional(),
   dateAddedStart: z.string().optional(),
   dateAddedEnd: z.string().optional(),
 });
 
 const DEFAULT_NOTE_ACTION = "Scout Screen - Qualified";
-const HARD_MAX_JOBS_EXHAUSTIVE = 200;
-const DEFAULT_MAX_JOBS_EXHAUSTIVE = 100;
+const HARD_MAX_JOBS_EXHAUSTIVE = 2000;
+const DEFAULT_MAX_JOBS_EXHAUSTIVE = 500;
 const HARD_MAX_CANDIDATES = 400;
 const JOB_ID_BATCH = 20;
 const NOTE_SCAN_CONCURRENCY = 8;
 const SUBMISSION_PAGE = 50;
+/** Per job-id batch: page JobSubmissions until total or this safety depth. */
+const SUBMISSION_PAGE_DEPTH = 5_000;
 /** ChatGPT / gateway proxies often 504 around ~120s — keep headroom. */
 export const EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS = 30;
 const EXHAUSTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const EXHAUSTIVE_MAX_WINDOWS = 6;
-const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 250;
+const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 400;
 /** Soft wall budget for exhaustive / auto-widen scans (ms). */
 export const EXHAUSTIVE_WALL_MS = 75_000;
 const AUTO_WIDEN_JOB_PAGE = 40;
 /**
  * Bounded auto-widen pages until jobs are exhausted or the wall hits.
- * Count-style (no limit) still early-exits once matches are found.
- * Hard ceiling only as a safety valve.
+ * Hard ceiling only as a safety valve (gateway/timeout protection).
  */
-const AUTO_WIDEN_MAX_JOBS_TOPN = 2000;
-const AUTO_WIDEN_CANDIDATES_PER_PAGE = 250;
+const AUTO_WIDEN_MAX_JOBS = 2000;
+const AUTO_WIDEN_CANDIDATES_PER_PAGE = 400;
+
+/** Machine-readable why a scout call stopped — caps vs connector vs complete. */
+export type ScoutStopReason =
+  | "complete"
+  | "wall_time"
+  | "job_safety_cap"
+  | "applicant_cap"
+  | "submission_page_depth"
+  | "no_matching_jobs";
 
 const INCOMPLETE_NO_FANOUT =
   "Do NOT issue multiple scout_dept_report calls with different dateAddedStart/dateAddedEnd " +
   "to chase an exact total — that multiplies per-candidate note fetches and causes timeouts. " +
-  "For a fuller single-call lookback count, pass mode=exhaustive (server partitions dates). " +
+  "For a fuller single-call lookback count, ONE follow-up with mode=exhaustive is allowed. " +
   "Or narrow the ask (recent window / one department) and keep mode=bounded.";
 
 const INCOMPLETE_PARTIAL_RESULTS =
   "uniqueCandidateCount is a LOWER BOUND / partial ranked list for this single call. " +
   "Present these results to the user. Do NOT invent more names. " +
+  "Check stopReason / confirmedComplete: only stop treating the task as unfinished when " +
+  "confirmedComplete is true, or stopReason reflects a true connector/gateway limit you cannot work around. " +
   INCOMPLETE_NO_FANOUT +
-  " If the user wants a fuller answer, ask one clarifying question " +
-  "(include closed jobs? all applicants vs responses only? approximate time window?) " +
-  "then call once more with those narrower/broader business filters — never date-window fan-out.";
+  " If filters are ambiguous, ask one clarifying question; otherwise continue with one broader/exhaustive call.";
 
 const INCOMPLETE_ZERO_NOT_CONFIRMED =
-  "uniqueCandidateCount is 0 but the scan did NOT cover every matching job — " +
+  "uniqueCandidateCount is 0 but confirmedComplete is false — " +
   "this is NOT a confirmed zero. Do NOT tell the user there are no matching candidates. " +
-  "Say the first pass found none in the scanned jobs, then ask one clarifying question " +
-  "(confirm department nickname, include closed/filled jobs, or all applicants vs responses) " +
-  "and/or call scout_dept_report once more with openJobsOnly=false or applicantPool=all if that fits. " +
+  "Say the first pass found none in the scanned portion, then either ask one clarifying question " +
+  "(confirm department, include closed jobs, all applicants vs responses) " +
+  "and/or call scout_dept_report once more with broader filters or mode=exhaustive. " +
   INCOMPLETE_NO_FANOUT;
 
 function escapeLucenePhrase(term: string): string {
@@ -252,7 +262,7 @@ export function incompleteGuidanceNote(
   opts?: { stoppedForWallTime?: boolean; matchCount?: number },
 ): string {
   const wall = opts?.stoppedForWallTime
-    ? "Scan stopped early to stay under the ChatGPT/gateway timeout budget. "
+    ? "Scan stopped early under the ChatGPT/gateway timeout budget (stopReason=wall_time) — a real platform limit, not a search-cap give-up. "
     : "";
   const zeroUnconfirmed =
     typeof opts?.matchCount === "number" && opts.matchCount === 0;
@@ -272,9 +282,25 @@ export function incompleteGuidanceNote(
   }
   return (
     wall +
-    "Result set may be incomplete because job and/or applicant caps were hit. " +
+    "Result set may be incomplete (jobs/applicants still unscanned, or wall). " +
     INCOMPLETE_PARTIAL_RESULTS
   );
+}
+
+/** Prefer the most specific incomplete reason for the model. */
+export function resolveScoutStopReason(args: {
+  noJobs?: boolean;
+  stoppedForWallTime?: boolean;
+  jobsTruncated?: boolean;
+  applicantsTruncated?: boolean;
+  submissionDepthTruncated?: boolean;
+}): ScoutStopReason {
+  if (args.noJobs) return "no_matching_jobs";
+  if (args.stoppedForWallTime) return "wall_time";
+  if (args.submissionDepthTruncated) return "submission_page_depth";
+  if (args.applicantsTruncated) return "applicant_cap";
+  if (args.jobsTruncated) return "job_safety_cap";
+  return "complete";
 }
 
 function candidateIdFromRow(row: Record<string, unknown>): number | null {
@@ -361,6 +387,7 @@ type ScanPassResult = {
   applicantsUnique: number;
   submissionRowsSeen: number;
   applicantsTruncated: boolean;
+  submissionDepthTruncated: boolean;
   maxJobs: number;
   maxCandidatesToScan: number;
 };
@@ -461,6 +488,7 @@ async function runScoutScanPass(args: {
       applicantsUnique: 0,
       submissionRowsSeen: 0,
       applicantsTruncated: false,
+      submissionDepthTruncated: false,
       maxJobs: args.maxJobs,
       maxCandidatesToScan: args.maxCandidatesToScan,
     };
@@ -474,6 +502,7 @@ async function runScoutScanPass(args: {
   };
   const applicants = new Map<number, ApplicantHit>();
   let applicantsTruncated = false;
+  let submissionDepthTruncated = false;
   let submissionRowsSeen = 0;
 
   const statusClause =
@@ -550,7 +579,8 @@ async function runScoutScanPass(args: {
       start += rows.length;
       if (rows.length < SUBMISSION_PAGE) break;
       if (total !== undefined && start >= total) break;
-      if (start >= 500) {
+      if (start >= SUBMISSION_PAGE_DEPTH) {
+        submissionDepthTruncated = true;
         applicantsTruncated = true;
         break;
       }
@@ -564,8 +594,7 @@ async function runScoutScanPass(args: {
   await mapWithLimit(applicantList, NOTE_SCAN_CONCURRENCY, async (app) => {
     const notesRes = (await getNotes({
       candidateId: app.candidateId,
-      count: 50,
-      start: 0,
+      returnAllLoaded: true,
       fields:
         "id,action,comments,jobOrder,dateAdded,personReference,candidates",
     })) as { data?: Array<Record<string, unknown>> };
@@ -644,6 +673,7 @@ async function runScoutScanPass(args: {
     applicantsUnique: applicantList.length,
     submissionRowsSeen,
     applicantsTruncated,
+    submissionDepthTruncated,
     maxJobs: args.maxJobs,
     maxCandidatesToScan: args.maxCandidatesToScan,
   };
@@ -706,11 +736,13 @@ function emptyNoJobsResult(args: {
     jobsScanned: { count: 0, totalMatching: args.jobsTotal, truncated: false },
     applicantsScanned: { uniqueCandidates: 0, truncated: false },
     limits: { maxJobs: args.maxJobs, maxCandidatesToScan: args.maxCandidatesToScan },
+    stopReason: "no_matching_jobs" as ScoutStopReason,
+    confirmedComplete: true,
     definition:
       "Jobs by Internal Department (correlatedCustomText1) → inbound applicants " +
       "(JobSubmission Response bucket by default) → candidate notes with matching action " +
       "that reference a scanned job (jobOrder or comment Job ID).",
-    note: `No jobs found for department "${args.department}" with the current filters.`,
+    note: `No jobs found for department "${args.department}" with the current filters. confirmedComplete=true — safe to say none under these filters (try openJobsOnly=false or another department nickname if the user meant something broader).`,
   };
 }
 
@@ -754,7 +786,7 @@ export async function scoutQualifiedByDepartment(args: {
 
   // Natural-language path: top-N or default bounded — auto-page open jobs in ONE call.
   // Prefer this over exhaustive date windows for "most recent" / "list N" asks.
-  // Cap is high; count-style (no limit) still early-exits once matches are found.
+  // Keep paging until jobs exhausted or gateway wall — do not stop early for search caps.
   if (mode === "bounded" || limit !== undefined) {
     return runAutoWidenScout({
       department,
@@ -764,8 +796,8 @@ export async function scoutQualifiedByDepartment(args: {
       applicantPool,
       limit,
       maxJobsCap: Math.min(
-        Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS_TOPN, 1),
-        AUTO_WIDEN_MAX_JOBS_TOPN,
+        Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS, 1),
+        AUTO_WIDEN_MAX_JOBS,
       ),
       maxCandidatesPerPage: Math.min(
         Math.max(
@@ -810,6 +842,7 @@ export async function scoutQualifiedByDepartment(args: {
   const merged = new Map<number, MatchCandidate>();
   let jobsTruncated = preloadedJobs.jobsTruncated;
   let applicantsTruncated = false;
+  let submissionDepthTruncated = false;
   let stoppedForWallTime = false;
   let jobsTotal = preloadedJobs.jobsTotal;
   let jobRows = preloadedJobs.jobRows;
@@ -846,6 +879,7 @@ export async function scoutQualifiedByDepartment(args: {
     jobIds = pass.jobIds;
     if (pass.jobsTruncated) jobsTruncated = true;
     if (pass.applicantsTruncated) applicantsTruncated = true;
+    if (pass.submissionDepthTruncated) submissionDepthTruncated = true;
     submissionRowsSeen += pass.submissionRowsSeen;
     applicantsUniqueAcrossWindows += pass.applicantsUnique;
     mergeMatches(merged, pass.matches);
@@ -880,6 +914,13 @@ export async function scoutQualifiedByDepartment(args: {
     applicantsTruncated ||
     stoppedForWallTime ||
     windowsCompleted < windowsPlanned;
+  const stopReason = resolveScoutStopReason({
+    stoppedForWallTime,
+    jobsTruncated,
+    applicantsTruncated,
+    submissionDepthTruncated,
+  });
+  const confirmedComplete = stopReason === "complete" && !incomplete;
 
   return {
     department,
@@ -925,9 +966,12 @@ export async function scoutQualifiedByDepartment(args: {
       maxWindows: EXHAUSTIVE_MAX_WINDOWS,
       wallMs: EXHAUSTIVE_WALL_MS,
     },
+    stopReason,
+    confirmedComplete,
     definition:
       "mode=exhaustive: partitions JobSubmission dateAdded into windows in ONE call. " +
-      "For 'list N most recent' prefer default bounded mode with limit=N (ranks by note date).",
+      "For 'list N most recent' prefer default bounded mode with limit=N (ranks by note date). " +
+      "Stop only when confirmedComplete=true or stopReason is a real connector/gateway limit.",
     ...(incomplete
       ? {
           incomplete: true,
@@ -939,7 +983,7 @@ export async function scoutQualifiedByDepartment(args: {
       : {
           note:
             "Exhaustive single-call scan completed without per-window truncation " +
-            "in the date range shown. Still not a global Note Lucene total.",
+            "in the date range shown. Still not a global Note Lucene total (Bullhorn Note index unavailable).",
         }),
   };
 }
@@ -965,6 +1009,7 @@ async function runAutoWidenScout(args: {
   let submissionRowsSeen = 0;
   let applicantsUnique = 0;
   let applicantsTruncated = false;
+  let submissionDepthTruncated = false;
   let stoppedForWallTime = false;
   let pages = 0;
 
@@ -1003,6 +1048,7 @@ async function runAutoWidenScout(args: {
     submissionRowsSeen += pass.submissionRowsSeen;
     applicantsUnique += pass.applicantsUnique;
     if (pass.applicantsTruncated) applicantsTruncated = true;
+    if (pass.submissionDepthTruncated) submissionDepthTruncated = true;
     for (const row of batch.jobRows) {
       allJobRows.push(row);
       if (typeof row.id === "number") allJobIds.push(row.id);
@@ -1010,13 +1056,8 @@ async function runAutoWidenScout(args: {
 
     jobStart += batch.jobIds.length;
     if (jobStart >= jobsTotal) break;
-
-    // Count-style (no limit): stop after first page that found matches —
-    // return a lower bound without scanning every open job.
-    // Top-N (limit set): keep paging so ranking by note date can see more of the pool.
-    if (args.limit === undefined && merged.size > 0 && pages >= 1) {
-      break;
-    }
+    // Keep paging until jobs exhausted or wall — never stop early just because
+    // a first page already found matches (that was the false-zero / undercount bug).
   }
 
   if (allJobIds.length === 0) {
@@ -1036,7 +1077,17 @@ async function runAutoWidenScout(args: {
   const ranked = rankAndLimitMatches([...merged.values()], args.limit);
   const jobsTruncated = jobStart < jobsTotal || allJobIds.length < jobsTotal;
   const incomplete =
-    jobsTruncated || applicantsTruncated || stoppedForWallTime;
+    jobsTruncated ||
+    applicantsTruncated ||
+    stoppedForWallTime ||
+    submissionDepthTruncated;
+  const stopReason = resolveScoutStopReason({
+    stoppedForWallTime,
+    jobsTruncated,
+    applicantsTruncated,
+    submissionDepthTruncated,
+  });
+  const confirmedComplete = stopReason === "complete" && !incomplete;
 
   let userNote: string;
   if (incomplete && ranked.length === 0) {
@@ -1050,7 +1101,7 @@ async function runAutoWidenScout(args: {
       (jobsTruncated || stoppedForWallTime
         ? "More (or more recent) matches may exist on jobs not yet scanned — treat as a partial ranked list. "
         : "") +
-      "Present these names to the user. " +
+      `stopReason=${stopReason}; confirmedComplete=false. Present these names. ` +
       INCOMPLETE_NO_FANOUT +
       " Ask a clarifying question only if they need a fuller/more recent set.";
   } else if (incomplete) {
@@ -1059,10 +1110,10 @@ async function runAutoWidenScout(args: {
       matchCount: ranked.length,
     });
   } else if (args.limit !== undefined) {
-    userNote = `Top ${ranked.length} most recent matching candidates by Scout/note date among open-department jobs.`;
+    userNote = `Top ${ranked.length} most recent matching candidates by Scout/note date among open-department jobs. confirmedComplete=true.`;
   } else {
     userNote =
-      "Unique matching candidates among the scanned open-department applicant pool.";
+      "Unique matching candidates among the open-department applicant pool for scanned jobs. confirmedComplete=true.";
   }
 
   return {
@@ -1105,11 +1156,14 @@ async function runAutoWidenScout(args: {
       maxCandidatesToScan: args.maxCandidatesPerPage,
       wallMs: EXHAUSTIVE_WALL_MS,
     },
+    stopReason,
+    confirmedComplete,
     definition:
       "Natural-language Scout/screening report: resolve Internal Department nicknames, " +
-      "scan OPEN jobs in pages, match Response applicants with the given note action " +
+      "scan OPEN jobs until exhausted or gateway wall, match Response applicants with the given note action " +
       "(jobOrder or comment Job ID), rank by latest matching note date. " +
-      "Pass limit=N for 'N most recent'. One call — do not fan out.",
+      "Pass limit=N for 'N most recent'. Stop working only when confirmedComplete=true " +
+      "or stopReason is a real connector/gateway limit — never because of an arbitrary early search cap.",
     ...(incomplete ? { incomplete: true, note: userNote } : { note: userNote }),
   };
 }
