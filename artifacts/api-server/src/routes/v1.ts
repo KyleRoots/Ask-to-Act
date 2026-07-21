@@ -10,6 +10,10 @@ import {
   listReports,
 } from "../lib/reports.js";
 import { countEntity } from "../lib/bullhorn-client.js";
+import {
+  scoutQualifiedByDepartment,
+  scoutReportQuerySchema,
+} from "../lib/scout-screen.js";
 import { logger } from "../lib/logger.js";
 
 /**
@@ -45,7 +49,9 @@ function clientErrorStatus(message: string): number | null {
     /invalid field "/i.test(message) ||
     /malformed bullhorn/i.test(message) ||
     /is query-only/i.test(message) ||
-    /unsupported entitytype/i.test(message)
+    /unsupported entitytype/i.test(message) ||
+    /department is required/i.test(message) ||
+    /noteaction must/i.test(message)
   ) {
     return 400;
   }
@@ -123,6 +129,13 @@ router.get("/reports/job-aging", handle("job_aging", () => jobAgingReport()));
 router.get(
   "/reports/recruiter-leaderboard",
   handle("recruiter_leaderboard", (req) => recruiterLeaderboard(dateRangeQuery.parse(req.query))),
+);
+
+router.get(
+  "/reports/scout-qualified-by-department",
+  handle("scout_dept_report", (req) =>
+    scoutQualifiedByDepartment(scoutReportQuerySchema.parse(req.query)),
+  ),
 );
 
 // --- Ad-hoc lookups (read-only) ---

@@ -198,6 +198,61 @@ paths:
                 $ref: "#/components/schemas/ReportResult"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /v1/reports/scout-qualified-by-department:
+    get:
+      operationId: getScoutQualifiedByDepartment
+      tags: [reports]
+      summary: Scout Screen qualified by department
+      description: >-
+        Unique candidates with a Scout Screen note among inbound applicants to
+        jobs in an Internal Department (correlatedCustomText1).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: department
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: noteAction
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: openJobsOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: applicantPool
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [responses, all]
+        - name: maxJobs
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: maxCandidatesToScan
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 400
+      responses:
+        "200":
+          description: Scout qualified candidates by department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/count:
     post:
       operationId: countEntities

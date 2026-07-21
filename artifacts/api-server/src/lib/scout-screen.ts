@@ -13,6 +13,7 @@
  *
  * Department is a free-string parameter (STS-STSI, MYT-Ottawa, …) — not hardcoded.
  */
+import { z } from "zod";
 import {
   searchJobs,
   searchAnyEntity,
@@ -21,6 +22,18 @@ import {
   parseJobIdsFromNoteComments,
 } from "./bullhorn-client.js";
 import { classifySubmissionStage } from "./submission-status.js";
+
+/** Shared query/body shape for REST + MCP scout report entry points. */
+export const scoutReportQuerySchema = z.object({
+  department: z.string().min(1),
+  noteAction: z.string().min(1).optional(),
+  openJobsOnly: z.coerce.boolean().optional(),
+  applicantPool: z.enum(["responses", "all"]).optional(),
+  maxJobs: z.coerce.number().int().min(1).max(100).optional(),
+  maxCandidatesToScan: z.coerce.number().int().min(1).max(400).optional(),
+  dateAddedStart: z.string().optional(),
+  dateAddedEnd: z.string().optional(),
+});
 
 const DEFAULT_NOTE_ACTION = "Scout Screen - Qualified";
 const DEFAULT_MAX_JOBS = 25;

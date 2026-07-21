@@ -412,7 +412,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_candidates",
-    "Search for candidates in Bullhorn ATS. PREFERRED for any skills/résumé/clearance text search: use the `keywords` argument — the server then searches ALL of a candidate's searchable text fields at once (`description` = full parsed RÉSUMÉ text, `skillSet` = skills list, `comments` = recruiter notes, `occupation` = title) so you can never miss a field, and it safely handles quoting/escaping. Each `keywords` entry is a REQUIRED concept (AND-ed); a plain string is one phrase and an inner array is a synonym/OR group — e.g. `keywords=[[\"Top Secret\",\"TS/SCI\",\"security clearance\"]]` (any of those) or `keywords=[\"Java\",\"AWS\"]` (both required). Use the `query` argument for STRUCTURED filters only (status, willRelocate, desiredLocations, dates); `keywords` and `query` are AND-ed together. If you instead hand-write free text into `query`, you must field-qualify every term across all text fields yourself (bare keywords are rejected by Bullhorn), e.g. `(skillSet:Kubernetes OR description:Kubernetes OR comments:Kubernetes OR occupation:Kubernetes)`. Combine must-have criteria with AND, use OR within a criterion for recall, quote multi-word terms to keep them together (e.g. `skillSet:\"Spring Boot\"`; Bullhorn matching is relevance-ranked, not strict exact-phrase, so confirm the top hits on the shortlist), and field-qualify EVERY term — bare keywords are rejected by Bullhorn. Results are relevance-ranked. Years-of-experience and skill recency are NOT reliable as query filters (the structured `experience` field is usually empty) — to judge those, open the shortlist with get_candidate (work history with dates) and get_candidate_resume (full résumé text). IMPORTANT — search the résumé via the QUERY (e.g. `description:Kubernetes`), but do NOT add `description` to the returned `fields`: in search results résumé text is truncated to a short preview to keep responses small, and pulling full résumés for many candidates at once makes the client drop the whole result. To CONFIRM a clearance phrase or skill on your shortlist, call get_candidate_resume with `highlight=[...the terms you're checking...]` — it returns just the short quote(s) where each term appears (smaller, and less likely to be withheld by the client) plus which terms were/weren't found. To read a candidate's FULL résumé, call get_candidate_resume WITHOUT `highlight` on your shortlist (~5 candidates). STATUS NOTE — to find 'active' / current / workable candidates, do NOT filter on `status:\"Active\"`: in this Bullhorn the workable pool is dominated by 'Online Applicant' and 'New Lead', with 'Active' only a minority and 'Archive' the main inactive bucket observed. Express 'active' as `AND NOT status:Archive` (keeps the full workable pool); only restrict to a specific status like `status:Active` when the user explicitly asks for that exact status. For stronger asks like 'available' / 'contactable' / 'submit-ready', do NOT assume every non-archived candidate is actionable — verify on your shortlist using recent placements (list_placements), submissions (list_submissions_for_candidate), and notes (get_notes). Returns key fields including `skillSet`. DISPLAY RULE (REQUIRED): every record includes a `bullhornUrl`. Whenever you present these candidates — in prose, a bullet list, OR a table — render each candidate's NAME as a markdown hyperlink to their `bullhornUrl`, e.g. `[Jane Doe](<bullhornUrl>)`. NEVER print a candidate's name as plain text when a `bullhornUrl` is present; inside a table, the linked name goes in the Name/Candidate column (do not add a separate URL column).",
+    "Search candidates. PREFERRED for résumé/skills text: use `keywords` (searches description, skillSet, comments, occupation; AND/OR groups). Use `query` for structured filters only (status, dates, location). Workable pool: `AND NOT status:Archive` — not `status:Active`. Confirm skills/clearance with get_candidate_resume on shortlist. Full résumés: get_candidate_resume (~5 candidates). Link each NAME to bullhornUrl.",
     {
       query: z
         .string()
@@ -454,7 +454,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_jobs",
-    "Search for job orders in Bullhorn ATS using a Lucene query. Returns matching job records, each with a `bullhornUrl`. DISPLAY RULE (REQUIRED): render each job's TITLE as a markdown hyperlink to its `bullhornUrl` (e.g. `[Senior Engineer](<bullhornUrl>)`) in prose, lists, AND tables; never show a job title as plain text when a `bullhornUrl` is present. IMPORTANT: in this instance each job's \"Internal Department\" (the owning office/branch, e.g. \"MYT-Ottawa\" or \"MYT-Chicago\") is stored in the field `correlatedCustomText1`, which is populated on virtually all jobs — use that field (NOT `categories`, which is mostly empty) to group, filter, or report jobs by internal department. You can filter on it directly, e.g. query `isOpen:true AND correlatedCustomText1:\"MYT-Ottawa\"`. IMPORTANT — do NOT use this tool to COUNT or TOTAL jobs (e.g. \"how many open jobs\", \"open jobs by department\"): fetching records here caps at a few hundred and silently UNDERCOUNTS, and large result pages can be dropped by the client. For ANY count / total / by-department number, use the `count_entity` tool instead — it returns exact totals from Bullhorn in a tiny payload (set groupBy:`correlatedCustomText1` for a per-department breakdown). CONVENTION for this instance: \"open jobs\" means EXACTLY `isOpen:true AND NOT status:Archive AND isDeleted:false` (this still INCLUDES on-hold, filled, and placed roles — only Archived AND soft-deleted records are excluded); do NOT add extra status exclusions (Filled/Placed/Lost/Canceled/Declined/etc.) unless the user explicitly asks. Status values are exact-spelling and case-sensitive (this data uses `Canceled` with ONE l, and `Archive`, NOT \"Cancelled\"/\"Archived\"); a misspelled status is silently ignored rather than erroring, so when unsure, discover the valid values with count_entity grouped by `status`. CRITICAL — a job's office / branch / location / region is the Internal Department field `correlatedCustomText1` ONLY: do NOT infer office from the job's OWNER or houseOwner (this instance has owner/user accounts NAMED after offices, e.g. \"MYT-Ottawa House\", that are NOT the office field and will badly undercount — e.g. returning 1 job instead of the true 99), and ignore the empty `branch`/`address`/`categories` fields. For ANY open-jobs-by-office count use count_entity with groupBy:`correlatedCustomText1`, or the open_jobs_report / job_aging_report tools. Likewise NEVER rank, pick a superlative (most/fewest/largest/oldest/top/worst), or name a by-office winner from a returned record page — a page is a truncated sample and will mislead; use count_entity or the report tools for any ranking or superlative.",
+    "Search job orders (Lucene). Internal Department = correlatedCustomText1 (NOT owner). Open jobs: isOpen:true AND NOT status:Archive AND isDeleted:false. For totals/by-dept use count_entity or open_jobs_report — not this list. Link job TITLE to bullhornUrl.",
     {
       query: z
         .string()
@@ -591,7 +591,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "match_candidates_for_job",
-    "Find and rank the best candidate matches for a specific job order — the PREFERRED tool for any \"match/find/source candidates for job X\" request. It does the whole job deterministically on the server: (1) reads the job and reports the requirements it matched against (skills, location, on-site/remote, years); (2) searches candidates against those requirements; (3) RELIABLY EXCLUDES, by default, candidates who are Placed, Do Not Contact / Opted Out, Inactive / Archived, or who are ALREADY SUBMITTED TO THIS JOB (matched by candidate ID — never by name, so the submission status is trustworthy and verifiable). NOTE: 'already submitted' means a TRUE submission (Internally Submitted, Client Submission, or a later pipeline stage). Inbound APPLICANTS — the Bullhorn 'Response' bucket (New Lead / Online Applicant), people who merely applied via a job board — are NOT submissions; they are still shown as matches but flagged `alreadyApplied:true`. Never call an `alreadyApplied` candidate 'submitted'. (4) prioritizes local/on-site candidates while still surfacing strong remote ones; (5) returns short résumé EVIDENCE quotes plus a `bullhornUrl` for every candidate. By default it derives the must-have skills from the job itself — pass `mustHaveSkills` to override, and set the include* flags only when the recruiter explicitly wants those excluded groups back. DISPLAY RULE (REQUIRED): render each candidate NAME as a markdown hyperlink to its `bullhornUrl`, show their status and whether they are already submitted (or only `alreadyApplied`), and cite the résumé evidence — do NOT claim a skill or clearance without the evidence quote. Security clearance is NOT structured in Bullhorn (it lives in résumé text); treat any clearance as UNVERIFIED until confirmed via get_candidate_resume and note that clearances can lapse.",
+    "PREFERRED for sourcing candidates for a job: server reads job, searches, ranks, returns résumé evidence + bullhornUrl. Excludes placed/DNC/inactive and true submissions by default; inbound applicants flagged alreadyApplied (not submitted). Use get_candidate_resume to verify clearance.",
     {
       jobId: z.number().int().positive().describe("Bullhorn job order ID to match candidates against."),
       mustHaveSkills: z
@@ -639,7 +639,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "find_candidates",
-    "Find the best candidates for an ad hoc ask (NOT tied to a specific job order) — the PREFERRED tool whenever a recruiter describes who they want (\"find me a senior Python dev in Ottawa with AWS\"). It does all the search-quality work deterministically on the server so results are consistent no matter which AI is driving: (1) RECALL — expands each required concept into curated synonyms/orthographic variants (e.g. \"react\" also matches \"reactjs\"/\"react.js\"); (2) RANK — re-orders by recruiter signals (structured skill hits, résumé-confirmed skills, local match, recency, availability) instead of raw text relevance; (3) PRECISION — confirms the required terms against each shortlisted candidate's actual résumé and returns short EVIDENCE quotes; (4) EXPERIENCE — derives years/seniority/recency from work-history dates. By default it searches the workable (non-archived) pool. Use this instead of the raw `search_candidates` tool unless you need a raw Bullhorn query. For matching against a SPECIFIC job order, use `match_candidates_for_job` instead. DISPLAY RULE (REQUIRED): render each candidate NAME as a markdown hyperlink to its `bullhornUrl`, show status/location/experience, and cite the résumé evidence — do NOT claim a skill or clearance without it (`resumeConfirmed`/`resumeEvidence`). Security clearance is NOT structured in Bullhorn (it lives in résumé text); treat any clearance as UNVERIFIED until confirmed and note that clearances can lapse.",
+    "PREFERRED for ad-hoc candidate search (not tied to a job): synonym expansion, résumé-confirmed ranking, evidence quotes. Use match_candidates_for_job for a specific job. Link NAME to bullhornUrl; cite resumeEvidence for skills/clearance.",
     {
       mustHave: z
         .array(z.string())
@@ -777,7 +777,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "query_entity",
-    `Structured query (SQL-like 'where') over ANY query-capable Bullhorn entity, returning a PAGE of records (NOT a total). For "how many" / totals / by-department breakdowns use count_entity instead — do NOT fetch records here and count them yourself (this page caps out and will undercount). Use this for query-only entities (Appointment, Task, CorporateUser, Sendout, Tearsheet) and for precise field equality/range filters on any query-capable entity. Note is NOT supported here (Bullhorn rejects /query/Note); use get_notes(candidateId|jobId) instead — Note.action may include custom values absent from list_field_options. Bullhorn stores dates as epoch milliseconds, so date filters use numeric comparisons, e.g. where: "status='Placed' AND dateAdded >= 1746057600000". Use describe_entity first to discover valid field names — its \`configuredCustomFields\` maps this instance's custom-field labels to API names (e.g. "Internal Department" = \`correlatedCustomText1\` on Placement, \`customText1\` on ClientContact/Lead/Opportunity). 'orderBy' is optional (e.g. '-dateAdded' for newest first). For Candidate, ClientContact, ClientCorporation, JobOrder, Lead, and Opportunity, each returned record includes a \`bullhornUrl\` deep link to open it directly in Bullhorn. The server enforces the SAME locked operational universe here as on count_entity: JobOrder/Opportunity exclude soft-deleted records (and isOpen=true also excludes Archived / Closed-Won/Closed-Lost/Converted) and Placement defaults to confirmed-only (Approved/Completed/Ended); when the where is adjusted, the response carries an \`appliedDefinition\` note. Pass an explicit status / isDeleted filter to override. Do NOT rank, pick a superlative (most/fewest/top/largest/oldest), or draw a by-group/by-office conclusion from this record page — it is a truncated sample; use count_entity or a report tool for any ranking, total, or by-group breakdown.`,
+    "Structured SQL-like query for query-capable entities (NOT Note). Use count_entity for totals. Internal Department: correlatedCustomText1 on JobOrder/Placement; customText1 on Contact/Lead/Opp. Dates = epoch ms. Pages cap at 50 — not for ranking. Link names to bullhornUrl.",
     {
       entityType: z.string().describe(entityTypeDescribe),
       where: z
@@ -803,7 +803,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "count_entity",
-    `Count Bullhorn records for a Lucene query WITHOUT returning the records — and optionally break the count down by a field. USE THIS for "how many" and scorecard / by-department questions instead of fetching records and counting them yourself: record lists cap at 100-500 and will undercount (e.g. report "51+" instead of the true total). Returns exact totals straight from Bullhorn in a tiny payload. Set \`groupBy\` to a field to get a per-value breakdown; for EXACT grouping also pass the known values in \`groupValues\` (e.g. the Internal Department names) — without them, values are auto-discovered from a sample and may be incomplete (groupsComplete:false). "Internal Department" field by entity: JobOrder & Placement = \`correlatedCustomText1\`; Opportunity, ClientContact & Lead = \`customText1\`; Candidate = \`customText3\`. For JobOrder, "open jobs" means EXACTLY \`isOpen:true AND NOT status:Archive AND isDeleted:false\` (the open flag still includes on-hold/filled/placed; Archived AND soft-deleted records are excluded) — do NOT add extra status exclusions (Filled/Placed/Lost/Canceled/Declined/etc.) unless the user explicitly asks. For Placement, "placements made" / "placements so far" means CONFIRMED placements only — count \`(status:Approved OR status:Completed OR status:Ended)\` (i.e. exclude Canceled, Archive, AND pending Submitted) unless the user explicitly asks for all/pending/canceled placements; do NOT add \`isDeleted:false\` to Placement queries — that field is not searchable on Placement and returns 0 (Placement search already excludes soft-deleted). TIME-SCOPING: a bare confirmed-placement count is ALL-TIME; for "this year" / YTD / any period you MUST add a dateAdded range (e.g. \`dateAdded:[<startEpochMs> TO <nowEpochMs>]\`) or use the placements_report tool (which defaults to YTD) — never report the all-time number for a time-scoped question. For Opportunity, "active" / "open" / "in the pipeline" opportunities means EXACTLY \`isOpen:true\` — the server then applies the official exclusion of Closed-Won/Closed-Lost/Converted AND soft-deleted records (isDeleted:false); do NOT approximate "active" by enumerating a subset of statuses (e.g. \`status:Open OR status:Qualifying\`), which UNDERCOUNTS (it drops Qualified/New) — use \`isOpen:true\`, the sales_pipeline_report, or the staffing_scorecard. Status spellings are exact and case-sensitive (\`Canceled\` one l, \`Archive\` not "Archived"); a wrong spelling is silently ignored, so groupBy \`status\` to discover the valid values. Searchable entities only: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Lead, Opportunity. Note is NOT supported here (Lucene Note search returns 0; /query/Note rejected) — use get_notes(candidateId|jobId).`,
+    "Exact Lucene counts (and optional groupBy). Use for how-many / by-department — not record lists. Internal Department: correlatedCustomText1 (JobOrder/Placement), customText1 (Contact/Lead/Opp). Open jobs: isOpen:true AND NOT status:Archive. Placements made: Approved/Completed/Ended. Note entity NOT supported — use get_notes or scout_dept_report.",
     {
       entityType: z.string().describe(entityTypeDescribe),
       query: z
@@ -1098,9 +1098,89 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_reports",
-    "List the pre-built REPORTS available in this connector (the report 'library'): their names, what each shows, and parameters. Call this when the user asks 'what reports can you run?' / 'what can you show me?' or to pick a canned analytics report. Each report is a single fast call that returns a finished table. For anything not in the library, use the ad-hoc tools (count_entity, search_*).",
+    "Report library: names, params, when to use each. Scout Screen by department → scout_dept_report (not Note search). Else count_entity / search_*.",
     {},
     async () => rt("list_reports", {}, async () => listReports()),
+  );
+
+  tool(
+    "scout_dept_report",
+    "Unique candidates with Scout Screen note (default 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1, e.g. STS-STSI, MYT-Ottawa). One call — avoids empty Note Lucene. Returns uniqueCandidateCount + candidates[]; may be incomplete if caps hit. Link NAME to bullhornUrl.",
+    {
+      department: z
+        .string()
+        .min(1)
+        .describe('Internal Department, e.g. "STS-STSI" or "MYT-Ottawa".'),
+      noteAction: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Note.action to match (default: Scout Screen - Qualified)."),
+      openJobsOnly: z
+        .boolean()
+        .optional()
+        .describe("Default true: open jobs only (isOpen, not Archive/deleted)."),
+      applicantPool: z
+        .enum(["responses", "all"])
+        .optional()
+        .describe("'responses' (default) = New Lead/Online Applicant; 'all' = every submission."),
+      maxJobs: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Max jobs scanned (default 25)."),
+      maxCandidatesToScan: z
+        .number()
+        .int()
+        .min(1)
+        .max(400)
+        .optional()
+        .describe("Max applicants to load notes for (default 100)."),
+      dateAddedStart: z
+        .string()
+        .optional()
+        .describe("JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive."),
+      dateAddedEnd: z
+        .string()
+        .optional()
+        .describe("JobSubmission dateAdded end (YYYY-MM-DD), UTC exclusive."),
+    },
+    async ({
+      department,
+      noteAction,
+      openJobsOnly,
+      applicantPool,
+      maxJobs,
+      maxCandidatesToScan,
+      dateAddedStart,
+      dateAddedEnd,
+    }) =>
+      rt(
+        "scout_dept_report",
+        {
+          department,
+          noteAction,
+          openJobsOnly,
+          applicantPool,
+          maxJobs,
+          maxCandidatesToScan,
+          dateAddedStart,
+          dateAddedEnd,
+        },
+        () =>
+          scoutQualifiedByDepartment({
+            department,
+            noteAction,
+            openJobsOnly,
+            applicantPool,
+            maxJobs,
+            maxCandidatesToScan,
+            dateAddedStart,
+            dateAddedEnd,
+          }),
+      ),
   );
 
   tool(
@@ -1164,105 +1244,6 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     async ({ startDate, endDate }) =>
       rt("recruiter_leaderboard", { startDate, endDate }, () =>
         recruiterLeaderboard({ startDate, endDate }),
-      ),
-  );
-
-  tool(
-    "scout_qualified_by_department",
-    "PRE-BUILT WORKFLOW (one call). Unique candidates who have a Scout Screen note (default action 'Scout Screen - Qualified') among inbound APPLICANTS to jobs in an Internal Department. " +
-      "Department is parameterized — pass any value such as STS-STSI, MYT-Ottawa, MYT-Chicago (stored on JobOrder as correlatedCustomText1). " +
-      "USE THIS for 'how many Scout Screen - Qualified candidates for department X' style questions. " +
-      "It works around Bullhorn's empty Note Lucene index: (1) open jobs in that department (default), (2) Response-bucket JobSubmissions (New Lead / Online Applicant — NOT recruiter submissions), (3) get_notes per candidate, (4) keep notes whose action matches and that reference a scanned job via jobOrder or comment 'Job ID: N'. " +
-      "Returns uniqueCandidateCount + candidates[]. Caps (maxJobs default 25, maxCandidatesToScan default 100) may mark incomplete:true — raise caps or add date filters; never treat the count as firm-wide all-time without noting limits. " +
-      "DISPLAY RULE: render each candidate NAME as a markdown link to bullhornUrl when present.",
-    {
-      department: z
-        .string()
-        .min(1)
-        .describe(
-          'Internal Department exact value, e.g. "STS-STSI" or "MYT-Ottawa" (JobOrder.correlatedCustomText1).',
-        ),
-      noteAction: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          "Exact Note.action to match (default: 'Scout Screen - Qualified'). Custom actions are allowed even if missing from list_field_options.",
-        ),
-      openJobsOnly: z
-        .boolean()
-        .optional()
-        .describe(
-          "If true (default), only open jobs (isOpen + not Archive + not soft-deleted). Set false to include closed jobs in the department.",
-        ),
-      applicantPool: z
-        .enum(["responses", "all"])
-        .optional()
-        .describe(
-          "'responses' (default) = inbound applicants only (New Lead / Online Applicant). 'all' = every JobSubmission on those jobs.",
-        ),
-      maxJobs: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .optional()
-        .describe("Max department jobs to scan (default 25, max 100)."),
-      maxCandidatesToScan: z
-        .number()
-        .int()
-        .min(1)
-        .max(400)
-        .optional()
-        .describe(
-          "Max unique applicants to load notes for (default 100, max 400).",
-        ),
-      dateAddedStart: z
-        .string()
-        .optional()
-        .describe(
-          "Optional JobSubmission dateAdded start (YYYY-MM-DD or ISO), UTC inclusive.",
-        ),
-      dateAddedEnd: z
-        .string()
-        .optional()
-        .describe(
-          "Optional JobSubmission dateAdded end (YYYY-MM-DD or ISO), UTC exclusive.",
-        ),
-    },
-    async ({
-      department,
-      noteAction,
-      openJobsOnly,
-      applicantPool,
-      maxJobs,
-      maxCandidatesToScan,
-      dateAddedStart,
-      dateAddedEnd,
-    }) =>
-      rt(
-        "scout_qualified_by_department",
-        {
-          department,
-          noteAction,
-          openJobsOnly,
-          applicantPool,
-          maxJobs,
-          maxCandidatesToScan,
-          dateAddedStart,
-          dateAddedEnd,
-        },
-        () =>
-          scoutQualifiedByDepartment({
-            department,
-            noteAction,
-            openJobsOnly,
-            applicantPool,
-            maxJobs,
-            maxCandidatesToScan,
-            dateAddedStart,
-            dateAddedEnd,
-          }),
       ),
   );
 
