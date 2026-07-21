@@ -206,7 +206,9 @@ paths:
       description: >-
         Unique candidates with a Scout Screen note among inbound applicants to
         jobs in an Internal Department (correlatedCustomText1). Works around
-        empty Note Lucene search on this Bullhorn instance.
+        empty Note Lucene search. mode=bounded (default) is a capped single
+        pass — if incomplete, treat as a lower bound and do not fan out date
+        windows. mode=exhaustive partitions dates server-side in one call.
       security:
         - bearerAuth: []
       parameters:
@@ -233,13 +235,20 @@ paths:
           schema:
             type: string
             enum: [responses, all]
+        - name: mode
+          in: query
+          required: false
+          description: "'bounded' (default) or 'exhaustive'."
+          schema:
+            type: string
+            enum: [bounded, exhaustive]
         - name: maxJobs
           in: query
           required: false
           schema:
             type: integer
             minimum: 1
-            maximum: 100
+            maximum: 300
         - name: maxCandidatesToScan
           in: query
           required: false

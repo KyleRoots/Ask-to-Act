@@ -739,14 +739,17 @@ export const REPORTS_CATALOG = [
     name: "scout_dept_report",
     title: "Scout Screen Qualified by Department",
     description:
-      "Unique candidates with a Scout Screen note (default action 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1). Works around empty Note Lucene search. MCP tool: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
+      "Unique candidates with a Scout Screen note (default action 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1). mode=bounded (default) = one capped pass — if incomplete, report as lower bound and STOP (do not fan out date windows). mode=exhaustive = one call with server-side date partitioning. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
     parameters: {
       department: "required Internal Department, e.g. STS-STSI or MYT-Ottawa",
       noteAction: "optional; default 'Scout Screen - Qualified'",
       openJobsOnly: "optional boolean; default true",
       applicantPool: "'responses' (default) or 'all' JobSubmission rows on those jobs",
-      maxJobs: "optional cap (default 25, max 100)",
-      maxCandidatesToScan: "optional cap (default 100, max 400)",
+      mode: "'bounded' (default) or 'exhaustive'",
+      maxJobs: "optional cap (bounded default 25/max 100; exhaustive default/max 300)",
+      maxCandidatesToScan: "optional cap per pass/window (default 100 bounded / 400 exhaustive, max 400)",
+      dateAddedStart: "optional YYYY-MM-DD",
+      dateAddedEnd: "optional YYYY-MM-DD exclusive",
     },
   },
 ] as const;
@@ -755,7 +758,7 @@ export function listReports(): unknown {
   return {
     report: "list_reports",
     description:
-      "Pre-built report library. For Scout Screen / qualified-by-department counts use scout_dept_report (MCP) or GET /v1/reports/scout-qualified-by-department — do NOT use Note Lucene search. For anything else, use count_entity or search_*.",
+      "Pre-built report library. For Scout Screen / qualified-by-department counts use scout_dept_report (MCP) or GET /v1/reports/scout-qualified-by-department — do NOT use Note Lucene search; if incomplete, report lower bound (do not fan out date windows unless mode=exhaustive). For anything else, use count_entity or search_*.",
     reports: REPORTS_CATALOG,
     note:
       "Note entity Lucene search returns 0 on this Bullhorn instance; use get_notes per candidate or scout_dept_report for Scout workflows.",
