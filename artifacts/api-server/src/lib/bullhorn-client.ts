@@ -949,32 +949,81 @@ export async function listPlacements(args: {
   return enrichWithProfileUrls("Placement", result);
 }
 
+const DEFAULT_NOTE_FIELDS =
+  "id,action,comments,commentingPerson,personReference,candidates,jobOrder,dateAdded";
+
 /**
- * Builds a Bullhorn `/query/Note` where clause for curated note lookups.
- * Candidate notes may be linked via `personReference` (primary) and/or the
- * `candidates` association — filter with OR so neither path is missed.
+ * Pulls Job IDs embedded in note comment text (ScoutGenius and similar writers
+ * often leave `jobOrder` null and only put `Job ID: N` in comments).
  * Exported for unit tests.
  */
-export function buildNotesWhereClause(args: {
-  candidateId?: number;
-  jobId?: number;
-  dateAddedStart?: string;
-  dateAddedEnd?: string;
-}): string {
-  const conditions: string[] = [];
-  if (args.candidateId !== undefined) {
-    conditions.push(
-      `(personReference.id=${args.candidateId} OR candidates.id=${args.candidateId})`,
-    );
+export function parseJobIdsFromNoteComments(comments: unknown): number[] {
+  if (typeof comments !== "string" || comments.length === 0) return [];
+  const ids = new Set<number>();
+  const re = /Job\s*ID\s*:\s*(\d+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(comments)) !== null) {
+    const id = Number(match[1]);
+    if (Number.isInteger(id) && id > 0) ids.add(id);
   }
-  if (args.jobId !== undefined) {
-    conditions.push(`jobOrder.id=${args.jobId}`);
+  return [...ids];
+}
+
+/** True when the note's jobOrder association or comment Job ID matches. */
+export function noteReferencesJob(
+  note: Record<string, unknown>,
+  jobId: number,
+): boolean {
+  const jo = note.jobOrder;
+  if (typeof jo === "number" && jo === jobId) return true;
+  if (jo && typeof jo === "object" && !Array.isArray(jo)) {
+    const id = (jo as { id?: unknown }).id;
+    if (typeof id === "number" && id === jobId) return true;
   }
-  conditions.push(
-    ...queryDateConditions("dateAdded", args.dateAddedStart, args.dateAddedEnd),
-  );
-  // Unfiltered note dumps are rare; id>0 is a valid open where for /query.
-  return conditions.length > 0 ? conditions.join(" AND ") : "id>0";
+  return parseJobIdsFromNoteComments(note.comments).includes(jobId);
+}
+
+function enrichNoteParsedJobIds(
+  note: Record<string, unknown>,
+): Record<string, unknown> {
+  const parsedJobOrderIds = parseJobIdsFromNoteComments(note.comments);
+  if (parsedJobOrderIds.length === 0) return note;
+  return { ...note, parsedJobOrderIds };
+}
+
+/**
+ * Notes are NOT queryable via `/query/Note` on Bullhorn (indexed entity) and
+ * Lucene `/search/Note` returns total 0 on this instance. The reliable path is
+ * the parent to-many association: `/entity/Candidate/{id}/notes` or
+ * `/entity/JobOrder/{id}/notes`.
+ */
+async function listNotesViaAssociation(
+  parentEntity: "Candidate" | "JobOrder",
+  parentId: number,
+  fields: string,
+): Promise<Record<string, unknown>[]> {
+  const pageSize = 50;
+  const maxPages = 20;
+  const all: Record<string, unknown>[] = [];
+  let start = 0;
+  for (let page = 0; page < maxPages; page++) {
+    const res = (await bullhornFetch(`entity/${parentEntity}/${parentId}/notes`, {
+      fields: sanitizeFields(fields),
+      count: pageSize,
+      start,
+    })) as { data?: unknown[]; count?: number; total?: number };
+    const rows = Array.isArray(res.data) ? res.data : [];
+    for (const row of rows) {
+      if (row && typeof row === "object" && !Array.isArray(row)) {
+        all.push(row as Record<string, unknown>);
+      }
+    }
+    if (rows.length < pageSize) break;
+    const total = typeof res.total === "number" ? res.total : undefined;
+    start += pageSize;
+    if (total !== undefined && start >= total) break;
+  }
+  return all;
 }
 
 export async function getNotes(args: {
@@ -986,20 +1035,66 @@ export async function getNotes(args: {
   count?: number;
   start?: number;
 }) {
-  const where = buildNotesWhereClause(args);
-  const fields =
-    args.fields ??
-    "id,action,comments,commentingPerson,personReference,candidates,jobOrder,dateAdded";
-  // Prefer /query over Lucene /search — on several Bullhorn instances
-  // /search/Note returns total 0 for every query while /query and /entity work.
-  return queryEntity(
-    "Note",
-    where,
-    fields,
-    args.count ?? 50,
-    args.start ?? 0,
-    "-dateAdded",
+  if (args.candidateId === undefined && args.jobId === undefined) {
+    throw new Error(
+      "get_notes requires candidateId and/or jobId. " +
+        "Bullhorn rejects /query/Note, and Lucene /search/Note returns 0 on this instance — " +
+        "notes must be loaded via the Candidate or JobOrder association.",
+    );
+  }
+
+  const fields = args.fields ?? DEFAULT_NOTE_FIELDS;
+  const { startMs, endMs } = parseDateRange(
+    args.dateAddedStart,
+    args.dateAddedEnd,
   );
+
+  // Scout-style notes are written on the Candidate (jobOrder often null, Job ID
+  // only in comments). Prefer the candidate association when both IDs are given.
+  let notes: Record<string, unknown>[];
+  if (args.candidateId !== undefined) {
+    notes = await listNotesViaAssociation(
+      "Candidate",
+      args.candidateId,
+      fields,
+    );
+    if (args.jobId !== undefined) {
+      notes = notes.filter((n) => noteReferencesJob(n, args.jobId!));
+    }
+  } else {
+    notes = await listNotesViaAssociation("JobOrder", args.jobId!, fields);
+  }
+
+  if (startMs !== undefined || endMs !== undefined) {
+    notes = notes.filter((n) => {
+      const d = n.dateAdded;
+      if (typeof d !== "number") return false;
+      if (startMs !== undefined && d < startMs) return false;
+      if (endMs !== undefined && d >= endMs) return false;
+      return true;
+    });
+  }
+
+  notes = notes.map(enrichNoteParsedJobIds);
+  notes.sort((a, b) => {
+    const da = typeof a.dateAdded === "number" ? a.dateAdded : 0;
+    const db = typeof b.dateAdded === "number" ? b.dateAdded : 0;
+    return db - da;
+  });
+
+  const start = args.start ?? 0;
+  const count = Math.min(args.count ?? 50, 50);
+  const page = notes.slice(start, start + count);
+  return {
+    total: notes.length,
+    start,
+    count: page.length,
+    data: page,
+    note:
+      "Notes loaded via Candidate/JobOrder association (not Lucene /query). " +
+      "When jobOrder is null, parsedJobOrderIds may be filled from comments (e.g. 'Job ID: 35501'). " +
+      "Global Note.action filters need a working Lucene Note index — use get_notes per candidate/job until then.",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1688,9 +1783,9 @@ const ENTITY_CATALOG: Record<string, CatalogEntry> = {
   },
   note: {
     canonical: "Note",
-    // Prefer /query: Lucene /search/Note returns total 0 on some Bullhorn
-    // instances even when notes exist and are readable via /entity + /query.
-    route: "both",
+    // Bullhorn rejects /query/Note (indexed entity). Lucene /search/Note returns
+    // total 0 on this instance — use get_notes via Candidate/JobOrder associations.
+    route: "search",
     defaultFields:
       "id,action,comments,commentingPerson,personReference,candidates,jobOrder,dateAdded",
   },
@@ -1805,8 +1900,7 @@ export async function searchAnyEntity(args: {
     args.count ?? 20,
     args.start ?? 0,
   );
-  // Note Lucene index is often empty while /query still works — steer callers away
-  // from a silent zero without breaking instances where search does return hits.
+  // Note Lucene index is empty on this instance while association reads work.
   if (
     entry.canonical === "Note" &&
     result &&
@@ -1817,8 +1911,9 @@ export async function searchAnyEntity(args: {
     return {
       ...(result as Record<string, unknown>),
       note:
-        "Lucene /search/Note returned 0 matches. On this Bullhorn instance Notes are usually readable via query_entity " +
-        "(e.g. where: action='Scout Screen - Qualified') or get_notes — not search_entity/count_entity.",
+        "Lucene /search/Note returned 0 matches (index appears empty). " +
+        "Bullhorn also rejects /query/Note. Use get_notes(candidateId|jobId) or " +
+        "get_entity(Candidate|JobOrder) with nested notes(...) fields instead.",
     };
   }
   return result;
@@ -2278,7 +2373,7 @@ export async function countEntity(args: {
   if (entry.canonical === "Note") {
     throw new Error(
       `count_entity does not support Note: Lucene /search/Note returns no matches on this Bullhorn instance ` +
-        `even when notes exist. Use query_entity(Note, where: "action='…'") or get_notes and page results.`,
+        `even when notes exist, and /query/Note is not supported. Use get_notes(candidateId|jobId) and page results.`,
     );
   }
   const baseRaw = (args.query ?? "").trim();
@@ -2417,6 +2512,13 @@ export async function queryAnyEntity(args: {
 }) {
   const entry = resolveEntity(args.entityType);
   if (entry.route === "search") {
+    if (entry.canonical === "Note") {
+      throw new Error(
+        `Note cannot use query_entity — Bullhorn rejects /query/Note (indexed entity). ` +
+          `Lucene search_entity(Note) also returns 0 on this instance. ` +
+          `Use get_notes(candidateId|jobId) or get_entity(Candidate|JobOrder) with nested notes(...) fields.`,
+      );
+    }
     throw new Error(
       `Entity "${entry.canonical}" must be read with search_entity (Lucene 'query'), not query_entity.`,
     );
@@ -2557,7 +2659,8 @@ export async function listFieldOptions(args: {
             "Note.action picklist is NOT exhaustive for reads. Custom/integration action strings " +
             "(e.g. 'Scout Screen - Qualified') may exist on notes even when absent from this list. " +
             "Never reject a user-supplied action for filtering/querying solely because it is missing here. " +
-            "Prefer listed values when writing via add_note unless the firm intentionally uses a custom action.",
+            "Prefer listed values when writing via add_note unless the firm intentionally uses a custom action. " +
+            "To read notes with a custom action, use get_notes(candidateId|jobId) and filter on action.",
         }
       : {}),
   };
