@@ -208,7 +208,7 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
 // deep link; without this guidance clients render the raw Bullhorn ID as plain text
 // instead of a clickable link. Keep it short and presentation-focused.
 const SERVER_INSTRUCTIONS = [
-  "AskToAct connects you to this firm's Bullhorn ATS (read and write tools).",
+  "AskToAct connects you to this firm's Bullhorn ATS via ONE universal connector (read and write tools).",
   "",
   "PRESENTING RECORDS — make every Bullhorn record open in one click:",
   "- Each linkable record in a tool result has a `bullhornUrl`: a deep link that opens THAT record in Bullhorn.",
@@ -273,6 +273,88 @@ export const addressFieldSchema = z
   })
   .optional();
 
+// Universal connector: every tool stays registered. Order matters for clients that
+// truncate long tools/list payloads — high-value tools are registered first.
+export const MCP_TOOL_PRIORITY: readonly string[] = [
+  // Discovery + Scout / screening-by-department
+  "list_reports",
+  "scout_dept_report",
+  "staffing_scorecard",
+  "placements_report",
+  "open_jobs_report",
+  "sales_pipeline_report",
+  "job_aging_report",
+  "recruiter_leaderboard",
+  // Core browse / match / notes
+  "count_entity",
+  "describe_entity",
+  "search_candidates",
+  "search_jobs",
+  "match_candidates_for_job",
+  "find_candidates",
+  "get_notes",
+  "get_candidate",
+  "get_job",
+  "get_company",
+  "get_contact",
+  "get_candidate_resume",
+  "list_submissions_for_job",
+  // Secondary reads
+  "search_companies",
+  "search_contacts",
+  "search_leads",
+  "search_opportunities",
+  "list_placements",
+  "list_submissions_for_candidate",
+  "list_appointments",
+  "list_tasks",
+  "find_users",
+  "list_candidate_attachments",
+  "read_candidate_attachment",
+  "list_field_options",
+  "search_entity",
+  "query_entity",
+  "get_entity",
+  // High-use writes (still on the same universal connector)
+  "add_note",
+  "update_candidate",
+  "update_candidate_status",
+  "create_job_submission",
+  "bulk_create_submissions",
+  "update_submission_status",
+  "create_job",
+  "update_job",
+  "create_contact",
+  "update_contact",
+  "create_company",
+  "update_company",
+  "create_placement",
+  "update_placement",
+  "create_sendout",
+  "create_candidate_from_resume",
+  "upload_file_to_record",
+  "create_lead",
+  "update_lead",
+  "create_opportunity",
+  "update_opportunity",
+  "create_task",
+  "update_task",
+  "create_appointment",
+  "update_appointment",
+  "notify_users",
+  "create_tearsheet",
+  "add_candidates_to_tearsheet",
+  "remove_candidates_from_tearsheet",
+  "create_support_ticket",
+  // Destructive last
+  "delete_entity",
+  "restore_entity",
+  "archive_placement",
+];
+
+/** Soft budget for sum of tool descriptions (chars) — keeps ChatGPT tools/list lean. */
+export const MCP_DESCRIPTION_BUDGET_CHARS = 55_000;
+
 export function createMcpServer(caller?: CallerIdentity): McpServer {
   const server = new McpServer(
     {
@@ -288,48 +370,63 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     idempotentHint: true,
     openWorldHint: false,
   };
-  const tool = <Args extends z.ZodRawShape>(
-    name: string,
-    description: string,
-    schema: Args,
-    cb: ToolCallback<Args>,
-  ) =>
-    server["tool"](
-      name,
-      description + READ_PRESENTATION_SUFFIX,
-      schema,
-      READ_ONLY_ANNOTATIONS,
-      cb,
-    );
-
   const WRITE_ANNOTATIONS: ToolAnnotations = {
     readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: false,
     openWorldHint: false,
   };
-  const writeTool = <Args extends z.ZodRawShape>(
-    name: string,
-    description: string,
-    schema: Args,
-    cb: ToolCallback<Args>,
-  ) => server["tool"](name, description, schema, WRITE_ANNOTATIONS, cb);
-
-  // Destructive writes (soft-delete/restore/placement archive) carry
-  // destructiveHint:true so MCP clients can require explicit user approval.
-  // idempotentHint:true — repeating the same call converges on the same state.
   const DESTRUCTIVE_ANNOTATIONS: ToolAnnotations = {
     readOnlyHint: false,
     destructiveHint: true,
     idempotentHint: true,
     openWorldHint: false,
   };
+
+  type PendingTool = {
+    name: string;
+    description: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    schema: z.ZodRawShape;
+    annotations: ToolAnnotations;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    cb: ToolCallback<any>;
+  };
+  const pendingTools: PendingTool[] = [];
+
+  const enqueue = <Args extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    schema: Args,
+    annotations: ToolAnnotations,
+    cb: ToolCallback<Args>,
+  ) => {
+    pendingTools.push({ name, description, schema, annotations, cb });
+  };
+
+  const tool = <Args extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    schema: Args,
+    cb: ToolCallback<Args>,
+  ) => enqueue(name, description + READ_PRESENTATION_SUFFIX, schema, READ_ONLY_ANNOTATIONS, cb);
+
+  const writeTool = <Args extends z.ZodRawShape>(
+    name: string,
+    description: string,
+    schema: Args,
+    cb: ToolCallback<Args>,
+  ) => enqueue(name, description, schema, WRITE_ANNOTATIONS, cb);
+
+  // Destructive writes (soft-delete/restore/placement archive) carry
+  // destructiveHint:true so MCP clients can require explicit user approval.
+  // idempotentHint:true — repeating the same call converges on the same state.
   const destructiveTool = <Args extends z.ZodRawShape>(
     name: string,
     description: string,
     schema: Args,
     cb: ToolCallback<Args>,
-  ) => server["tool"](name, description, schema, DESTRUCTIVE_ANNOTATIONS, cb);
+  ) => enqueue(name, description, schema, DESTRUCTIVE_ANNOTATIONS, cb);
 
   /**
    * Resolves the calling user's Bullhorn session for write operations.
@@ -683,7 +780,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_placements",
-    "List placements, optionally filtered by candidate ID, job order ID, and/or a dateAdded range. This instance stores each placement's \"Internal Department\" (office/branch) in field correlatedCustomText1. To answer time-scoped questions (e.g. 'placements added in May 2026'), pass dateAddedStart/dateAddedEnd; this tool is for viewing specific records only (page with `start` if needed). Results are in `data`; `count` is how many were returned. If `count` equals your requested limit there may be more — raise `count` (max 50) or page with `start`. DISPLAY RULE (REQUIRED): each record includes a `bullhornUrl` — render the candidate NAME (or the placement ID when no name is shown) as a markdown hyperlink to it in prose, lists, AND tables; never show it as plain text when a `bullhornUrl` is present. To COUNT/total placements (e.g. 'how many placements in 2026', 'placements by department'), do NOT add them up from this list — use `count_entity` for an exact, fast total. CONVENTION for this instance: \"placements made\" / \"placements so far\" means CONFIRMED placements only — filter `status:Approved OR status:Completed OR status:Ended` (i.e. exclude Canceled, Archive, AND pending Submitted) unless the user explicitly asks for all/pending/canceled placements. Do NOT rank offices/recruiters or pick a 'most/fewest/top' from this record page — it is a truncated sample; use count_entity or the report tools (placements_report, recruiter_leaderboard) for any total, ranking, or by-group breakdown.",
+    "List placements (page, not a total). Internal Department = correlatedCustomText1. Time scope via dateAddedStart/End. Confirmed = Approved/Completed/Ended. For how-many / by-dept use count_entity or placements_report — not this list. Link candidate NAME (or placement id) to bullhornUrl.",
     {
       candidateId: z.number().int().positive().optional().describe("Filter by candidate Bullhorn ID"),
       jobId: z.number().int().positive().optional().describe("Filter by job order Bullhorn ID"),
@@ -1194,7 +1291,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "staffing_scorecard",
-    "PRE-BUILT REPORT (one fast call). Department staffing scorecard for a year: confirmed placements split by Contract / Contract-to-Hire / Direct Hire, currently open jobs, active sales opportunities, and a demand-vs-delivery ratio per department — plus totals and an 'otherOrUnmapped' bucket for records outside the configured departments. Uses this instance's locked definitions (open jobs = isOpen AND NOT Archive AND not soft-deleted; placements made = Approved/Completed/Ended; active opps = NOT Closed-Won/Closed-Lost/Converted AND not soft-deleted). Prefer this over assembling the numbers yourself with count_entity for scorecard / overview asks. Placement counts are year-to-date by dateAdded (when the placement record was added), not by assignment start date.",
+    "Report: department scorecard for a year — confirmed placements (Contract / C2H / DH), open jobs, active opps, demand-vs-delivery. Locked defs: open=isOpen not Archive; placements=Approved/Completed/Ended; opps exclude Closed-Won/Lost/Converted. Placements by dateAdded YTD.",
     {
       year: z
         .number()
@@ -1207,7 +1304,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "placements_report",
-    "PRE-BUILT REPORT (one fast call). Confirmed placements over a period, broken down by department and employment type (Contract / Contract-to-Hire / Direct Hire), with totals, a per-status breakdown, and an 'otherOrUnmapped' bucket. 'Confirmed' = status Approved/Completed/Ended by default; pass status:'all' to include every status. The period is measured by when the placement RECORD was added (dateAdded), not the assignment start date.",
+    "Report: confirmed placements by department and employment type over a period (by dateAdded). Default status confirmed=Approved/Completed/Ended; pass status:all for every status.",
     {
       startDate: z.string().optional().describe("Start date YYYY-MM-DD (default: start of current year)."),
       endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),
@@ -1224,28 +1321,28 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "open_jobs_report",
-    "PRE-BUILT REPORT (one fast call). Current demand: open job requisitions by department and by employment type, with the grand total. USE THIS for ANY \"open jobs by office/branch/department/region\" question instead of fetching job records and grouping them yourself — grouping jobs by OWNER is WRONG (the office lives in correlatedCustomText1, NOT the owner; e.g. owner accounts named \"MYT-Ottawa House\" are not the office). Open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (this instance's locked definition).",
+    "Report: open jobs by department (correlatedCustomText1 — NOT owner) and employment type. Open = isOpen AND NOT Archive AND not soft-deleted.",
     {},
     async () => rt("open_jobs_report", {}, () => openJobsReport()),
   );
 
   tool(
     "sales_pipeline_report",
-    "PRE-BUILT REPORT (one fast call). Active sales pipeline: open opportunities by department and by stage (status), with the total. Active = NOT Closed-Won / Closed-Lost / Converted AND not soft-deleted (isDeleted:false).",
+    "Report: active opportunities by department and stage. Active = not Closed-Won/Lost/Converted and not soft-deleted.",
     {},
     async () => rt("sales_pipeline_report", {}, () => salesPipelineReport()),
   );
 
   tool(
     "job_aging_report",
-    "PRE-BUILT REPORT (one fast call). How long open jobs have been open: counts bucketed by age (0-30 / 31-90 / 91-180 / 180+ days) plus stale (>90 days) open jobs by department. Spotlights aging requisitions. USE THIS for ANY \"stale / aging open jobs\" or \"aging by office\" question — do NOT assemble it from a job-record list or group by owner (office = correlatedCustomText1; the owner is a person/house account, not the office). Open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false.",
+    "Report: open-job age buckets (0-30/31-90/91-180/180+) and stale (>90d) by department (correlatedCustomText1, not owner).",
     {},
     async () => rt("job_aging_report", {}, () => jobAgingReport()),
   );
 
   tool(
     "recruiter_leaderboard",
-    "PRE-BUILT REPORT (one fast call). Recruiter SUBMISSION-TO-PLACEMENT CONVERSION leaderboard over a period. For each recruiter, conversionRate = confirmed placements (Approved/Completed/Ended) credited to the candidate they SUBMITTED (JobSubmission.sendingUser) ÷ their own submissions in the period. Attribution is by the SUBMITTER, not the placement owner — those are frequently different people on this instance, which previously produced impossible >100% rates. Rates are capped at 100% (cappedAt100 flags placements whose submission predates the period); recruiters with fewer than 10 submissions are flagged lowVolume and listed after the reliable rows so a 1/1=100% fluke never tops the board. v1 lists only recruiters whose submissions produced at least one confirmed placement; unattributedPlacements counts confirmed placements with no submission sender.",
+    "Report: submission-to-placement conversion by SUBMITTER (JobSubmission.sendingUser), not placement owner. Rates capped at 100%; lowVolume (<10 submissions) ranked below reliable rows.",
     {
       startDate: z.string().optional().describe("Start date YYYY-MM-DD (default: start of current year)."),
       endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),
@@ -2120,6 +2217,18 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         return archiveOrCancelPlacement(session, placementId, status);
       }),
   );
+
+  // Register in priority order so truncation-prone clients keep high-value tools.
+  const priorityIndex = new Map(MCP_TOOL_PRIORITY.map((n, i) => [n, i]));
+  pendingTools.sort((a, b) => {
+    const ia = priorityIndex.get(a.name) ?? 10_000;
+    const ib = priorityIndex.get(b.name) ?? 10_000;
+    if (ia !== ib) return ia - ib;
+    return a.name.localeCompare(b.name);
+  });
+  for (const p of pendingTools) {
+    server["tool"](p.name, p.description, p.schema, p.annotations, p.cb);
+  }
 
   return server;
 }
