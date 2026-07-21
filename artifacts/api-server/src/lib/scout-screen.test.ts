@@ -102,20 +102,30 @@ describe("planExhaustiveDateWindows", () => {
 });
 
 describe("incompleteGuidanceNote", () => {
-  it("forbids client-side date-window fan-out", () => {
-    const bounded = incompleteGuidanceNote("bounded");
-    expect(bounded).toMatch(/LOWER BOUND/i);
+  it("forbids client-side date-window fan-out when results exist", () => {
+    const bounded = incompleteGuidanceNote("bounded", { matchCount: 3 });
+    expect(bounded).toMatch(/LOWER BOUND|partial ranked list/i);
     expect(bounded).toMatch(/Do NOT issue multiple scout_dept_report/i);
-    expect(bounded).toMatch(/mode=exhaustive/);
+    expect(bounded).toMatch(/clarifying question/i);
+    expect(bounded).not.toMatch(/NOT a confirmed zero/i);
 
-    const exhaustive = incompleteGuidanceNote("exhaustive");
-    expect(exhaustive).toMatch(/LOWER BOUND/i);
+    const exhaustive = incompleteGuidanceNote("exhaustive", { matchCount: 2 });
+    expect(exhaustive).toMatch(/LOWER BOUND|partial/i);
     expect(exhaustive).toMatch(/Do NOT issue multiple scout_dept_report/i);
+  });
+
+  it("does not treat incomplete zero as a final answer", () => {
+    const note = incompleteGuidanceNote("bounded", { matchCount: 0 });
+    expect(note).toMatch(/NOT a confirmed zero/i);
+    expect(note).toMatch(/clarifying question/i);
+    expect(note).toMatch(/Do NOT issue multiple scout_dept_report/i);
+    expect(note).not.toMatch(/Report it and STOP/i);
   });
 
   it("mentions wall-time stop when applicable", () => {
     const note = incompleteGuidanceNote("exhaustive", {
       stoppedForWallTime: true,
+      matchCount: 1,
     });
     expect(note).toMatch(/timeout budget/i);
     expect(note).toMatch(/dateAddedStart/);

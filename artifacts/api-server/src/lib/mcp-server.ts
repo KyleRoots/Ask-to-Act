@@ -1202,7 +1202,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames (STSI→STS-STSI). Defaults to OPEN jobs. For 'list/show N most recent' pass limit=N (server auto-pages jobs, ranks by note date, ONE call). Do NOT ask the user for maxJobs/mode/dates. incomplete = partial list/lower bound — never fan out date windows. Link NAME to bullhornUrl.",
+    "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames (STSI→STS-STSI). Defaults to OPEN jobs. For 'list/show N most recent' pass limit=N (server auto-pages until filled/wall, ranks by note date, ONE call). Backend knobs stay hidden — business clarifying questions are OK. If incomplete with results: present them (partial/lower bound). If incomplete with 0: do NOT conclude zero — clarify or retry once with broader filters (closed jobs / all applicants). Never date-window fan-out. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
