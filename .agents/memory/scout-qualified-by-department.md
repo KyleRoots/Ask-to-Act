@@ -1,6 +1,9 @@
 # Scout Screen — qualified candidates by Internal Department
 
-Support playbook for questions like: *“How many unique candidates have a Scout Screen - Qualified note for department STS-STSI (or MYT-Ottawa, etc.)?”*
+Support playbook for questions like:
+
+- *“How many unique candidates have a Scout Screen - Qualified note for department STS-STSI?”*
+- *“List the five most recent STSI candidates with Scout Screen - Qualified”* (nicknames + top-N)
 
 ## Bullhorn constraints (cannot fix in connector)
 
@@ -18,48 +21,69 @@ See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhor
 | Surface | Name | When to use |
 |---------|------|-------------|
 | **MCP** | `scout_dept_report` | ChatGPT / Cursor — one call, department-parameterized |
-| **REST** | `GET /v1/reports/scout-qualified-by-department?department=STS-STSI` | Custom GPT Actions, non-MCP clients |
+| **REST** | `GET /api/v1/reports/scout-qualified-by-department?department=STSI&limit=5` | Custom GPT Actions, non-MCP clients |
 | **Manual** | `get_notes` + job/submission tools | Debugging a known candidate |
 
-### Modes (important for ChatGPT)
+### Natural-language contract (product non-negotiable)
+
+Users must **not** learn backend knobs (`maxJobs`, `mode`, Lucene). The model should:
+
+1. Pass the spoken department or nickname (`STSI`, `Ottawa`, `STS-STSI`).
+2. For “list / show **N** most recent”, pass **`limit=N`**.
+3. Make **one** call. If `incomplete: true`, present a **partial ranked list / lower bound** — never fan out date windows.
+
+Server behavior:
+
+- Resolves nicknames via live Internal Department values (`STSI` → `STS-STSI`).
+- Defaults to **open** jobs.
+- With `limit`, auto-pages jobs in **one** call (~75s wall), ranks by latest matching note `dateAdded`, returns top N.
+- Without `limit` (count-style), stops after the first job page that finds matches (lower bound) unless exhaustive.
+
+### Modes
 
 | Mode | Behavior |
 |------|----------|
-| **`bounded`** (default) | One capped pass. If `incomplete: true`, **`uniqueCandidateCount` is a LOWER BOUND** — report it and **STOP**. |
-| **`exhaustive`** | **One** call; server partitions `dateAdded` into ≤6 windows (default **30-day** lookback), soft **~75s wall** (returns lower bound instead of 504), pages jobs up to 200, dedupes candidates. Prefer explicit recent `dateAddedStart`/`dateAddedEnd` in ChatGPT. |
+| **`bounded`** (default) | Natural-language path (nickname resolve + optional `limit` + auto-widen). Prefer this for list/most-recent. |
+| **`exhaustive`** | Submission-date lookback **counts** — ≤6 windows, default **30-day** lookback, soft **~75s wall**. Prefer explicit recent dates. Not the right default for “most recent N”. |
 
-**Never** emulate exhaustive by calling `scout_dept_report` repeatedly with half-month / weekly / 3-day date windows — that multiplies `get_notes` cost and causes timeouts.
+**Never** emulate exhaustive by calling `scout_dept_report` repeatedly with half-month / weekly / 3-day date windows.
 
-### MCP parameters (short names)
+### MCP parameters (AI-facing; keep off user chat)
 
-- `department` — **required** — Internal Department value on JobOrder (`correlatedCustomText1`), e.g. `STS-STSI`, `MYT-Ottawa`
+- `department` — **required** — nickname or exact Internal Department (`correlatedCustomText1`)
+- `limit` — for “N most recent” / “list N”
 - `noteAction` — default `Scout Screen - Qualified`
 - `openJobsOnly` — default `true`
-- `applicantPool` — default `responses` (New Lead / Online Applicant only; not recruiter submissions)
-- `mode` — `bounded` (default) or `exhaustive`
-- `maxJobs` / `maxCandidatesToScan` — raise for wider bounded scans; exhaustive defaults are higher
-- `dateAddedStart` / `dateAddedEnd` — optional JobSubmission date window (exhaustive uses these as the overall range)
+- `applicantPool` — default `responses` (New Lead / Online Applicant)
+- `mode` — leave default for list asks; `exhaustive` only for lookback counts
+- `maxJobs` / `maxCandidatesToScan` / dates — optional; **do not ask the user**
 
-### REST example
+### REST examples
 
+Most recent (nickname):
 ```http
-GET /v1/reports/scout-qualified-by-department?department=MYT-Ottawa&mode=bounded&maxJobs=50
+GET /api/v1/reports/scout-qualified-by-department?department=STSI&limit=5
 Authorization: Bearer <MCP_BEARER_TOKEN or portal API key>
 ```
 
-Exhaustive:
+Count-style lower bound:
 ```http
-GET /v1/reports/scout-qualified-by-department?department=MYT-Ottawa&mode=exhaustive
+GET /api/v1/reports/scout-qualified-by-department?department=MYT-Ottawa
+```
+
+Exhaustive lookback:
+```http
+GET /api/v1/reports/scout-qualified-by-department?department=MYT-Ottawa&mode=exhaustive
 ```
 
 ## What the workflow does
 
-1. Find jobs where `correlatedCustomText1` = requested department (open by default).
-2. Collect **Response-bucket** JobSubmissions (`New Lead`, `Online Applicant`) on those jobs — **not** Internally Submitted / Client Submission rows unless `applicantPool=all`.
-3. For each unique candidate, `get_notes` via association (bottleneck — keep call count low).
-4. Keep notes where `action` matches and the note references a scanned job via:
-   - `jobOrder.id`, or
-   - `Job ID: N` parsed from comments (ScoutGenius often leaves `jobOrder: null`).
+1. Resolve department nickname → exact `correlatedCustomText1` when needed.
+2. Find jobs for that department (open by default); with `limit`, page through open jobs until filled / wall / exhausted.
+3. Collect **Response-bucket** JobSubmissions (`New Lead`, `Online Applicant`) — not Internally Submitted / Client Submission unless `applicantPool=all`.
+4. For each unique candidate, `get_notes` via association.
+5. Keep notes where `action` matches and the note references a scanned job via `jobOrder.id` or `Job ID: N` in comments.
+6. Rank by latest matching note date; apply `limit` when set.
 
 ## Validated example
 
@@ -71,21 +95,9 @@ Check: `get_notes(4672021)` → `parsedJobOrderIds: [35501]`.
 
 ## ChatGPT MCP visibility
 
-Production `tools/list` exposes the **full universal** tool set (reads + writes) on one connector URL. ChatGPT may still truncate long inventories — mitigation is **registration priority** (scout/reports early) + **description budget CI**, not a second read-only connector. See [mcp-universal-inventory.md](./mcp-universal-inventory.md).
+Production `tools/list` exposes the **full universal** tool set on one connector URL. See [mcp-universal-inventory.md](./mcp-universal-inventory.md).
 
 If `scout_dept_report` is missing after reconnect:
 
 1. Prefer **REST** Custom GPT Action for this report as a temporary workaround.
 2. Or use manual workflow: department job count → `list_submissions_for_job` (response stage) → `get_notes` per candidate.
-
-## Related memory
-
-- [bullhorn-response-vs-submission.md](./bullhorn-response-vs-submission.md) — Response vs true submission
-- [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) — Lucene Note index ticket
-- [mcp-universal-inventory.md](./mcp-universal-inventory.md) — one connector; priority + budget
-
-## Deferred improvements
-
-- **Generic screening alias** + firm-configurable default note action(s) (decouple ScoutGenius branding; same plumbing).
-- **ScoutGenius write-side**: populate `jobOrder` on notes at creation (easier filtering; does **not** fix Lucene).
-- Bullhorn Support Note Lucene ticket (upstream).

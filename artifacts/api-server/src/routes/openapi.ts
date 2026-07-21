@@ -132,16 +132,16 @@ function actionsSpec(baseUrl: string) {
           operationId: "getScoutQualifiedByDepartment",
           summary: "Scout Screen qualified by department",
           description:
-            "Unique candidates with a Scout Screen note among inbound applicants to jobs in an Internal Department. " +
-            "Works around empty Note Lucene search. mode=bounded (default) returns a capped single pass — if incomplete, " +
-            "treat as a lower bound and do not fan out date windows. mode=exhaustive partitions dates server-side in one call " +
-            "(default 30-day lookback, ~75s wall budget); prefer explicit recent dateAddedStart/dateAddedEnd for ChatGPT.",
+            "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames " +
+            "(STSI→STS-STSI). For 'list N most recent' pass limit=N (server auto-pages open jobs, ranks by note date, ONE call). " +
+            "Do not fan out date windows. incomplete = partial list / lower bound.",
           parameters: [
             {
               name: "department",
               in: "query",
               required: true,
-              description: 'Internal Department (JobOrder.correlatedCustomText1), e.g. "STS-STSI".',
+              description:
+                'Internal Department or nickname (JobOrder.correlatedCustomText1), e.g. "STS-STSI", "STSI", "MYT-Ottawa".',
               schema: { type: "string" },
             },
             {
@@ -166,23 +166,33 @@ function actionsSpec(baseUrl: string) {
               schema: { type: "string", enum: ["responses", "all"] },
             },
             {
+              name: "limit",
+              in: "query",
+              required: false,
+              description:
+                "For 'N most recent' / 'list N' — set to N. Server ranks by latest matching note date.",
+              schema: { type: "integer", minimum: 1, maximum: 50 },
+            },
+            {
               name: "mode",
               in: "query",
               required: false,
               description:
-                "'bounded' (default) = single capped pass. 'exhaustive' = one call with server-side date windows.",
+                "'bounded' (default) for list/most-recent. 'exhaustive' for submission-date lookback counts only.",
               schema: { type: "string", enum: ["bounded", "exhaustive"] },
             },
             {
               name: "maxJobs",
               in: "query",
               required: false,
+              description: "Optional. Server auto-pages; do not ask the user for this.",
               schema: { type: "integer", minimum: 1, maximum: 200 },
             },
             {
               name: "maxCandidatesToScan",
               in: "query",
               required: false,
+              description: "Optional per job-page applicant cap. Do not ask the user for this.",
               schema: { type: "integer", minimum: 1, maximum: 400 },
             },
             dateParam("dateAddedStart", "Optional JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive."),
@@ -247,7 +257,7 @@ const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your fi
 WHAT YOU CAN DO
 - Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
 - Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
-- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STS-STSI (do NOT search Note via Lucene — it returns 0). Prefer one call; if incomplete, report as a lower bound — do not fan out date windows. Use mode=exhaustive with a recent date range for a fuller single-call scan (default unscoped exhaustive is 30 days / ~75s wall).
+- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. One call; if incomplete, report as a partial list / lower bound — do not fan out date windows.
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.

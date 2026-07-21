@@ -3,6 +3,7 @@ import {
   buildDepartmentJobsQuery,
   planExhaustiveDateWindows,
   incompleteGuidanceNote,
+  pickDepartmentMatch,
   EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
   EXHAUSTIVE_MAX_WINDOWS,
   EXHAUSTIVE_WALL_MS,
@@ -32,6 +33,24 @@ describe("buildDepartmentJobsQuery", () => {
 
   it("rejects blank department", () => {
     expect(() => buildDepartmentJobsQuery("  ", true)).toThrow(/department/);
+  });
+});
+
+describe("pickDepartmentMatch", () => {
+  const values = ["STS-STSI", "MYT-Ottawa", "MYT-Chicago", "MYT-Ohio"];
+
+  it("resolves nicknames like STSI → STS-STSI", () => {
+    expect(pickDepartmentMatch("STSI", values)).toBe("STS-STSI");
+    expect(pickDepartmentMatch("stsi", values)).toBe("STS-STSI");
+  });
+
+  it("resolves exact and Ottawa nicknames", () => {
+    expect(pickDepartmentMatch("STS-STSI", values)).toBe("STS-STSI");
+    expect(pickDepartmentMatch("Ottawa", values)).toBe("MYT-Ottawa");
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(pickDepartmentMatch("ZZZ", values)).toBeNull();
   });
 });
 

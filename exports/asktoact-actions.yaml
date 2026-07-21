@@ -204,20 +204,18 @@ paths:
       tags: [reports]
       summary: Scout Screen qualified by department
       description: >-
-        Unique candidates with a Scout Screen note among inbound applicants to
-        jobs in an Internal Department (correlatedCustomText1). Works around
-        empty Note Lucene search. mode=bounded (default) is a capped single
-        pass — if incomplete, treat as a lower bound and do not fan out date
-        windows. mode=exhaustive partitions dates server-side in one call
-        (default 30-day lookback, ~75s wall); prefer explicit recent dates
-        for ChatGPT.
+        Screening/Scout notes by Internal Department — natural-language ready.
+        Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass
+        limit=N (server auto-pages open jobs, ranks by note date, ONE call).
+        Do not fan out date windows. incomplete = partial list / lower bound.
       security:
         - bearerAuth: []
       parameters:
         - name: department
           in: query
           required: true
-          description: Internal Department value, e.g. STS-STSI or MYT-Ottawa.
+          description: >-
+            Internal Department or nickname, e.g. STS-STSI, STSI, MYT-Ottawa.
           schema:
             type: string
         - name: noteAction
@@ -237,16 +235,29 @@ paths:
           schema:
             type: string
             enum: [responses, all]
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            For 'N most recent' / 'list N' — set to N. Server ranks by latest
+            matching note date.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
         - name: mode
           in: query
           required: false
-          description: "'bounded' (default) or 'exhaustive'."
+          description: >-
+            'bounded' (default) for list/most-recent. 'exhaustive' for
+            submission-date lookback counts only.
           schema:
             type: string
             enum: [bounded, exhaustive]
         - name: maxJobs
           in: query
           required: false
+          description: Optional. Server auto-pages; do not ask the user.
           schema:
             type: integer
             minimum: 1
@@ -254,6 +265,7 @@ paths:
         - name: maxCandidatesToScan
           in: query
           required: false
+          description: Optional per job-page cap. Do not ask the user.
           schema:
             type: integer
             minimum: 1

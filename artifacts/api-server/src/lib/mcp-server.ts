@@ -1202,12 +1202,12 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Scout Screen qualified by Internal Department (correlatedCustomText1). Default mode=bounded: ONE capped call; if incomplete:true treat uniqueCandidateCount as a LOWER BOUND and STOP — never fan out date-window calls. mode=exhaustive: ONE call with server date windows (default 30-day lookback, ~75s wall budget); prefer explicit dateAddedStart/dateAddedEnd for ChatGPT. Avoids empty Note Lucene. Link NAME to bullhornUrl.",
+    "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames (STSI→STS-STSI). Defaults to OPEN jobs. For 'list/show N most recent' pass limit=N (server auto-pages jobs, ranks by note date, ONE call). Do NOT ask the user for maxJobs/mode/dates. incomplete = partial list/lower bound — never fan out date windows. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
         .min(1)
-        .describe('Internal Department, e.g. "STS-STSI" or "MYT-Ottawa".'),
+        .describe('Internal Department or nickname, e.g. "STS-STSI", "STSI", "MYT-Ottawa".'),
       noteAction: z
         .string()
         .min(1)
@@ -1216,45 +1216,51 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       openJobsOnly: z
         .boolean()
         .optional()
-        .describe("Default true: open jobs only (isOpen, not Archive/deleted)."),
+        .describe("Default true. Leave default for normal asks."),
       applicantPool: z
         .enum(["responses", "all"])
         .optional()
         .describe("'responses' (default) = New Lead/Online Applicant; 'all' = every submission."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("For 'N most recent' / 'list N' asks — set to N. Server ranks by latest matching note date."),
       mode: z
         .enum(["bounded", "exhaustive"])
         .optional()
-        .describe(
-          "'bounded' (default) = single capped pass. 'exhaustive' = one call, ≤6 server date windows, default 30-day lookback, soft ~75s wall — prefer recent dateAddedStart/dateAddedEnd. Do not emulate with multiple calls.",
-        ),
+        .describe("Leave default (bounded) for list/most-recent. exhaustive = submission-date lookback counts only."),
       maxJobs: z
         .number()
         .int()
         .min(1)
         .max(200)
         .optional()
-        .describe("Max jobs scanned (bounded default 25 / max 100; exhaustive default 100 / max 200)."),
+        .describe("Optional. Server auto-pages; do not ask the user for this."),
       maxCandidatesToScan: z
         .number()
         .int()
         .min(1)
         .max(400)
         .optional()
-        .describe("Max applicants to load notes for per pass/window (bounded default 100; exhaustive default 250)."),
+        .describe("Optional per job-page applicant cap. Do not ask the user for this."),
       dateAddedStart: z
         .string()
         .optional()
-        .describe("JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive. Recommended with mode=exhaustive."),
+        .describe("Optional JobSubmission dateAdded start. Omit for most-recent-by-note asks."),
       dateAddedEnd: z
         .string()
         .optional()
-        .describe("JobSubmission dateAdded end (YYYY-MM-DD), UTC exclusive. Recommended with mode=exhaustive."),
+        .describe("Optional JobSubmission dateAdded end. Omit for most-recent-by-note asks."),
     },
     async ({
       department,
       noteAction,
       openJobsOnly,
       applicantPool,
+      limit,
       mode,
       maxJobs,
       maxCandidatesToScan,
@@ -1268,6 +1274,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
           noteAction,
           openJobsOnly,
           applicantPool,
+          limit,
           mode,
           maxJobs,
           maxCandidatesToScan,
@@ -1280,6 +1287,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
             noteAction,
             openJobsOnly,
             applicantPool,
+            limit,
             mode,
             maxJobs,
             maxCandidatesToScan,

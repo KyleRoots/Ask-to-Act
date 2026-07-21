@@ -14,11 +14,11 @@
  * Department is a free-string parameter (STS-STSI, MYT-Ottawa, …) — not hardcoded.
  *
  * Modes:
- *   - bounded (default): one capped pass; incomplete → LOWER BOUND; clients must
- *     NOT fan out date-window calls (that multiplies get_notes cost / timeouts).
+ *   - bounded (default): natural-language friendly — resolves department nicknames
+ *     (e.g. STSI → STS-STSI), defaults to open jobs, optional `limit` for "most recent N"
+ *     (sorted by note date), and auto-pages jobs in ONE call until N found or caps/wall.
  *   - exhaustive: server partitions JobSubmission dateAdded into windows in ONE
- *     call, dedupes candidates, pages more jobs. Still may be incomplete if
- *     window/job caps are hit.
+ *     call (counts over a lookback). Prefer bounded+limit for "list most recent".
  */
 import { z } from "zod";
 import {
@@ -27,8 +27,18 @@ import {
   getNotes,
   noteReferencesJob,
   parseJobIdsFromNoteComments,
+  countEntity,
 } from "./bullhorn-client.js";
 import { classifySubmissionStage } from "./submission-status.js";
+
+/** Fallback Internal Department names when live discovery fails (Myticas). */
+const DEPARTMENT_FALLBACK = [
+  "STS-STSI",
+  "MYT-Ottawa",
+  "MYT-Chicago",
+  "MYT-Clover",
+  "MYT-Ohio",
+] as const;
 
 /** Shared query/body shape for REST + MCP scout report entry points. */
 export const scoutReportQuerySchema = z.object({
@@ -37,6 +47,8 @@ export const scoutReportQuerySchema = z.object({
   openJobsOnly: z.coerce.boolean().optional(),
   applicantPool: z.enum(["responses", "all"]).optional(),
   mode: z.enum(["bounded", "exhaustive"]).optional(),
+  /** Top-N most recent by matching note dateAdded (natural-language "list 5 most recent"). */
+  limit: z.coerce.number().int().min(1).max(50).optional(),
   maxJobs: z.coerce.number().int().min(1).max(200).optional(),
   maxCandidatesToScan: z.coerce.number().int().min(1).max(400).optional(),
   dateAddedStart: z.string().optional(),
@@ -44,11 +56,8 @@ export const scoutReportQuerySchema = z.object({
 });
 
 const DEFAULT_NOTE_ACTION = "Scout Screen - Qualified";
-const DEFAULT_MAX_JOBS = 25;
-const HARD_MAX_JOBS_BOUNDED = 100;
 const HARD_MAX_JOBS_EXHAUSTIVE = 200;
 const DEFAULT_MAX_JOBS_EXHAUSTIVE = 100;
-const DEFAULT_MAX_CANDIDATES = 100;
 const HARD_MAX_CANDIDATES = 400;
 const JOB_ID_BATCH = 20;
 const NOTE_SCAN_CONCURRENCY = 8;
@@ -58,8 +67,11 @@ export const EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS = 30;
 const EXHAUSTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export const EXHAUSTIVE_MAX_WINDOWS = 6;
 const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 250;
-/** Soft wall budget for exhaustive scans (ms). Stop early and return lower bound. */
+/** Soft wall budget for exhaustive / auto-widen scans (ms). */
 export const EXHAUSTIVE_WALL_MS = 75_000;
+const AUTO_WIDEN_JOB_PAGE = 40;
+const AUTO_WIDEN_MAX_JOBS = 200;
+const AUTO_WIDEN_CANDIDATES_PER_PAGE = 250;
 
 const INCOMPLETE_NO_FANOUT =
   "uniqueCandidateCount is a LOWER BOUND for this single call. Report it and STOP. " +
@@ -111,6 +123,69 @@ export function buildDepartmentJobsQuery(
     return `${deptClause} AND isOpen:true AND NOT status:Archive AND isDeleted:false`;
   }
   return `${deptClause} AND isDeleted:false`;
+}
+
+/**
+ * Map a user/AI nickname (e.g. "STSI") to a real Internal Department value.
+ * Exported for unit tests.
+ */
+export function pickDepartmentMatch(
+  input: string,
+  values: readonly string[],
+): string | null {
+  const q = input.trim().toLowerCase();
+  if (!q) return null;
+  const exact = values.find((v) => v.toLowerCase() === q);
+  if (exact) return exact;
+  const suffix = values.filter((v) => {
+    const vl = v.toLowerCase();
+    return vl.endsWith(`-${q}`) || vl.endsWith(q);
+  });
+  if (suffix.length === 1) return suffix[0]!;
+  if (suffix.length > 1) {
+    return [...suffix].sort((a, b) => a.length - b.length || a.localeCompare(b))[0]!;
+  }
+  const contains = values.filter((v) => v.toLowerCase().includes(q));
+  if (contains.length === 1) return contains[0]!;
+  if (contains.length > 1) {
+    return [...contains].sort((a, b) => a.length - b.length || a.localeCompare(b))[0]!;
+  }
+  return null;
+}
+
+async function listInternalDepartments(): Promise<string[]> {
+  try {
+    const r = (await countEntity({
+      entityType: "JobOrder",
+      query: "isDeleted:false",
+      groupBy: "correlatedCustomText1",
+    })) as {
+      groups?: Array<{ value?: string; count?: number }>;
+    };
+    const values = (r.groups ?? [])
+      .map((g) => g.value)
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+    if (values.length > 0) return values;
+  } catch {
+    // fall through
+  }
+  return [...DEPARTMENT_FALLBACK];
+}
+
+/** Resolve nicknames like STSI → STS-STSI. Exported for tests via pickDepartmentMatch. */
+export async function resolveDepartmentLabel(input: string): Promise<{
+  department: string;
+  resolvedFrom?: string;
+}> {
+  const raw = input.trim();
+  const values = await listInternalDepartments();
+  const picked = pickDepartmentMatch(raw, values);
+  if (picked && picked !== raw) {
+    return { department: picked, resolvedFrom: raw };
+  }
+  if (picked) return { department: picked };
+  // Keep caller string — may still match Lucene exact if discovery was incomplete.
+  return { department: raw };
 }
 
 /** Parse YYYY-MM-DD or ISO into epoch ms. Exported for tests. */
@@ -220,7 +295,34 @@ type MatchCandidate = {
   matchedJobIds: number[];
   matchedJobs: Array<{ id: number; title?: string }>;
   notes: MatchNote[];
+  /** Max matching note dateAdded (ms) — used for "most recent" ranking. */
+  latestNoteDate?: number;
 };
+
+function latestNoteMs(m: MatchCandidate): number {
+  if (typeof m.latestNoteDate === "number") return m.latestNoteDate;
+  let max = 0;
+  for (const n of m.notes) {
+    if (typeof n.dateAdded === "number" && n.dateAdded > max) max = n.dateAdded;
+  }
+  return max;
+}
+
+function withLatestNoteDate(m: MatchCandidate): MatchCandidate {
+  const latestNoteDate = latestNoteMs(m);
+  return latestNoteDate > 0 ? { ...m, latestNoteDate } : { ...m };
+}
+
+function rankAndLimitMatches(
+  matches: MatchCandidate[],
+  limit?: number,
+): MatchCandidate[] {
+  const ranked = matches
+    .map(withLatestNoteDate)
+    .sort((a, b) => latestNoteMs(b) - latestNoteMs(a) || a.id - b.id);
+  if (typeof limit === "number" && limit > 0) return ranked.slice(0, limit);
+  return ranked;
+}
 
 type ScanPassResult = {
   matches: MatchCandidate[];
@@ -240,6 +342,8 @@ async function loadDepartmentJobs(args: {
   openJobsOnly: boolean;
   maxJobs: number;
   pageAll: boolean;
+  /** Lucene search start offset (for auto-widen paging). */
+  start?: number;
 }): Promise<{
   jobRows: Array<Record<string, unknown>>;
   jobsTotal: number;
@@ -250,8 +354,9 @@ async function loadDepartmentJobs(args: {
   const jobsQuery = buildDepartmentJobsQuery(args.department, args.openJobsOnly);
   const jobRows: Array<Record<string, unknown>> = [];
   let jobsTotal = 0;
-  let start = 0;
+  let start = Math.max(0, args.start ?? 0);
   const pageSize = Math.min(args.maxJobs, 100);
+  const initialStart = start;
 
   for (;;) {
     const remaining = args.maxJobs - jobRows.length;
@@ -276,8 +381,8 @@ async function loadDepartmentJobs(args: {
     if (page.length < count) break;
   }
 
-  if (jobsTotal === 0) jobsTotal = jobRows.length;
-  const jobsTruncated = jobsTotal > jobRows.length;
+  if (jobsTotal === 0) jobsTotal = initialStart + jobRows.length;
+  const jobsTruncated = jobsTotal > initialStart + jobRows.length;
   const jobIds = jobRows
     .map((r) => (typeof r.id === "number" ? r.id : null))
     .filter((id): id is number => id !== null);
@@ -557,9 +662,13 @@ function emptyNoJobsResult(args: {
   maxJobs: number;
   maxCandidatesToScan: number;
   jobsTotal: number;
+  resolvedFrom?: string;
 }): unknown {
   return {
     department: args.department,
+    ...(args.resolvedFrom
+      ? { departmentResolvedFrom: args.resolvedFrom }
+      : {}),
     noteAction: args.noteAction,
     openJobsOnly: args.openJobsOnly,
     applicantPool: args.applicantPool,
@@ -583,14 +692,17 @@ export async function scoutQualifiedByDepartment(args: {
   openJobsOnly?: boolean;
   /** Default "responses" = Bullhorn Response tab (New Lead / Online Applicant). */
   applicantPool?: ScoutApplicantPool;
-  /** Default "bounded". Use "exhaustive" for one-call server-side date partitioning. */
+  /** Default "bounded". Use "exhaustive" for lookback counts via submission dates. */
   mode?: ScoutReportMode;
+  /** Top-N most recent by note date — for "list 5 most recent" natural-language asks. */
+  limit?: number;
   maxJobs?: number;
   maxCandidatesToScan?: number;
   dateAddedStart?: string;
   dateAddedEnd?: string;
 }): Promise<unknown> {
-  const department = args.department.trim();
+  const resolved = await resolveDepartmentLabel(args.department);
+  const department = resolved.department;
   const noteAction = (args.noteAction ?? DEFAULT_NOTE_ACTION).trim();
   if (!noteAction) throw new Error("noteAction must be a non-empty string.");
   const openJobsOnly = args.openJobsOnly !== false;
@@ -598,25 +710,10 @@ export async function scoutQualifiedByDepartment(args: {
     args.applicantPool === "all" ? "all" : "responses";
   const mode: ScoutReportMode =
     args.mode === "exhaustive" ? "exhaustive" : "bounded";
-
-  const hardMaxJobs =
-    mode === "exhaustive" ? HARD_MAX_JOBS_EXHAUSTIVE : HARD_MAX_JOBS_BOUNDED;
-  const defaultMaxJobs =
-    mode === "exhaustive" ? DEFAULT_MAX_JOBS_EXHAUSTIVE : DEFAULT_MAX_JOBS;
-  const maxJobs = Math.min(
-    Math.max(args.maxJobs ?? defaultMaxJobs, 1),
-    hardMaxJobs,
-  );
-  const maxCandidatesToScan = Math.min(
-    Math.max(
-      args.maxCandidatesToScan ??
-        (mode === "exhaustive"
-          ? EXHAUSTIVE_PER_WINDOW_CANDIDATES
-          : DEFAULT_MAX_CANDIDATES),
-      1,
-    ),
-    HARD_MAX_CANDIDATES,
-  );
+  const limit =
+    typeof args.limit === "number" && args.limit > 0
+      ? Math.min(Math.floor(args.limit), 50)
+      : undefined;
 
   let dateStartMs: number | undefined;
   let dateEndMs: number | undefined;
@@ -627,77 +724,43 @@ export async function scoutQualifiedByDepartment(args: {
     dateEndMs = parseScoutDateBound(args.dateAddedEnd, true);
   }
 
-  if (mode === "bounded") {
-    const pass = await runScoutScanPass({
+  // Natural-language path: top-N or default bounded — auto-page open jobs in ONE call.
+  // Prefer this over exhaustive date windows for "most recent" / "list N" asks.
+  if (mode === "bounded" || limit !== undefined) {
+    return runAutoWidenScout({
       department,
+      resolvedFrom: resolved.resolvedFrom,
       noteAction,
       openJobsOnly,
       applicantPool,
-      maxJobs,
-      maxCandidatesToScan,
-      pageAllJobs: false,
+      limit,
+      maxJobsCap: Math.min(
+        Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS, 1),
+        AUTO_WIDEN_MAX_JOBS,
+      ),
+      maxCandidatesPerPage: Math.min(
+        Math.max(
+          args.maxCandidatesToScan ?? AUTO_WIDEN_CANDIDATES_PER_PAGE,
+          1,
+        ),
+        HARD_MAX_CANDIDATES,
+      ),
       dateAddedStartMs: dateStartMs,
       dateAddedEndMs: dateEndMs,
     });
-
-    if (pass.jobIds.length === 0) {
-      return emptyNoJobsResult({
-        department,
-        noteAction,
-        openJobsOnly,
-        applicantPool,
-        mode,
-        maxJobs,
-        maxCandidatesToScan,
-        jobsTotal: pass.jobsTotal,
-      });
-    }
-
-    const incomplete = pass.jobsTruncated || pass.applicantsTruncated;
-    return {
-      department,
-      noteAction,
-      openJobsOnly,
-      applicantPool,
-      mode,
-      uniqueCandidateCount: pass.matches.length,
-      candidates: pass.matches,
-      jobsScanned: {
-        count: pass.jobIds.length,
-        totalMatching: pass.jobsTotal,
-        truncated: pass.jobsTruncated,
-        jobs: pass.jobRows.map((r) => ({
-          id: r.id,
-          title: r.title,
-          status: r.status,
-          isOpen: r.isOpen,
-        })),
-      },
-      applicantsScanned: {
-        uniqueCandidates: pass.applicantsUnique,
-        submissionRowsSeen: pass.submissionRowsSeen,
-        truncated: pass.applicantsTruncated,
-      },
-      limits: { maxJobs, maxCandidatesToScan },
-      definition:
-        "1) JobOrder Internal Department = correlatedCustomText1 (exact). " +
-        "2) Applicant pool = JobSubmission Response statuses (New Lead / Online Applicant) by default — not recruiter submissions. " +
-        `3) Notes loaded per candidate; keep action exactly "${noteAction}" that reference a scanned job via jobOrder or comment "Job ID: N". ` +
-        "4) Return UNIQUE candidates. Global Note Lucene search is unavailable on this instance. " +
-        "5) mode=bounded is a single capped pass — incomplete means LOWER BOUND, do not fan out date windows.",
-      ...(incomplete
-        ? { incomplete: true, note: incompleteGuidanceNote("bounded") }
-        : {
-            note:
-              "Unique candidates among the scanned applicant pool for this department. " +
-              "Not a firm-wide Note Lucene count (Note search index returns 0 on this Bullhorn instance).",
-          }),
-    };
   }
 
-  // --- exhaustive: one call, server-side date windows + more jobs ---
-  // Tuned for ChatGPT/gateway ~120s ceilings: 30-day default lookback, ≤6 windows,
-  // soft wall budget, and jobs loaded once (not per window).
+  // --- exhaustive: submission-date windows (counts over a lookback) ---
+  const hardMaxJobs = HARD_MAX_JOBS_EXHAUSTIVE;
+  const maxJobs = Math.min(
+    Math.max(args.maxJobs ?? DEFAULT_MAX_JOBS_EXHAUSTIVE, 1),
+    hardMaxJobs,
+  );
+  const maxCandidatesToScan = Math.min(
+    Math.max(args.maxCandidatesToScan ?? EXHAUSTIVE_PER_WINDOW_CANDIDATES, 1),
+    HARD_MAX_CANDIDATES,
+  );
+
   const startedAt = Date.now();
   const rangeEnd = dateEndMs ?? startedAt;
   const rangeStart =
@@ -772,14 +835,15 @@ export async function scoutQualifiedByDepartment(args: {
       noteAction,
       openJobsOnly,
       applicantPool,
-      mode,
+      mode: "exhaustive",
       maxJobs,
       maxCandidatesToScan,
       jobsTotal,
+      resolvedFrom: resolved.resolvedFrom,
     });
   }
 
-  const matches = [...merged.values()].sort((a, b) => a.id - b.id);
+  const matches = rankAndLimitMatches([...merged.values()], limit);
   const windowsPlanned = windows.length;
   const windowsCompleted = windowSummaries.length;
   const incomplete =
@@ -790,10 +854,12 @@ export async function scoutQualifiedByDepartment(args: {
 
   return {
     department,
+    ...(resolved.resolvedFrom ? { departmentResolvedFrom: resolved.resolvedFrom } : {}),
     noteAction,
     openJobsOnly,
     applicantPool,
-    mode,
+    mode: "exhaustive",
+    ...(limit !== undefined ? { limit } : {}),
     uniqueCandidateCount: matches.length,
     candidates: matches,
     jobsScanned: {
@@ -831,12 +897,8 @@ export async function scoutQualifiedByDepartment(args: {
       wallMs: EXHAUSTIVE_WALL_MS,
     },
     definition:
-      "mode=exhaustive: same Scout Screen filters as bounded, but the server partitions " +
-      "JobSubmission dateAdded into non-overlapping windows in ONE call and dedupes candidates. " +
-      `Default lookback is ${EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS} days when dates are omitted; ` +
-      `soft wall budget ~${Math.round(EXHAUSTIVE_WALL_MS / 1000)}s. ` +
-      "For ChatGPT, prefer an explicit recent dateAddedStart/dateAddedEnd. " +
-      "Still not a firm-wide Note Lucene count.",
+      "mode=exhaustive: partitions JobSubmission dateAdded into windows in ONE call. " +
+      "For 'list N most recent' prefer default bounded mode with limit=N (ranks by note date).",
     ...(incomplete
       ? {
           incomplete: true,
@@ -844,9 +906,164 @@ export async function scoutQualifiedByDepartment(args: {
         }
       : {
           note:
-            "Exhaustive single-call scan completed without per-window applicant/job truncation " +
-            "within the date range shown in exhaustive.*. Still not a global Note Lucene total.",
+            "Exhaustive single-call scan completed without per-window truncation " +
+            "in the date range shown. Still not a global Note Lucene total.",
         }),
+  };
+}
+
+async function runAutoWidenScout(args: {
+  department: string;
+  resolvedFrom?: string;
+  noteAction: string;
+  openJobsOnly: boolean;
+  applicantPool: ScoutApplicantPool;
+  limit?: number;
+  maxJobsCap: number;
+  maxCandidatesPerPage: number;
+  dateAddedStartMs?: number;
+  dateAddedEndMs?: number;
+}): Promise<unknown> {
+  const startedAt = Date.now();
+  const merged = new Map<number, MatchCandidate>();
+  const allJobRows: Array<Record<string, unknown>> = [];
+  const allJobIds: number[] = [];
+  let jobsTotal = 0;
+  let jobStart = 0;
+  let submissionRowsSeen = 0;
+  let applicantsUnique = 0;
+  let applicantsTruncated = false;
+  let stoppedForWallTime = false;
+  let pages = 0;
+
+  while (jobStart < args.maxJobsCap) {
+    if (Date.now() - startedAt >= EXHAUSTIVE_WALL_MS) {
+      stoppedForWallTime = true;
+      break;
+    }
+
+    const pageBudget = Math.min(AUTO_WIDEN_JOB_PAGE, args.maxJobsCap - jobStart);
+    const batch = await loadDepartmentJobs({
+      department: args.department,
+      openJobsOnly: args.openJobsOnly,
+      maxJobs: pageBudget,
+      pageAll: false,
+      start: jobStart,
+    });
+    jobsTotal = batch.jobsTotal;
+    pages += 1;
+
+    if (batch.jobIds.length === 0) break;
+
+    const pass = await runScoutScanPass({
+      department: args.department,
+      noteAction: args.noteAction,
+      openJobsOnly: args.openJobsOnly,
+      applicantPool: args.applicantPool,
+      maxJobs: batch.jobIds.length,
+      maxCandidatesToScan: args.maxCandidatesPerPage,
+      pageAllJobs: false,
+      dateAddedStartMs: args.dateAddedStartMs,
+      dateAddedEndMs: args.dateAddedEndMs,
+      preloadedJobs: batch,
+    });
+    mergeMatches(merged, pass.matches);
+    submissionRowsSeen += pass.submissionRowsSeen;
+    applicantsUnique += pass.applicantsUnique;
+    if (pass.applicantsTruncated) applicantsTruncated = true;
+    for (const row of batch.jobRows) {
+      allJobRows.push(row);
+      if (typeof row.id === "number") allJobIds.push(row.id);
+    }
+
+    jobStart += batch.jobIds.length;
+    if (jobStart >= jobsTotal) break;
+
+    // Count-style (no limit): stop after first page that found matches —
+    // return a lower bound without scanning every open job.
+    // Top-N (limit set): keep paging so ranking by note date can see more of the pool.
+    if (args.limit === undefined && merged.size > 0 && pages >= 1) {
+      break;
+    }
+  }
+
+  if (allJobIds.length === 0) {
+    return emptyNoJobsResult({
+      department: args.department,
+      noteAction: args.noteAction,
+      openJobsOnly: args.openJobsOnly,
+      applicantPool: args.applicantPool,
+      mode: "bounded",
+      maxJobs: args.maxJobsCap,
+      maxCandidatesToScan: args.maxCandidatesPerPage,
+      jobsTotal,
+      resolvedFrom: args.resolvedFrom,
+    });
+  }
+
+  const ranked = rankAndLimitMatches([...merged.values()], args.limit);
+  const jobsTruncated = jobStart < jobsTotal || allJobIds.length < jobsTotal;
+  const incomplete =
+    jobsTruncated || applicantsTruncated || stoppedForWallTime;
+
+  const userNote = incomplete
+    ? args.limit !== undefined && ranked.length > 0
+      ? `Showing the ${ranked.length} most recent matching candidate(s) found while scanning open jobs in this department. ` +
+        (jobsTruncated || stoppedForWallTime
+          ? "More (or more recent) matches may exist on jobs not yet scanned — treat as a partial ranked list. "
+          : "") +
+        "Do NOT fan out extra date-window tool calls."
+      : incompleteGuidanceNote("bounded", { stoppedForWallTime })
+    : args.limit !== undefined
+      ? `Top ${ranked.length} most recent matching candidates by Scout/note date among open-department jobs.`
+      : "Unique matching candidates among the scanned open-department applicant pool.";
+
+  return {
+    department: args.department,
+    ...(args.resolvedFrom
+      ? { departmentResolvedFrom: args.resolvedFrom }
+      : {}),
+    noteAction: args.noteAction,
+    openJobsOnly: args.openJobsOnly,
+    applicantPool: args.applicantPool,
+    mode: "bounded",
+    ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    uniqueCandidateCount: ranked.length,
+    candidates: ranked,
+    jobsScanned: {
+      count: allJobIds.length,
+      totalMatching: jobsTotal,
+      truncated: jobsTruncated,
+      pages,
+      jobs: allJobRows.slice(0, 50).map((r) => ({
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        isOpen: r.isOpen,
+      })),
+    },
+    applicantsScanned: {
+      uniqueCandidates: applicantsUnique,
+      submissionRowsSeen,
+      truncated: applicantsTruncated,
+    },
+    autoWiden: {
+      elapsedMs: Date.now() - startedAt,
+      wallMs: EXHAUSTIVE_WALL_MS,
+      stoppedForWallTime,
+      rankedBy: "latestMatchingNoteDate",
+    },
+    limits: {
+      maxJobs: args.maxJobsCap,
+      maxCandidatesToScan: args.maxCandidatesPerPage,
+      wallMs: EXHAUSTIVE_WALL_MS,
+    },
+    definition:
+      "Natural-language Scout/screening report: resolve Internal Department nicknames, " +
+      "scan OPEN jobs in pages, match Response applicants with the given note action " +
+      "(jobOrder or comment Job ID), rank by latest matching note date. " +
+      "Pass limit=N for 'N most recent'. One call — do not fan out.",
+    ...(incomplete ? { incomplete: true, note: userNote } : { note: userNote }),
   };
 }
 
