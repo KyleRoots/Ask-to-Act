@@ -26,7 +26,7 @@ See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhor
 | Mode | Behavior |
 |------|----------|
 | **`bounded`** (default) | One capped pass. If `incomplete: true`, **`uniqueCandidateCount` is a LOWER BOUND** — report it and **STOP**. |
-| **`exhaustive`** | **One** call; server partitions `dateAdded` into windows (default **90-day** lookback), pages more jobs (up to 300), dedupes candidates. Still may be incomplete. |
+| **`exhaustive`** | **One** call; server partitions `dateAdded` into ≤6 windows (default **30-day** lookback), soft **~75s wall** (returns lower bound instead of 504), pages jobs up to 200, dedupes candidates. Prefer explicit recent `dateAddedStart`/`dateAddedEnd` in ChatGPT. |
 
 **Never** emulate exhaustive by calling `scout_dept_report` repeatedly with half-month / weekly / 3-day date windows — that multiplies `get_notes` cost and causes timeouts.
 

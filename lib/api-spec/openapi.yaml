@@ -208,7 +208,8 @@ paths:
         jobs in an Internal Department (correlatedCustomText1). mode=bounded
         (default) is a capped single pass — if incomplete, treat as a lower
         bound and do not fan out date windows. mode=exhaustive partitions dates
-        server-side in one call.
+        server-side in one call (default 30-day lookback, ~75s wall); prefer
+        explicit recent dates for ChatGPT.
       security:
         - bearerAuth: []
       parameters:
@@ -245,7 +246,7 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 300
+            maximum: 200
         - name: maxCandidatesToScan
           in: query
           required: false

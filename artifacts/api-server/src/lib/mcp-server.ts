@@ -1105,7 +1105,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Scout Screen qualified by Internal Department (correlatedCustomText1). Default mode=bounded: ONE capped call; if incomplete:true treat uniqueCandidateCount as a LOWER BOUND and STOP — never fan out multiple date-window calls (timeouts). For fuller coverage in ONE call use mode=exhaustive (server partitions dates). Avoids empty Note Lucene. Link NAME to bullhornUrl.",
+    "Scout Screen qualified by Internal Department (correlatedCustomText1). Default mode=bounded: ONE capped call; if incomplete:true treat uniqueCandidateCount as a LOWER BOUND and STOP — never fan out date-window calls. mode=exhaustive: ONE call with server date windows (default 30-day lookback, ~75s wall budget); prefer explicit dateAddedStart/dateAddedEnd for ChatGPT. Avoids empty Note Lucene. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
@@ -1128,30 +1128,30 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .enum(["bounded", "exhaustive"])
         .optional()
         .describe(
-          "'bounded' (default) = single capped pass. 'exhaustive' = one call with server-side date windows (default 90-day lookback). Do not emulate exhaustive yourself.",
+          "'bounded' (default) = single capped pass. 'exhaustive' = one call, ≤6 server date windows, default 30-day lookback, soft ~75s wall — prefer recent dateAddedStart/dateAddedEnd. Do not emulate with multiple calls.",
         ),
       maxJobs: z
         .number()
         .int()
         .min(1)
-        .max(300)
+        .max(200)
         .optional()
-        .describe("Max jobs scanned (bounded default 25 / max 100; exhaustive default/max 300)."),
+        .describe("Max jobs scanned (bounded default 25 / max 100; exhaustive default 100 / max 200)."),
       maxCandidatesToScan: z
         .number()
         .int()
         .min(1)
         .max(400)
         .optional()
-        .describe("Max applicants to load notes for per pass/window (bounded default 100; exhaustive default 400)."),
+        .describe("Max applicants to load notes for per pass/window (bounded default 100; exhaustive default 250)."),
       dateAddedStart: z
         .string()
         .optional()
-        .describe("JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive."),
+        .describe("JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive. Recommended with mode=exhaustive."),
       dateAddedEnd: z
         .string()
         .optional()
-        .describe("JobSubmission dateAdded end (YYYY-MM-DD), UTC exclusive."),
+        .describe("JobSubmission dateAdded end (YYYY-MM-DD), UTC exclusive. Recommended with mode=exhaustive."),
     },
     async ({
       department,

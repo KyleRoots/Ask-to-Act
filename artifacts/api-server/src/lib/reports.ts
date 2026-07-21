@@ -739,17 +739,17 @@ export const REPORTS_CATALOG = [
     name: "scout_dept_report",
     title: "Scout Screen Qualified by Department",
     description:
-      "Unique candidates with a Scout Screen note (default action 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1). mode=bounded (default) = one capped pass — if incomplete, report as lower bound and STOP (do not fan out date windows). mode=exhaustive = one call with server-side date partitioning. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
+      "Unique candidates with a Scout Screen note (default action 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1). mode=bounded (default) = one capped pass — if incomplete, report as lower bound and STOP (do not fan out date windows). mode=exhaustive = one call with ≤6 server date windows (default 30-day lookback, ~75s wall); prefer explicit recent dates for ChatGPT. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
     parameters: {
       department: "required Internal Department, e.g. STS-STSI or MYT-Ottawa",
       noteAction: "optional; default 'Scout Screen - Qualified'",
       openJobsOnly: "optional boolean; default true",
       applicantPool: "'responses' (default) or 'all' JobSubmission rows on those jobs",
       mode: "'bounded' (default) or 'exhaustive'",
-      maxJobs: "optional cap (bounded default 25/max 100; exhaustive default/max 300)",
-      maxCandidatesToScan: "optional cap per pass/window (default 100 bounded / 400 exhaustive, max 400)",
-      dateAddedStart: "optional YYYY-MM-DD",
-      dateAddedEnd: "optional YYYY-MM-DD exclusive",
+      maxJobs: "optional cap (bounded default 25/max 100; exhaustive default 100/max 200)",
+      maxCandidatesToScan: "optional cap per pass/window (default 100 bounded / 250 exhaustive, max 400)",
+      dateAddedStart: "optional YYYY-MM-DD (recommended with exhaustive)",
+      dateAddedEnd: "optional YYYY-MM-DD exclusive (recommended with exhaustive)",
     },
   },
 ] as const;

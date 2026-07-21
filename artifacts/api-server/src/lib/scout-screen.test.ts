@@ -3,6 +3,9 @@ import {
   buildDepartmentJobsQuery,
   planExhaustiveDateWindows,
   incompleteGuidanceNote,
+  EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
+  EXHAUSTIVE_MAX_WINDOWS,
+  EXHAUSTIVE_WALL_MS,
 } from "./scout-screen.js";
 
 describe("buildDepartmentJobsQuery", () => {
@@ -60,6 +63,23 @@ describe("planExhaustiveDateWindows", () => {
   it("rejects inverted ranges", () => {
     expect(() => planExhaustiveDateWindows(10, 10)).toThrow(/end after start/);
   });
+
+  it("keeps ChatGPT-safe default lookback within max window budget", () => {
+    const end = Date.parse("2026-07-21T00:00:00.000Z");
+    const start =
+      end - EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+    const week = 7 * 24 * 60 * 60 * 1000;
+    const windows = planExhaustiveDateWindows(
+      start,
+      end,
+      week,
+      EXHAUSTIVE_MAX_WINDOWS,
+    );
+    expect(EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS).toBe(30);
+    expect(EXHAUSTIVE_MAX_WINDOWS).toBe(6);
+    expect(EXHAUSTIVE_WALL_MS).toBeLessThanOrEqual(90_000);
+    expect(windows.length).toBeLessThanOrEqual(EXHAUSTIVE_MAX_WINDOWS);
+  });
 });
 
 describe("incompleteGuidanceNote", () => {
@@ -72,5 +92,13 @@ describe("incompleteGuidanceNote", () => {
     const exhaustive = incompleteGuidanceNote("exhaustive");
     expect(exhaustive).toMatch(/LOWER BOUND/i);
     expect(exhaustive).toMatch(/Do NOT issue multiple scout_dept_report/i);
+  });
+
+  it("mentions wall-time stop when applicable", () => {
+    const note = incompleteGuidanceNote("exhaustive", {
+      stoppedForWallTime: true,
+    });
+    expect(note).toMatch(/timeout budget/i);
+    expect(note).toMatch(/dateAddedStart/);
   });
 });
