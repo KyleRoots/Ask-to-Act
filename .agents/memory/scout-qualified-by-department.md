@@ -51,6 +51,7 @@ Server behavior:
 - Resolves nicknames via live Internal Department values (`STSI` → `STS-STSI`).
 - Defaults to **open** jobs.
 - Auto-pages jobs until exhausted or ~75s gateway wall (safety valve, not a “give up” signal for the model when results are incomplete).
+- For top-N / list asks: preload open jobs **newest-first** (`dateAdded` desc) and allow ~95s wall so July-level matches are not stranded behind older Lucene page order.
 - Matches notes across the full association-loaded note set (not just a 50-row display page).
 - Returns top-level `stopReason` + `confirmedComplete`.
 - Applicant note-scan budget prefers **newest JobSubmissions** (ordered query + eviction of older applicants when capped) so "most recent" asks stay accurate under the wall.

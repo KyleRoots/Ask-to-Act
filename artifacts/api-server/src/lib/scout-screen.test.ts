@@ -6,9 +6,11 @@ import {
   pickDepartmentMatch,
   resolveScoutStopReason,
   upsertApplicantPreferRecent,
+  sortJobsNewestFirst,
   EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
   EXHAUSTIVE_MAX_WINDOWS,
   EXHAUSTIVE_WALL_MS,
+  TOPN_WALL_MS,
 } from "./scout-screen.js";
 
 describe("buildDepartmentJobsQuery", () => {
@@ -188,5 +190,21 @@ describe("upsertApplicantPreferRecent", () => {
     upsertApplicantPreferRecent(map, hit(2, 200), 2);
     upsertApplicantPreferRecent(map, hit(3, 100), 2);
     expect([...map.keys()].sort()).toEqual([1, 2]);
+  });
+});
+
+describe("sortJobsNewestFirst", () => {
+  it("orders by dateAdded descending then id", () => {
+    const sorted = sortJobsNewestFirst([
+      { id: 1, dateAdded: 100 },
+      { id: 35429, dateAdded: 300 },
+      { id: 35159, dateAdded: 200 },
+    ]);
+    expect(sorted.map((r) => r.id)).toEqual([35429, 35159, 1]);
+  });
+
+  it("keeps top-N wall above bounded default", () => {
+    expect(TOPN_WALL_MS).toBeGreaterThan(EXHAUSTIVE_WALL_MS);
+    expect(TOPN_WALL_MS).toBeLessThanOrEqual(120_000);
   });
 });
