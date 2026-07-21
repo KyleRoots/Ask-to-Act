@@ -1243,7 +1243,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .number()
         .int()
         .min(1)
-        .max(400)
+        .max(800)
         .optional()
         .describe("Optional per job-page applicant cap. Do not ask the user for this."),
       dateAddedStart: z

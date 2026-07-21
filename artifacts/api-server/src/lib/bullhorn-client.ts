@@ -865,6 +865,32 @@ export async function listSubmissionsForJob(args: {
 }
 
 /**
+ * Ordered JobSubmission query for scout/applicant workflows.
+ * Defaults to newest-first (`-dateAdded`) so note-scan budgets prefer recent applicants.
+ */
+export async function queryJobSubmissions(args: {
+  where: string;
+  fields?: string;
+  count?: number;
+  start?: number;
+  orderBy?: string;
+}) {
+  const fields =
+    args.fields ?? "id,status,candidate,jobOrder,dateAdded,sendingUser";
+  const result = await queryEntity(
+    "JobSubmission",
+    args.where,
+    fields,
+    args.count ?? 50,
+    args.start ?? 0,
+    args.orderBy ?? "-dateAdded",
+  );
+  return tagSubmissionStages(
+    await enrichWithProfileUrls("JobSubmission", result),
+  );
+}
+
+/**
  * Tag each JobSubmission row with a derived `stage` ("response" | "submission")
  * so the AI never conflates inbound applicants (the Bullhorn "Response" bucket)
  * with recruiter-actioned submissions. Returns the same envelope, enriched.
