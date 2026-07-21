@@ -736,10 +736,10 @@ export const REPORTS_CATALOG = [
     },
   },
   {
-    name: "scout_qualified_by_department",
+    name: "scout_dept_report",
     title: "Scout Screen Qualified by Department",
     description:
-      "Unique candidates with a Scout Screen (or custom) note action among inbound applicants to jobs in an Internal Department. Works around the empty Note Lucene index by scanning Response-bucket applicants then per-candidate notes.",
+      "Unique candidates with a Scout Screen note (default action 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1). Works around empty Note Lucene search. MCP tool: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
     parameters: {
       department: "required Internal Department, e.g. STS-STSI or MYT-Ottawa",
       noteAction: "optional; default 'Scout Screen - Qualified'",
@@ -755,7 +755,9 @@ export function listReports(): unknown {
   return {
     report: "list_reports",
     description:
-      "Pre-built report library. Call one of these tools by name for a fast, ready-made answer. For anything not covered, use the ad-hoc tools (count_entity, search_*).",
+      "Pre-built report library. For Scout Screen / qualified-by-department counts use scout_dept_report (MCP) or GET /v1/reports/scout-qualified-by-department — do NOT use Note Lucene search. For anything else, use count_entity or search_*.",
     reports: REPORTS_CATALOG,
+    note:
+      "Note entity Lucene search returns 0 on this Bullhorn instance; use get_notes per candidate or scout_dept_report for Scout workflows.",
   };
 }

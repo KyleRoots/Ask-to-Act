@@ -50,6 +50,6 @@ Attach: one sample Note id + Candidate id, timestamps, REST URL host.
 
 ## Workaround in AskToAct
 
-`get_notes(candidateId|jobId)` via associations + `scout_qualified_by_department`
+`get_notes(candidateId|jobId)` via associations + `scout_dept_report`
 (department → Response applicants → per-candidate notes). Not a substitute for
 global Note search.

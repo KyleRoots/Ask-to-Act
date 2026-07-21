@@ -127,6 +127,60 @@ function actionsSpec(baseUrl: string) {
           responses: okReport,
         },
       },
+      "/reports/scout-qualified-by-department": {
+        get: {
+          operationId: "getScoutQualifiedByDepartment",
+          summary: "Scout Screen qualified by department",
+          description:
+            "Unique candidates with a Scout Screen note among inbound applicants to jobs in an Internal Department. " +
+            "Works around empty Note Lucene search on this Bullhorn instance.",
+          parameters: [
+            {
+              name: "department",
+              in: "query",
+              required: true,
+              description: 'Internal Department (JobOrder.correlatedCustomText1), e.g. "STS-STSI".',
+              schema: { type: "string" },
+            },
+            {
+              name: "noteAction",
+              in: "query",
+              required: false,
+              description: "Note.action to match (default: Scout Screen - Qualified).",
+              schema: { type: "string" },
+            },
+            {
+              name: "openJobsOnly",
+              in: "query",
+              required: false,
+              description: "If true (default), only open jobs in the department.",
+              schema: { type: "boolean" },
+            },
+            {
+              name: "applicantPool",
+              in: "query",
+              required: false,
+              description: "'responses' (default) or 'all' JobSubmissions on those jobs.",
+              schema: { type: "string", enum: ["responses", "all"] },
+            },
+            {
+              name: "maxJobs",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 100 },
+            },
+            {
+              name: "maxCandidatesToScan",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 400 },
+            },
+            dateParam("dateAddedStart", "Optional JobSubmission dateAdded start (YYYY-MM-DD), UTC inclusive."),
+            dateParam("dateAddedEnd", "Optional JobSubmission dateAdded end (YYYY-MM-DD), UTC exclusive."),
+          ],
+          responses: okReport,
+        },
+      },
       "/count": {
         post: {
           operationId: "countEntities",
@@ -146,7 +200,7 @@ function actionsSpec(baseUrl: string) {
                       type: "string",
                       description:
                         "Searchable entity: Candidate, ClientContact, ClientCorporation, " +
-                        "JobOrder, JobSubmission, Placement, Lead, Opportunity, or Note.",
+                        "JobOrder, JobSubmission, Placement, Lead, or Opportunity. Note is not supported.",
                     },
                     query: {
                       type: "string",
@@ -181,8 +235,9 @@ function actionsSpec(baseUrl: string) {
 const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your firm's Bullhorn ATS through read-only reporting Actions.
 
 WHAT YOU CAN DO
-- Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, and recruiter leaderboard.
-- Run exact record counts for any searchable Bullhorn entity (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
+- Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
+- Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
+- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STS-STSI (do NOT search Note via Lucene — it returns 0 on this instance).
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.
