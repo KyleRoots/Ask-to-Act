@@ -206,7 +206,9 @@ paths:
       description: >-
         Screening/Scout notes by Internal Department — natural-language ready.
         Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass
-        limit=N (server auto-pages open jobs, ranks by note date, ONE call).
+        limit=N (server auto-pages open jobs until exhausted or gateway wall,
+        ranks by note date). Returns stopReason + confirmedComplete — keep
+        working unless confirmedComplete or a real connector/gateway limit.
         Do not fan out date windows. incomplete = partial list / lower bound.
       security:
         - bearerAuth: []
@@ -261,7 +263,7 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 200
+            maximum: 2000
         - name: maxCandidatesToScan
           in: query
           required: false

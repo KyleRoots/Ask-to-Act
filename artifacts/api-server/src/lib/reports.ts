@@ -739,7 +739,7 @@ export const REPORTS_CATALOG = [
     name: "scout_dept_report",
     title: "Scout Screen Qualified by Department",
     description:
-      "Natural-language screening/Scout notes by Internal Department. Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass limit=N (auto-pages open jobs, ranks by note date, ONE call). Do not ask users for maxJobs/mode. incomplete = partial list / lower bound — never fan out date windows. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
+      "Natural-language screening/Scout notes by Internal Department. Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass limit=N. Returns stopReason + confirmedComplete — keep working unless confirmedComplete or a real connector/gateway limit. Never date-window fan-out. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
     parameters: {
       department: "required Internal Department or nickname, e.g. STS-STSI, STSI, MYT-Ottawa",
       noteAction: "optional; default 'Scout Screen - Qualified'",

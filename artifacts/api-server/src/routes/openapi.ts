@@ -186,7 +186,7 @@ function actionsSpec(baseUrl: string) {
               in: "query",
               required: false,
               description: "Optional. Server auto-pages; do not ask the user for this.",
-              schema: { type: "integer", minimum: 1, maximum: 200 },
+              schema: { type: "integer", minimum: 1, maximum: 2000 },
             },
             {
               name: "maxCandidatesToScan",
@@ -257,7 +257,7 @@ const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your fi
 WHAT YOU CAN DO
 - Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
 - Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
-- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. One call; if incomplete, report as a partial list / lower bound — do not fan out date windows.
+- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. Read stopReason/confirmedComplete — keep working unless complete or a real connector/gateway limit; do not fan out date windows.
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.

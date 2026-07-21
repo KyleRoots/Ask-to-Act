@@ -4,6 +4,7 @@ import {
   planExhaustiveDateWindows,
   incompleteGuidanceNote,
   pickDepartmentMatch,
+  resolveScoutStopReason,
   EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
   EXHAUSTIVE_MAX_WINDOWS,
   EXHAUSTIVE_WALL_MS,
@@ -106,7 +107,7 @@ describe("incompleteGuidanceNote", () => {
     const bounded = incompleteGuidanceNote("bounded", { matchCount: 3 });
     expect(bounded).toMatch(/LOWER BOUND|partial ranked list/i);
     expect(bounded).toMatch(/Do NOT issue multiple scout_dept_report/i);
-    expect(bounded).toMatch(/clarifying question/i);
+    expect(bounded).toMatch(/confirmedComplete|exhaustive/i);
     expect(bounded).not.toMatch(/NOT a confirmed zero/i);
 
     const exhaustive = incompleteGuidanceNote("exhaustive", { matchCount: 2 });
@@ -117,17 +118,36 @@ describe("incompleteGuidanceNote", () => {
   it("does not treat incomplete zero as a final answer", () => {
     const note = incompleteGuidanceNote("bounded", { matchCount: 0 });
     expect(note).toMatch(/NOT a confirmed zero/i);
-    expect(note).toMatch(/clarifying question/i);
+    expect(note).toMatch(/confirmedComplete is false/i);
     expect(note).toMatch(/Do NOT issue multiple scout_dept_report/i);
     expect(note).not.toMatch(/Report it and STOP/i);
   });
 
-  it("mentions wall-time stop when applicable", () => {
+  it("mentions wall-time as a real platform limit when applicable", () => {
     const note = incompleteGuidanceNote("exhaustive", {
       stoppedForWallTime: true,
       matchCount: 1,
     });
-    expect(note).toMatch(/timeout budget/i);
+    expect(note).toMatch(/timeout budget|wall_time/i);
     expect(note).toMatch(/dateAddedStart/);
+  });
+});
+
+describe("resolveScoutStopReason", () => {
+  it("prefers wall_time over job caps", () => {
+    expect(
+      resolveScoutStopReason({
+        stoppedForWallTime: true,
+        jobsTruncated: true,
+      }),
+    ).toBe("wall_time");
+  });
+
+  it("returns complete only when nothing truncated", () => {
+    expect(resolveScoutStopReason({})).toBe("complete");
+    expect(resolveScoutStopReason({ noJobs: true })).toBe("no_matching_jobs");
+    expect(resolveScoutStopReason({ jobsTruncated: true })).toBe(
+      "job_safety_cap",
+    );
   });
 });

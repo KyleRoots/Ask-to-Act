@@ -1034,6 +1034,12 @@ export async function getNotes(args: {
   fields?: string;
   count?: number;
   start?: number;
+  /**
+   * Internal matching workflows (e.g. scout_dept_report): return every note
+   * loaded from the association (up to the association page budget), not the
+   * MCP display page of 50. Display callers must omit this.
+   */
+  returnAllLoaded?: boolean;
 }) {
   if (args.candidateId === undefined && args.jobId === undefined) {
     throw new Error(
@@ -1083,7 +1089,9 @@ export async function getNotes(args: {
   });
 
   const start = args.start ?? 0;
-  const count = Math.min(args.count ?? 50, 50);
+  const count = args.returnAllLoaded
+    ? Math.max(0, notes.length - start)
+    : Math.min(args.count ?? 50, 50);
   const page = notes.slice(start, start + count);
   return {
     total: notes.length,

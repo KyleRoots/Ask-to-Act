@@ -1202,7 +1202,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames (STSI→STS-STSI). Defaults to OPEN jobs. For 'list/show N most recent' pass limit=N (server auto-pages until filled/wall, ranks by note date, ONE call). Backend knobs stay hidden — business clarifying questions are OK. If incomplete with results: present them (partial/lower bound). If incomplete with 0: do NOT conclude zero — clarify or retry once with broader filters (closed jobs / all applicants). Never date-window fan-out. Link NAME to bullhornUrl.",
+    "Screening/Scout notes by Internal Department — NL-ready. Resolves nicknames (STSI→STS-STSI). Defaults OPEN jobs. For 'N most recent' pass limit=N (pages until jobs exhausted or gateway wall). Read stopReason + confirmedComplete: only treat the task as finished when confirmedComplete=true OR stopReason is a real connector/gateway limit (e.g. wall_time, no_matching_jobs) — never give up solely because of an arbitrary search cap. 0+incomplete → clarify or one broader/exhaustive retry. Never date-window fan-out. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
@@ -1236,7 +1236,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .number()
         .int()
         .min(1)
-        .max(200)
+        .max(2000)
         .optional()
         .describe("Optional. Server auto-pages; do not ask the user for this."),
       maxCandidatesToScan: z
