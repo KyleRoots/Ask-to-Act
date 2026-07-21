@@ -13,13 +13,22 @@ Support playbook for questions like: *“How many unique candidates have a Scout
 
 See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhorn Support ticket text.
 
-## AskToAct entry points (Phase A)
+## AskToAct entry points
 
 | Surface | Name | When to use |
 |---------|------|-------------|
 | **MCP** | `scout_dept_report` | ChatGPT / Cursor — one call, department-parameterized |
 | **REST** | `GET /v1/reports/scout-qualified-by-department?department=STS-STSI` | Custom GPT Actions, non-MCP clients |
-| **Manual** | `get_notes` + job/submission tools | Debugging or when scout caps mark `incomplete: true` |
+| **Manual** | `get_notes` + job/submission tools | Debugging a known candidate |
+
+### Modes (important for ChatGPT)
+
+| Mode | Behavior |
+|------|----------|
+| **`bounded`** (default) | One capped pass. If `incomplete: true`, **`uniqueCandidateCount` is a LOWER BOUND** — report it and **STOP**. |
+| **`exhaustive`** | **One** call; server partitions `dateAdded` into windows (default **90-day** lookback), pages more jobs (up to 300), dedupes candidates. Still may be incomplete. |
+
+**Never** emulate exhaustive by calling `scout_dept_report` repeatedly with half-month / weekly / 3-day date windows — that multiplies `get_notes` cost and causes timeouts.
 
 ### MCP parameters (short names)
 
@@ -27,21 +36,27 @@ See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhor
 - `noteAction` — default `Scout Screen - Qualified`
 - `openJobsOnly` — default `true`
 - `applicantPool` — default `responses` (New Lead / Online Applicant only; not recruiter submissions)
-- `maxJobs` / `maxCandidatesToScan` — raise if result is `incomplete: true`
-- `dateAddedStart` / `dateAddedEnd` — optional JobSubmission date window
+- `mode` — `bounded` (default) or `exhaustive`
+- `maxJobs` / `maxCandidatesToScan` — raise for wider bounded scans; exhaustive defaults are higher
+- `dateAddedStart` / `dateAddedEnd` — optional JobSubmission date window (exhaustive uses these as the overall range)
 
 ### REST example
 
 ```http
-GET /v1/reports/scout-qualified-by-department?department=MYT-Ottawa&maxJobs=50
+GET /v1/reports/scout-qualified-by-department?department=MYT-Ottawa&mode=bounded&maxJobs=50
 Authorization: Bearer <MCP_BEARER_TOKEN or portal API key>
+```
+
+Exhaustive:
+```http
+GET /v1/reports/scout-qualified-by-department?department=MYT-Ottawa&mode=exhaustive
 ```
 
 ## What the workflow does
 
 1. Find jobs where `correlatedCustomText1` = requested department (open by default).
 2. Collect **Response-bucket** JobSubmissions (`New Lead`, `Online Applicant`) on those jobs — **not** Internally Submitted / Client Submission rows unless `applicantPool=all`.
-3. For each unique candidate, `get_notes` via association.
+3. For each unique candidate, `get_notes` via association (bottleneck — keep call count low).
 4. Keep notes where `action` matches and the note references a scanned job via:
    - `jobOrder.id`, or
    - `Job ID: N` parsed from comments (ScoutGenius often leaves `jobOrder: null`).
@@ -56,11 +71,10 @@ Check: `get_notes(4672021)` → `parsedJobOrderIds: [35501]`.
 
 ## ChatGPT MCP visibility
 
-Production `tools/list` includes **69 tools** (~40k tokens of schema). ChatGPT may **truncate** long MCP inventories — if `scout_dept_report` is missing after reconnect:
+Production `tools/list` includes ~69 tools. ChatGPT may **truncate** long MCP inventories — if `scout_dept_report` is missing after reconnect:
 
 1. Prefer **REST** Custom GPT Action for this report.
 2. Or use manual workflow: department job count → `list_submissions_for_job` (response stage) → `get_notes` per candidate.
-3. Phase B (deferred): MCP core/full tiers + CI token budget.
 
 ## Related memory
 
@@ -70,4 +84,4 @@ Production `tools/list` includes **69 tools** (~40k tokens of schema). ChatGPT m
 ## Deferred improvements
 
 - **ScoutGenius write-side**: populate `jobOrder` on notes at creation (easier filtering; does **not** fix Lucene).
-- **MCP description diet / tiers** — Phase B.
+- **MCP core/full tiers** + CI token budget for tool descriptions.

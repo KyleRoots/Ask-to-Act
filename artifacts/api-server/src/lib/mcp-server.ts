@@ -1098,14 +1098,14 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_reports",
-    "Report library: names, params, when to use each. Scout Screen by department → scout_dept_report (not Note search). Else count_entity / search_*.",
+    "Report library: names, params, when to use each. Scout Screen by department → scout_dept_report (not Note search; incomplete = lower bound, no date fan-out). Else count_entity / search_*.",
     {},
     async () => rt("list_reports", {}, async () => listReports()),
   );
 
   tool(
     "scout_dept_report",
-    "Unique candidates with Scout Screen note (default 'Scout Screen - Qualified') among inbound applicants to jobs in an Internal Department (correlatedCustomText1, e.g. STS-STSI, MYT-Ottawa). One call — avoids empty Note Lucene. Returns uniqueCandidateCount + candidates[]; may be incomplete if caps hit. Link NAME to bullhornUrl.",
+    "Scout Screen qualified by Internal Department (correlatedCustomText1). Default mode=bounded: ONE capped call; if incomplete:true treat uniqueCandidateCount as a LOWER BOUND and STOP — never fan out multiple date-window calls (timeouts). For fuller coverage in ONE call use mode=exhaustive (server partitions dates). Avoids empty Note Lucene. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
@@ -1124,20 +1124,26 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .enum(["responses", "all"])
         .optional()
         .describe("'responses' (default) = New Lead/Online Applicant; 'all' = every submission."),
+      mode: z
+        .enum(["bounded", "exhaustive"])
+        .optional()
+        .describe(
+          "'bounded' (default) = single capped pass. 'exhaustive' = one call with server-side date windows (default 90-day lookback). Do not emulate exhaustive yourself.",
+        ),
       maxJobs: z
         .number()
         .int()
         .min(1)
-        .max(100)
+        .max(300)
         .optional()
-        .describe("Max jobs scanned (default 25)."),
+        .describe("Max jobs scanned (bounded default 25 / max 100; exhaustive default/max 300)."),
       maxCandidatesToScan: z
         .number()
         .int()
         .min(1)
         .max(400)
         .optional()
-        .describe("Max applicants to load notes for (default 100)."),
+        .describe("Max applicants to load notes for per pass/window (bounded default 100; exhaustive default 400)."),
       dateAddedStart: z
         .string()
         .optional()
@@ -1152,6 +1158,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       noteAction,
       openJobsOnly,
       applicantPool,
+      mode,
       maxJobs,
       maxCandidatesToScan,
       dateAddedStart,
@@ -1164,6 +1171,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
           noteAction,
           openJobsOnly,
           applicantPool,
+          mode,
           maxJobs,
           maxCandidatesToScan,
           dateAddedStart,
@@ -1175,6 +1183,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
             noteAction,
             openJobsOnly,
             applicantPool,
+            mode,
             maxJobs,
             maxCandidatesToScan,
             dateAddedStart,
