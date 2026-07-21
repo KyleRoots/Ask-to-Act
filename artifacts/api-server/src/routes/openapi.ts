@@ -134,7 +134,8 @@ function actionsSpec(baseUrl: string) {
           description:
             "Unique candidates with a Scout Screen note among inbound applicants to jobs in an Internal Department. " +
             "Works around empty Note Lucene search. mode=bounded (default) returns a capped single pass — if incomplete, " +
-            "treat as a lower bound and do not fan out date windows. mode=exhaustive partitions dates server-side in one call.",
+            "treat as a lower bound and do not fan out date windows. mode=exhaustive partitions dates server-side in one call " +
+            "(default 30-day lookback, ~75s wall budget); prefer explicit recent dateAddedStart/dateAddedEnd for ChatGPT.",
           parameters: [
             {
               name: "department",
@@ -176,7 +177,7 @@ function actionsSpec(baseUrl: string) {
               name: "maxJobs",
               in: "query",
               required: false,
-              schema: { type: "integer", minimum: 1, maximum: 300 },
+              schema: { type: "integer", minimum: 1, maximum: 200 },
             },
             {
               name: "maxCandidatesToScan",
@@ -246,7 +247,7 @@ const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your fi
 WHAT YOU CAN DO
 - Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
 - Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
-- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STS-STSI (do NOT search Note via Lucene — it returns 0). Prefer one call; if incomplete, report as a lower bound — do not fan out date windows. Use mode=exhaustive for a fuller single-call scan.
+- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STS-STSI (do NOT search Note via Lucene — it returns 0). Prefer one call; if incomplete, report as a lower bound — do not fan out date windows. Use mode=exhaustive with a recent date range for a fuller single-call scan (default unscoped exhaustive is 30 days / ~75s wall).
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.

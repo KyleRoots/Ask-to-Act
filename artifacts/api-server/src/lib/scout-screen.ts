@@ -37,7 +37,7 @@ export const scoutReportQuerySchema = z.object({
   openJobsOnly: z.coerce.boolean().optional(),
   applicantPool: z.enum(["responses", "all"]).optional(),
   mode: z.enum(["bounded", "exhaustive"]).optional(),
-  maxJobs: z.coerce.number().int().min(1).max(300).optional(),
+  maxJobs: z.coerce.number().int().min(1).max(200).optional(),
   maxCandidatesToScan: z.coerce.number().int().min(1).max(400).optional(),
   dateAddedStart: z.string().optional(),
   dateAddedEnd: z.string().optional(),
@@ -46,16 +46,20 @@ export const scoutReportQuerySchema = z.object({
 const DEFAULT_NOTE_ACTION = "Scout Screen - Qualified";
 const DEFAULT_MAX_JOBS = 25;
 const HARD_MAX_JOBS_BOUNDED = 100;
-const HARD_MAX_JOBS_EXHAUSTIVE = 300;
+const HARD_MAX_JOBS_EXHAUSTIVE = 200;
+const DEFAULT_MAX_JOBS_EXHAUSTIVE = 100;
 const DEFAULT_MAX_CANDIDATES = 100;
 const HARD_MAX_CANDIDATES = 400;
 const JOB_ID_BATCH = 20;
 const NOTE_SCAN_CONCURRENCY = 8;
 const SUBMISSION_PAGE = 50;
-const EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS = 90;
+/** ChatGPT / gateway proxies often 504 around ~120s — keep headroom. */
+export const EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS = 30;
 const EXHAUSTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const EXHAUSTIVE_MAX_WINDOWS = 16;
-const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 400;
+export const EXHAUSTIVE_MAX_WINDOWS = 6;
+const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 250;
+/** Soft wall budget for exhaustive scans (ms). Stop early and return lower bound. */
+export const EXHAUSTIVE_WALL_MS = 75_000;
 
 const INCOMPLETE_NO_FANOUT =
   "uniqueCandidateCount is a LOWER BOUND for this single call. Report it and STOP. " +
@@ -148,13 +152,20 @@ export function planExhaustiveDateWindows(
   return windows;
 }
 
-/** Guidance text when caps truncate a scan. Exported for tests. */
-export function incompleteGuidanceNote(mode: "bounded" | "exhaustive"): string {
+export function incompleteGuidanceNote(
+  mode: "bounded" | "exhaustive",
+  opts?: { stoppedForWallTime?: boolean },
+): string {
+  const wall = opts?.stoppedForWallTime
+    ? "Scan stopped early to stay under the ChatGPT/gateway timeout budget. "
+    : "";
   if (mode === "exhaustive") {
     return (
+      wall +
       "Result may still be incomplete after server-side date partitioning (job and/or " +
-      "per-window applicant caps). uniqueCandidateCount is a LOWER BOUND. " +
-      INCOMPLETE_NO_FANOUT
+      "per-window applicant caps, or wall-time budget). uniqueCandidateCount is a LOWER BOUND. " +
+      INCOMPLETE_NO_FANOUT +
+      " Prefer an explicit recent dateAddedStart/dateAddedEnd (e.g. last 2–3 weeks) with mode=exhaustive."
     );
   }
   return (
@@ -289,14 +300,23 @@ async function runScoutScanPass(args: {
   pageAllJobs: boolean;
   dateAddedStartMs?: number;
   dateAddedEndMs?: number;
+  /** Reuse jobs across exhaustive windows (avoids reloading the same JobOrders). */
+  preloadedJobs?: {
+    jobRows: Array<Record<string, unknown>>;
+    jobsTotal: number;
+    jobsTruncated: boolean;
+    jobIds: number[];
+    jobTitleById: Map<number, string>;
+  };
 }): Promise<ScanPassResult> {
   const { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById } =
-    await loadDepartmentJobs({
+    args.preloadedJobs ??
+    (await loadDepartmentJobs({
       department: args.department,
       openJobsOnly: args.openJobsOnly,
       maxJobs: args.maxJobs,
       pageAll: args.pageAllJobs,
-    });
+    }));
 
   if (jobIds.length === 0) {
     return {
@@ -582,7 +602,7 @@ export async function scoutQualifiedByDepartment(args: {
   const hardMaxJobs =
     mode === "exhaustive" ? HARD_MAX_JOBS_EXHAUSTIVE : HARD_MAX_JOBS_BOUNDED;
   const defaultMaxJobs =
-    mode === "exhaustive" ? HARD_MAX_JOBS_EXHAUSTIVE : DEFAULT_MAX_JOBS;
+    mode === "exhaustive" ? DEFAULT_MAX_JOBS_EXHAUSTIVE : DEFAULT_MAX_JOBS;
   const maxJobs = Math.min(
     Math.max(args.maxJobs ?? defaultMaxJobs, 1),
     hardMaxJobs,
@@ -676,8 +696,10 @@ export async function scoutQualifiedByDepartment(args: {
   }
 
   // --- exhaustive: one call, server-side date windows + more jobs ---
-  const now = Date.now();
-  const rangeEnd = dateEndMs ?? now;
+  // Tuned for ChatGPT/gateway ~120s ceilings: 30-day default lookback, ≤6 windows,
+  // soft wall budget, and jobs loaded once (not per window).
+  const startedAt = Date.now();
+  const rangeEnd = dateEndMs ?? startedAt;
   const rangeStart =
     dateStartMs ??
     rangeEnd - EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
@@ -686,12 +708,20 @@ export async function scoutQualifiedByDepartment(args: {
   }
   const windows = planExhaustiveDateWindows(rangeStart, rangeEnd);
 
+  const preloadedJobs = await loadDepartmentJobs({
+    department,
+    openJobsOnly,
+    maxJobs,
+    pageAll: true,
+  });
+
   const merged = new Map<number, MatchCandidate>();
-  let jobsTruncated = false;
+  let jobsTruncated = preloadedJobs.jobsTruncated;
   let applicantsTruncated = false;
-  let jobsTotal = 0;
-  let jobRows: Array<Record<string, unknown>> = [];
-  let jobIds: number[] = [];
+  let stoppedForWallTime = false;
+  let jobsTotal = preloadedJobs.jobsTotal;
+  let jobRows = preloadedJobs.jobRows;
+  let jobIds = preloadedJobs.jobIds;
   let submissionRowsSeen = 0;
   let applicantsUniqueAcrossWindows = 0;
   const windowSummaries: Array<{
@@ -703,6 +733,10 @@ export async function scoutQualifiedByDepartment(args: {
   }> = [];
 
   for (const w of windows) {
+    if (Date.now() - startedAt >= EXHAUSTIVE_WALL_MS) {
+      stoppedForWallTime = true;
+      break;
+    }
     const pass = await runScoutScanPass({
       department,
       noteAction,
@@ -713,6 +747,7 @@ export async function scoutQualifiedByDepartment(args: {
       pageAllJobs: true,
       dateAddedStartMs: w.startMs,
       dateAddedEndMs: w.endMs,
+      preloadedJobs,
     });
     jobsTotal = pass.jobsTotal;
     jobRows = pass.jobRows;
@@ -745,7 +780,13 @@ export async function scoutQualifiedByDepartment(args: {
   }
 
   const matches = [...merged.values()].sort((a, b) => a.id - b.id);
-  const incomplete = jobsTruncated || applicantsTruncated;
+  const windowsPlanned = windows.length;
+  const windowsCompleted = windowSummaries.length;
+  const incomplete =
+    jobsTruncated ||
+    applicantsTruncated ||
+    stoppedForWallTime ||
+    windowsCompleted < windowsPlanned;
 
   return {
     department,
@@ -770,21 +811,37 @@ export async function scoutQualifiedByDepartment(args: {
       uniqueCandidates: applicantsUniqueAcrossWindows,
       submissionRowsSeen,
       truncated: applicantsTruncated,
-      windows: windowSummaries.length,
+      windows: windowsCompleted,
     },
     exhaustive: {
       dateAddedStart: new Date(rangeStart).toISOString().slice(0, 10),
       dateAddedEnd: new Date(rangeEnd).toISOString().slice(0, 10),
-      windowCount: windows.length,
+      defaultLookbackDays: EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
+      windowCount: windowsCompleted,
+      windowsPlanned,
+      wallMs: EXHAUSTIVE_WALL_MS,
+      elapsedMs: Date.now() - startedAt,
+      stoppedForWallTime,
       windows: windowSummaries,
     },
-    limits: { maxJobs, maxCandidatesToScan, maxWindows: EXHAUSTIVE_MAX_WINDOWS },
+    limits: {
+      maxJobs,
+      maxCandidatesToScan,
+      maxWindows: EXHAUSTIVE_MAX_WINDOWS,
+      wallMs: EXHAUSTIVE_WALL_MS,
+    },
     definition:
       "mode=exhaustive: same Scout Screen filters as bounded, but the server partitions " +
       "JobSubmission dateAdded into non-overlapping windows in ONE call and dedupes candidates. " +
-      "Default lookback is 90 days when dates are omitted. Still not a firm-wide Note Lucene count.",
+      `Default lookback is ${EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS} days when dates are omitted; ` +
+      `soft wall budget ~${Math.round(EXHAUSTIVE_WALL_MS / 1000)}s. ` +
+      "For ChatGPT, prefer an explicit recent dateAddedStart/dateAddedEnd. " +
+      "Still not a firm-wide Note Lucene count.",
     ...(incomplete
-      ? { incomplete: true, note: incompleteGuidanceNote("exhaustive") }
+      ? {
+          incomplete: true,
+          note: incompleteGuidanceNote("exhaustive", { stoppedForWallTime }),
+        }
       : {
           note:
             "Exhaustive single-call scan completed without per-window applicant/job truncation " +
