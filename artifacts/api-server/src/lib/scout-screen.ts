@@ -73,7 +73,13 @@ export const EXHAUSTIVE_MAX_WINDOWS = 6;
 const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 500;
 /** Soft wall budget for exhaustive / auto-widen scans (ms). */
 export const EXHAUSTIVE_WALL_MS = 75_000;
-/** Fewer jobs per page → fuller newest-first applicant coverage before the note-scan budget. */
+/**
+ * Top-N / list asks get a slightly longer soft wall so we can finish typical
+ * open-dept pools (~250–300 jobs) after newest-first ordering. Still under
+ * common ChatGPT/gateway ~120s 504 thresholds.
+ */
+export const TOPN_WALL_MS = 95_000;
+/** Fewer jobs per note-scan page after newest-first preload. */
 const AUTO_WIDEN_JOB_PAGE = 20;
 /**
  * Bounded auto-widen pages until jobs are exhausted or the wall hits.
@@ -490,6 +496,43 @@ async function loadDepartmentJobs(args: {
 
   if (jobsTotal === 0) jobsTotal = initialStart + jobRows.length;
   const jobsTruncated = jobsTotal > initialStart + jobRows.length;
+  const jobIds = jobRows
+    .map((r) => (typeof r.id === "number" ? r.id : null))
+    .filter((id): id is number => id !== null);
+  const jobTitleById = new Map<number, string>();
+  for (const r of jobRows) {
+    if (typeof r.id === "number" && typeof r.title === "string") {
+      jobTitleById.set(r.id, r.title);
+    }
+  }
+  return { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById };
+}
+
+/** Newest open jobs first — critical when the gateway wall cuts a scan short. */
+export function sortJobsNewestFirst(
+  rows: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return [...rows].sort((a, b) => {
+    const da = typeof a.dateAdded === "number" ? a.dateAdded : 0;
+    const db = typeof b.dateAdded === "number" ? b.dateAdded : 0;
+    if (db !== da) return db - da;
+    const ia = typeof a.id === "number" ? a.id : 0;
+    const ib = typeof b.id === "number" ? b.id : 0;
+    return ib - ia;
+  });
+}
+
+function jobsBundleFromRows(
+  jobRows: Array<Record<string, unknown>>,
+  jobsTotal: number,
+  jobsTruncated: boolean,
+): {
+  jobRows: Array<Record<string, unknown>>;
+  jobsTotal: number;
+  jobsTruncated: boolean;
+  jobIds: number[];
+  jobTitleById: Map<number, string>;
+} {
   const jobIds = jobRows
     .map((r) => (typeof r.id === "number" ? r.id : null))
     .filter((id): id is number => id !== null);
@@ -1037,11 +1080,11 @@ async function runAutoWidenScout(args: {
   dateAddedEndMs?: number;
 }): Promise<unknown> {
   const startedAt = Date.now();
+  const wallMs =
+    args.limit !== undefined ? TOPN_WALL_MS : EXHAUSTIVE_WALL_MS;
   const merged = new Map<number, MatchCandidate>();
   const allJobRows: Array<Record<string, unknown>> = [];
   const allJobIds: number[] = [];
-  let jobsTotal = 0;
-  let jobStart = 0;
   let submissionRowsSeen = 0;
   let applicantsUnique = 0;
   let applicantsTruncated = false;
@@ -1049,25 +1092,33 @@ async function runAutoWidenScout(args: {
   let stoppedForWallTime = false;
   let pages = 0;
 
-  while (jobStart < args.maxJobsCap) {
-    if (Date.now() - startedAt >= EXHAUSTIVE_WALL_MS) {
+  // Preload jobs, then scan newest-first. Lucene page order is not recency —
+  // without this, the gateway wall can stop before July-level matches on newer jobs.
+  const preloaded = await loadDepartmentJobs({
+    department: args.department,
+    openJobsOnly: args.openJobsOnly,
+    maxJobs: args.maxJobsCap,
+    pageAll: true,
+  });
+  const jobsTotal = preloaded.jobsTotal;
+  const sortedRows = sortJobsNewestFirst(preloaded.jobRows).slice(
+    0,
+    args.maxJobsCap,
+  );
+  const jobsTruncatedAtLoad =
+    preloaded.jobsTruncated || sortedRows.length < jobsTotal;
+
+  for (let offset = 0; offset < sortedRows.length; offset += AUTO_WIDEN_JOB_PAGE) {
+    if (Date.now() - startedAt >= wallMs) {
       stoppedForWallTime = true;
       break;
     }
 
-    const pageBudget = Math.min(AUTO_WIDEN_JOB_PAGE, args.maxJobsCap - jobStart);
-    const batch = await loadDepartmentJobs({
-      department: args.department,
-      openJobsOnly: args.openJobsOnly,
-      maxJobs: pageBudget,
-      pageAll: false,
-      start: jobStart,
-    });
-    jobsTotal = batch.jobsTotal;
+    const slice = sortedRows.slice(offset, offset + AUTO_WIDEN_JOB_PAGE);
+    if (slice.length === 0) break;
     pages += 1;
 
-    if (batch.jobIds.length === 0) break;
-
+    const batch = jobsBundleFromRows(slice, jobsTotal, false);
     const pass = await runScoutScanPass({
       department: args.department,
       noteAction: args.noteAction,
@@ -1089,11 +1140,6 @@ async function runAutoWidenScout(args: {
       allJobRows.push(row);
       if (typeof row.id === "number") allJobIds.push(row.id);
     }
-
-    jobStart += batch.jobIds.length;
-    if (jobStart >= jobsTotal) break;
-    // Keep paging until jobs exhausted or wall — never stop early just because
-    // a first page already found matches (that was the false-zero / undercount bug).
   }
 
   if (allJobIds.length === 0) {
@@ -1111,7 +1157,10 @@ async function runAutoWidenScout(args: {
   }
 
   const ranked = rankAndLimitMatches([...merged.values()], args.limit);
-  const jobsTruncated = jobStart < jobsTotal || allJobIds.length < jobsTotal;
+  const jobsTruncated =
+    jobsTruncatedAtLoad ||
+    allJobIds.length < sortedRows.length ||
+    allJobIds.length < jobsTotal;
   const incomplete =
     jobsTruncated ||
     applicantsTruncated ||
@@ -1133,9 +1182,10 @@ async function runAutoWidenScout(args: {
     });
   } else if (incomplete && args.limit !== undefined && ranked.length > 0) {
     userNote =
-      `Showing the ${ranked.length} most recent matching candidate(s) found while scanning open jobs in this department. ` +
+      `Showing the ${ranked.length} most recent matching candidate(s) found while scanning open jobs ` +
+      `(newest jobs first) in this department. ` +
       (jobsTruncated || stoppedForWallTime
-        ? "More (or more recent) matches may exist on jobs not yet scanned — treat as a partial ranked list. "
+        ? "More matches may exist on jobs not yet scanned — treat as a partial ranked list. "
         : "") +
       `stopReason=${stopReason}; confirmedComplete=false. Present these names. ` +
       INCOMPLETE_NO_FANOUT +
@@ -1169,6 +1219,7 @@ async function runAutoWidenScout(args: {
       totalMatching: jobsTotal,
       truncated: jobsTruncated,
       pages,
+      order: "dateAddedDesc",
       jobs: allJobRows.slice(0, 50).map((r) => ({
         id: r.id,
         title: r.title,
@@ -1183,20 +1234,21 @@ async function runAutoWidenScout(args: {
     },
     autoWiden: {
       elapsedMs: Date.now() - startedAt,
-      wallMs: EXHAUSTIVE_WALL_MS,
+      wallMs,
       stoppedForWallTime,
       rankedBy: "latestMatchingNoteDate",
+      jobsOrderedBy: "dateAddedDesc",
     },
     limits: {
       maxJobs: args.maxJobsCap,
       maxCandidatesToScan: args.maxCandidatesPerPage,
-      wallMs: EXHAUSTIVE_WALL_MS,
+      wallMs,
     },
     stopReason,
     confirmedComplete,
     definition:
       "Natural-language Scout/screening report: resolve Internal Department nicknames, " +
-      "scan OPEN jobs until exhausted or gateway wall, match Response applicants with the given note action " +
+      "preload OPEN jobs newest-first, match Response applicants with the given note action " +
       "(jobOrder or comment Job ID), rank by latest matching note date. " +
       "Pass limit=N for 'N most recent'. Stop working only when confirmedComplete=true " +
       "or stopReason is a real connector/gateway limit — never because of an arbitrary early search cap.",
