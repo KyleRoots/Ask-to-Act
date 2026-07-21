@@ -70,15 +70,35 @@ const EXHAUSTIVE_PER_WINDOW_CANDIDATES = 250;
 /** Soft wall budget for exhaustive / auto-widen scans (ms). */
 export const EXHAUSTIVE_WALL_MS = 75_000;
 const AUTO_WIDEN_JOB_PAGE = 40;
-const AUTO_WIDEN_MAX_JOBS = 200;
+/**
+ * Bounded auto-widen pages until jobs are exhausted or the wall hits.
+ * Count-style (no limit) still early-exits once matches are found.
+ * Hard ceiling only as a safety valve.
+ */
+const AUTO_WIDEN_MAX_JOBS_TOPN = 2000;
 const AUTO_WIDEN_CANDIDATES_PER_PAGE = 250;
 
 const INCOMPLETE_NO_FANOUT =
-  "uniqueCandidateCount is a LOWER BOUND for this single call. Report it and STOP. " +
   "Do NOT issue multiple scout_dept_report calls with different dateAddedStart/dateAddedEnd " +
   "to chase an exact total — that multiplies per-candidate note fetches and causes timeouts. " +
-  "For a fuller single-call scan, pass mode=exhaustive (server partitions dates internally). " +
+  "For a fuller single-call lookback count, pass mode=exhaustive (server partitions dates). " +
   "Or narrow the ask (recent window / one department) and keep mode=bounded.";
+
+const INCOMPLETE_PARTIAL_RESULTS =
+  "uniqueCandidateCount is a LOWER BOUND / partial ranked list for this single call. " +
+  "Present these results to the user. Do NOT invent more names. " +
+  INCOMPLETE_NO_FANOUT +
+  " If the user wants a fuller answer, ask one clarifying question " +
+  "(include closed jobs? all applicants vs responses only? approximate time window?) " +
+  "then call once more with those narrower/broader business filters — never date-window fan-out.";
+
+const INCOMPLETE_ZERO_NOT_CONFIRMED =
+  "uniqueCandidateCount is 0 but the scan did NOT cover every matching job — " +
+  "this is NOT a confirmed zero. Do NOT tell the user there are no matching candidates. " +
+  "Say the first pass found none in the scanned jobs, then ask one clarifying question " +
+  "(confirm department nickname, include closed/filled jobs, or all applicants vs responses) " +
+  "and/or call scout_dept_report once more with openJobsOnly=false or applicantPool=all if that fits. " +
+  INCOMPLETE_NO_FANOUT;
 
 function escapeLucenePhrase(term: string): string {
   return term.replace(/[\\"]/g, "\\$&");
@@ -229,23 +249,31 @@ export function planExhaustiveDateWindows(
 
 export function incompleteGuidanceNote(
   mode: "bounded" | "exhaustive",
-  opts?: { stoppedForWallTime?: boolean },
+  opts?: { stoppedForWallTime?: boolean; matchCount?: number },
 ): string {
   const wall = opts?.stoppedForWallTime
     ? "Scan stopped early to stay under the ChatGPT/gateway timeout budget. "
     : "";
+  const zeroUnconfirmed =
+    typeof opts?.matchCount === "number" && opts.matchCount === 0;
+
+  if (zeroUnconfirmed) {
+    return wall + INCOMPLETE_ZERO_NOT_CONFIRMED;
+  }
+
   if (mode === "exhaustive") {
     return (
       wall +
       "Result may still be incomplete after server-side date partitioning (job and/or " +
-      "per-window applicant caps, or wall-time budget). uniqueCandidateCount is a LOWER BOUND. " +
-      INCOMPLETE_NO_FANOUT +
+      "per-window applicant caps, or wall-time budget). " +
+      INCOMPLETE_PARTIAL_RESULTS +
       " Prefer an explicit recent dateAddedStart/dateAddedEnd (e.g. last 2–3 weeks) with mode=exhaustive."
     );
   }
   return (
+    wall +
     "Result set may be incomplete because job and/or applicant caps were hit. " +
-    INCOMPLETE_NO_FANOUT
+    INCOMPLETE_PARTIAL_RESULTS
   );
 }
 
@@ -726,6 +754,7 @@ export async function scoutQualifiedByDepartment(args: {
 
   // Natural-language path: top-N or default bounded — auto-page open jobs in ONE call.
   // Prefer this over exhaustive date windows for "most recent" / "list N" asks.
+  // Cap is high; count-style (no limit) still early-exits once matches are found.
   if (mode === "bounded" || limit !== undefined) {
     return runAutoWidenScout({
       department,
@@ -735,8 +764,8 @@ export async function scoutQualifiedByDepartment(args: {
       applicantPool,
       limit,
       maxJobsCap: Math.min(
-        Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS, 1),
-        AUTO_WIDEN_MAX_JOBS,
+        Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS_TOPN, 1),
+        AUTO_WIDEN_MAX_JOBS_TOPN,
       ),
       maxCandidatesPerPage: Math.min(
         Math.max(
@@ -902,7 +931,10 @@ export async function scoutQualifiedByDepartment(args: {
     ...(incomplete
       ? {
           incomplete: true,
-          note: incompleteGuidanceNote("exhaustive", { stoppedForWallTime }),
+          note: incompleteGuidanceNote("exhaustive", {
+            stoppedForWallTime,
+            matchCount: matches.length,
+          }),
         }
       : {
           note:
@@ -1006,17 +1038,32 @@ async function runAutoWidenScout(args: {
   const incomplete =
     jobsTruncated || applicantsTruncated || stoppedForWallTime;
 
-  const userNote = incomplete
-    ? args.limit !== undefined && ranked.length > 0
-      ? `Showing the ${ranked.length} most recent matching candidate(s) found while scanning open jobs in this department. ` +
-        (jobsTruncated || stoppedForWallTime
-          ? "More (or more recent) matches may exist on jobs not yet scanned — treat as a partial ranked list. "
-          : "") +
-        "Do NOT fan out extra date-window tool calls."
-      : incompleteGuidanceNote("bounded", { stoppedForWallTime })
-    : args.limit !== undefined
-      ? `Top ${ranked.length} most recent matching candidates by Scout/note date among open-department jobs.`
-      : "Unique matching candidates among the scanned open-department applicant pool.";
+  let userNote: string;
+  if (incomplete && ranked.length === 0) {
+    userNote = incompleteGuidanceNote("bounded", {
+      stoppedForWallTime,
+      matchCount: 0,
+    });
+  } else if (incomplete && args.limit !== undefined && ranked.length > 0) {
+    userNote =
+      `Showing the ${ranked.length} most recent matching candidate(s) found while scanning open jobs in this department. ` +
+      (jobsTruncated || stoppedForWallTime
+        ? "More (or more recent) matches may exist on jobs not yet scanned — treat as a partial ranked list. "
+        : "") +
+      "Present these names to the user. " +
+      INCOMPLETE_NO_FANOUT +
+      " Ask a clarifying question only if they need a fuller/more recent set.";
+  } else if (incomplete) {
+    userNote = incompleteGuidanceNote("bounded", {
+      stoppedForWallTime,
+      matchCount: ranked.length,
+    });
+  } else if (args.limit !== undefined) {
+    userNote = `Top ${ranked.length} most recent matching candidates by Scout/note date among open-department jobs.`;
+  } else {
+    userNote =
+      "Unique matching candidates among the scanned open-department applicant pool.";
+  }
 
   return {
     department: args.department,

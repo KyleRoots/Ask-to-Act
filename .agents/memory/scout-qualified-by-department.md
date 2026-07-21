@@ -26,18 +26,27 @@ See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhor
 
 ### Natural-language contract (product non-negotiable)
 
-Users must **not** learn backend knobs (`maxJobs`, `mode`, Lucene). The model should:
+**Keep it simple. Do not block accurate answers.**
+
+- Users must **not** learn backend knobs (`maxJobs`, `mode`, Lucene, wall budgets). Those stay server-side.
+- It **is** okay — and expected — for the AI to ask the user for **business clarification** when that improves accuracy (e.g. which department if ambiguous, open jobs vs all, “most recent 5” vs a full count, a rough time window). That is normal universal-agent behavior.
+- Prefer: try a sensible default → return what you found → ask one clarifying question if the ask was ambiguous. Do not refuse or stall because a knob is missing.
+
+When parameters are clear enough, the model should:
 
 1. Pass the spoken department or nickname (`STSI`, `Ottawa`, `STS-STSI`).
 2. For “list / show **N** most recent”, pass **`limit=N`**.
-3. Make **one** call. If `incomplete: true`, present a **partial ranked list / lower bound** — never fan out date windows.
+3. Make **one** call. Then:
+   - **Results + `incomplete`:** present the partial list / lower bound — never fan out date windows. Ask a clarifying question only if the user needs a fuller answer.
+   - **`0` + `incomplete`:** **do not conclude zero.** Say the first pass found none in the scanned portion, clarify (department / open vs closed / responses vs all), and/or call once more with broader business filters. Never date-window fan-out.
+   - **`0` + complete scan:** then it is safe to say none matched under those filters.
 
 Server behavior:
 
 - Resolves nicknames via live Internal Department values (`STSI` → `STS-STSI`).
 - Defaults to **open** jobs.
-- With `limit`, auto-pages jobs in **one** call (~75s wall), ranks by latest matching note `dateAdded`, returns top N.
-- Without `limit` (count-style), stops after the first job page that finds matches (lower bound) unless exhaustive.
+- With `limit`, auto-pages jobs in **one** call (~75s wall, up to ~2000 jobs), ranks by latest matching note `dateAdded`, returns top N.
+- Without `limit` (count-style), stops after the first job page that finds matches (lower bound); if still empty, keeps paging until jobs/wall.
 
 ### Modes
 
