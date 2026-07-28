@@ -337,12 +337,25 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
     const enrollToken = randomBytes(32).toString("hex");
     const enrollTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
+    // For enrolled users, "Resend access link" is used as a reconnect path.
+    // Clear the stale Bullhorn session so the enroll page does not short-circuit
+    // to "already connected" without replacing the refresh token.
+    invalidateUserSession(id);
     await db
       .update(usersTable)
-      .set({ enrollToken, enrollTokenExpiresAt, updatedAt: new Date() })
+      .set({
+        enrollToken,
+        enrollTokenExpiresAt,
+        refreshToken: null,
+        bhRestToken: null,
+        restUrl: null,
+        tokenExpiresAt: null,
+        sessionExpiresAt: null,
+        updatedAt: new Date(),
+      })
       .where(eq(usersTable.id, id));
 
-    const enrollUrl = `/api/auth/user/enroll?token=${enrollToken}`;
+    const enrollUrl = `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}&force=1&manual=1`;
     logger.info({ userId: id }, "Enrollment token regenerated");
 
     if (user.email) {
@@ -353,12 +366,11 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
           const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, user.firmId)).limit(1);
           if (firm) firmName = firm.name;
         }
-        const baseUrl = getBaseUrl();
         await sendInviteEmail({
           toEmail: user.email,
           userName: user.name,
           firmName,
-          enrollUrl: `${baseUrl}${enrollUrl}`,
+          enrollUrl,
         });
       } catch (emailErr) {
         logger.warn({ emailErr, userId: id }, "Failed to send re-invite email (token still valid)");
@@ -921,9 +933,12 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     }
 
     // Already connected to Bullhorn — skip the credentials form and show the
-    // connector-setup page (next phase) directly so the user can copy their
-    // connector URL and follow the AI-tool instructions.
-    if (rows[0].refreshToken) {
+    // connector-setup page, unless this is an explicit reconnect/force flow.
+    // Stale refresh tokens used to short-circuit here and leave the recruiter
+    // stuck with "already connected" while MCP still failed to refresh.
+    const forceReconnect =
+      req.query["force"] === "1" || req.query["reconnect"] === "1";
+    if (rows[0].refreshToken && !forceReconnect) {
       const baseUrl = getBaseUrl();
       const mcpUrl = rows[0].apiKey ? `${baseUrl}/api/mcp/${rows[0].apiKey}` : null;
       res.send(connectorSetupPage(rows[0].name, mcpUrl, true));

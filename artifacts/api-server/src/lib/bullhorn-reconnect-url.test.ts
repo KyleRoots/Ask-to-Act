@@ -23,10 +23,10 @@ describe("Bullhorn reconnect URL", () => {
     vi.clearAllMocks();
   });
 
-  it("mints an absolute enroll?token= URL (never enroll?id=)", async () => {
+  it("mints an absolute enroll?token= URL with force+manual (never enroll?id=)", async () => {
     const url = await getBullhornReconnectUrlForUser("user-123");
     expect(url).toMatch(
-      /^https:\/\/connect\.asktoact\.ai\/api\/auth\/user\/enroll\?token=[a-f0-9]{64}$/,
+      /^https:\/\/connect\.asktoact\.ai\/api\/auth\/user\/enroll\?token=[a-f0-9]{64}&force=1&manual=1$/,
     );
     expect(url).not.toContain("enroll?id=");
     expect(db.update).toHaveBeenCalled();

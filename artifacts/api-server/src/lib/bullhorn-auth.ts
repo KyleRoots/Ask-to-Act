@@ -26,15 +26,30 @@ export class BullhornReconnectRequiredError extends Error {
 /**
  * Issues a fresh one-time enrollment/reconnect token for an existing user and
  * returns the absolute browser URL GPT/clients should present.
+ *
+ * Clears the stale Bullhorn refresh session first. Without that, the enroll
+ * page short-circuits to "already connected" and never replaces the dead token.
  */
 export async function getBullhornReconnectUrlForUser(userId: string): Promise<string> {
   const enrollToken = randomBytes(32).toString("hex");
   const enrollTokenExpiresAt = new Date(Date.now() + USER_ENROLL_TOKEN_TTL_MS);
+  invalidateUserSession(userId);
   await db
     .update(usersTable)
-    .set({ enrollToken, enrollTokenExpiresAt, updatedAt: new Date() })
+    .set({
+      enrollToken,
+      enrollTokenExpiresAt,
+      refreshToken: null,
+      bhRestToken: null,
+      restUrl: null,
+      tokenExpiresAt: null,
+      sessionExpiresAt: null,
+      updatedAt: new Date(),
+    })
     .where(eq(usersTable.id, userId));
-  return `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}`;
+  // force=1 skips the "already connected" short-circuit; manual=1 opens the
+  // credential form so the recruiter actually re-auths Bullhorn.
+  return `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}&force=1&manual=1`;
 }
 
 const BULLHORN_LOGIN_INFO_URL =
