@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, firmsTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
+import { getUserMailboxStatus } from "../lib/m365-auth.js";
 import {
   requireClerkUser,
   requireFirmAdmin,
@@ -21,7 +22,7 @@ router.get(
   async (req: Request, res: Response) => {
     const u = req.portalUser!;
 
-    const [firmName, userRow] = await Promise.all([
+    const [firmName, userRow, mailboxStatus] = await Promise.all([
       u.firmId
         ? db
             .select({ name: firmsTable.name })
@@ -34,6 +35,10 @@ router.get(
         .from(usersTable)
         .where(eq(usersTable.id, u.id))
         .then((rows) => rows[0] ?? null),
+      getUserMailboxStatus(u.id).catch(() => ({
+        connected: false,
+        mailboxEmail: null,
+      })),
     ]);
 
     const enrolled = userRow?.refreshToken != null;
@@ -50,6 +55,8 @@ router.get(
       firmId: u.firmId,
       firmName,
       enrolled,
+      mailboxConnected: mailboxStatus.connected,
+      mailboxEmail: mailboxStatus.mailboxEmail,
       mcpUrl,
     });
   },

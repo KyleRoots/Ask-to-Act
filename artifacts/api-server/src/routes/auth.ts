@@ -9,6 +9,11 @@ import {
   getFirmBullhornHealthStatus,
   firmContext,
 } from "../lib/bullhorn-auth.js";
+import {
+  completeMailboxConnection,
+  getMicrosoftAuthorizeUrl,
+  resolveUserIdFromMailboxConnectToken,
+} from "../lib/m365-auth.js";
 import { countEntity } from "../lib/bullhorn-client.js";
 import { rememberState, consumeState, userIdFromState, peekFirmId } from "../lib/oauth-state.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
@@ -20,6 +25,12 @@ import { page } from "../lib/html.js";
 import { connectorSetupPage } from "./users.js";
 
 const router: IRouter = Router();
+
+function mailboxUserIdFromState(state: string): string | null {
+  if (!state.startsWith("mailbox:")) return null;
+  const parts = state.split(":");
+  return parts[1] ?? null;
+}
 
 
 /**
@@ -211,6 +222,123 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
         page(
           "Could not complete Bullhorn connection",
           "The authorization code could not be exchanged for a session. Please try connecting again.",
+        ),
+      );
+  }
+});
+
+router.get("/auth/m365/start", async (req: Request, res: Response) => {
+  const token = req.query["token"];
+  if (typeof token !== "string" || token.length === 0) {
+    res
+      .status(400)
+      .send(
+        page(
+          "Invalid connect link",
+          "This Microsoft 365 connect link is missing or invalid. Retry the email send from AskToAct to get a fresh link.",
+        ),
+      );
+    return;
+  }
+
+  try {
+    const resolved = await resolveUserIdFromMailboxConnectToken(token);
+    if (!resolved) {
+      res
+        .status(410)
+        .send(
+          page(
+            "Connect link expired",
+            "This Microsoft 365 connect link has expired. Retry the email send from AskToAct to get a fresh link.",
+          ),
+        );
+      return;
+    }
+
+    const state = `mailbox:${resolved.userId}:${randomBytes(16).toString("hex")}`;
+    rememberState(state);
+    const authorizeUrl = await getMicrosoftAuthorizeUrl(state);
+    res.set("Cache-Control", "no-store");
+    res.redirect(authorizeUrl);
+  } catch (err) {
+    logger.error({ err }, "Microsoft 365 connect redirect failed");
+    res
+      .status(500)
+      .send(
+        page(
+          "Could not start Microsoft 365 sign-in",
+          "The server could not build the Microsoft 365 authorization link. Check the M365 OAuth configuration and try again.",
+        ),
+      );
+  }
+});
+
+router.get("/auth/m365/callback", async (req: Request, res: Response) => {
+  const { code, state, error, error_description } = req.query;
+
+  if (typeof error === "string") {
+    const detail = typeof error_description === "string" ? error_description : error;
+    logger.warn({ error: detail }, "Microsoft 365 callback returned an error");
+    res
+      .status(400)
+      .send(page("Microsoft 365 authorization failed", `Microsoft reported: ${detail}`));
+    return;
+  }
+
+  if (typeof state !== "string" || !consumeState(state)) {
+    res
+      .status(400)
+      .send(
+        page(
+          "Authorization link expired",
+          "This Microsoft 365 authorization link is invalid or has expired. Retry the email send to get a fresh connect link.",
+        ),
+      );
+    return;
+  }
+
+  if (typeof code !== "string" || code.length === 0) {
+    res
+      .status(400)
+      .send(
+        page(
+          "Missing authorization code",
+          "Microsoft 365 did not return an authorization code.",
+        ),
+      );
+    return;
+  }
+
+  const userId = mailboxUserIdFromState(state);
+  if (!userId) {
+    res
+      .status(400)
+      .send(
+        page(
+          "Invalid mailbox authorization state",
+          "This mailbox connection flow was not tied to a user. Retry the email send to get a fresh connect link.",
+        ),
+      );
+    return;
+  }
+
+  try {
+    const { mailboxEmail } = await completeMailboxConnection(userId, code);
+    res.set("Cache-Control", "no-store");
+    res.send(
+      page(
+        "Microsoft 365 connected",
+        `Your Microsoft 365 mailbox (${mailboxEmail}) is now connected. Return to your AI chat and retry the email send.`,
+      ),
+    );
+  } catch (err) {
+    logger.error({ err, userId }, "Microsoft 365 authorization exchange failed");
+    res
+      .status(500)
+      .send(
+        page(
+          "Could not complete Microsoft 365 connection",
+          "The Microsoft 365 authorization code could not be exchanged for a mailbox session. Please retry the email send to get a fresh connect link.",
         ),
       );
   }

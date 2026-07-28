@@ -69,6 +69,11 @@ Set all of these as secrets in Replit (never hardcode them):
 | `BULLHORN_CLIENT_SECRET` | **Yes** | Bullhorn API client secret |
 | `BULLHORN_USERNAME` | **Yes** | Service account username for the password grant |
 | `BULLHORN_PASSWORD` | **Yes** | Service account password |
+| `M365_CLIENT_ID` | For recruiter mailbox send | Microsoft Entra app client ID for delegated recruiter mailbox OAuth |
+| `M365_CLIENT_SECRET` | For recruiter mailbox send | Microsoft Entra app client secret |
+| `M365_REDIRECT_URI` | For recruiter mailbox send | Redirect URI registered on the Entra app, e.g. `https://connect.asktoact.ai/api/auth/m365/callback` |
+| `M365_TENANT_ID` | No | Entra tenant ID for single-tenant auth; defaults to `organizations` if omitted |
+| `M365_SCOPE` | No | Override Microsoft Graph delegated scopes. Default: `offline_access openid profile email User.Read Mail.Send` |
 | `RATE_LIMIT_MAX` | No | Max requests per window (default: 120) |
 | `RATE_LIMIT_WINDOW_MS` | No | Rate limit window in milliseconds (default: 60000) |
 | `SENTRY_DSN` | No (recommended in production) | Sentry project DSN. When set, unhandled Express errors and process crashes are reported to Sentry. When unset, the app runs normally with local logs only. |
@@ -154,6 +159,34 @@ After connect, the page shows the personal MCP URL and ChatGPT setup steps. In C
 
 ---
 
+## Recruiter mailbox connect (Microsoft 365)
+
+Outbound candidate/contact email uses a separate **lazy-connect** flow from Bullhorn enrollment:
+
+1. A recruiter asks AskToAct to send an email.
+2. The MCP tool previews the recipient and message and asks for confirmation.
+3. If the recruiter has not connected Microsoft 365 yet, AskToAct returns a one-time connect link.
+4. The recruiter signs into Microsoft 365 and grants delegated mailbox access.
+5. The recruiter retries the send; AskToAct sends through their own mailbox, logs a Bullhorn `Email` note, and writes an internal send-log row.
+
+### Microsoft 365 tenant setup
+
+For Myticas or any Microsoft 365 customer, create an Entra app registration with:
+
+- delegated Microsoft Graph permission: `Mail.Send`
+- delegated profile scopes used by the lazy-connect flow: `User.Read`, `email`, `openid`, `profile`, `offline_access`
+- the AskToAct redirect URI: `https://<your-domain>/api/auth/m365/callback`
+
+If your tenant restricts user consent, an administrator must grant consent for the app once before recruiters can connect their mailboxes.
+
+Bullhorn native Outlook/email tracking is optional. AskToAct's guaranteed audit path is:
+
+- sent through the recruiter's mailbox
+- Bullhorn `Note` with `action: "Email"`
+- internal AskToAct send ledger
+
+---
+
 ## Running locally (development)
 
 ```bash
@@ -166,6 +199,9 @@ export BULLHORN_CLIENT_ID=your-client-id
 export BULLHORN_CLIENT_SECRET=your-client-secret
 export BULLHORN_USERNAME=your-username
 export BULLHORN_PASSWORD=your-password
+export M365_CLIENT_ID=your-m365-client-id
+export M365_CLIENT_SECRET=your-m365-client-secret
+export M365_REDIRECT_URI=http://localhost:5000/api/auth/m365/callback
 export PORT=5000
 
 # Start the server
@@ -204,8 +240,9 @@ curl -X POST http://localhost:5000/api/mcp \
 - **v1 — Read tools**: 33 search, fetch, report, and résumé-reading tools
 - **v2 — Write tools (live)**: 32 write tools for notes, submissions, placements, jobs, companies, tasks, tearsheets, file uploads, and permission-aware soft-delete/restore/archive
 - **v2 — Per-user OAuth (live)**: Each recruiter authenticates as their own Bullhorn user (not a shared service account), so every write is properly attributed
+- **v3 — Recruiter mailbox send (live)**: Microsoft 365 lazy-connect email to Bullhorn candidates/contacts, with Bullhorn note logging and an internal send ledger
 
 ## Roadmap
 
-- **v3 — Bulk outreach**: Search candidates → generate personalized messages via GPT → send via Bullhorn email
+- **v4 — Bulk outreach**: Search candidates → generate personalized messages via GPT → send in controlled batches via recruiter mailbox
 - **Multi-ATS**: Greenhouse, Lever, Vincere, Avionte connector library

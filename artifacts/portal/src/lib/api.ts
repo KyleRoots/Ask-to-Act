@@ -18,6 +18,8 @@ export type PortalMe = {
   firmId: string;
   firmName: string | null;
   enrolled: boolean;
+  mailboxConnected: boolean;
+  mailboxEmail: string | null;
   mcpUrl: string | null;
 };
 

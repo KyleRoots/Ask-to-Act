@@ -27,6 +27,7 @@ const NEW_WRITE_TOOLS = [
   "update_placement",
   "upload_file_to_record",
   "create_candidate_from_resume",
+  "send_email_to_record",
 ];
 
 // Destructive tools (soft-delete surface) must additionally carry

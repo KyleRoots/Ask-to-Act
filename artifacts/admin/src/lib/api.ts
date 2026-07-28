@@ -94,6 +94,8 @@ export type UserRow = {
   email: string | null;
   role: string;
   enrolled: boolean;
+  mailboxConnected: boolean;
+  mailboxEmail: string | null;
   invitedAt: string | null;
   enrollUrl: string;
   createdAt: string;

@@ -18,8 +18,10 @@
 //   export type Post = typeof postsTable.$inferSelect;
 
 export * from "./bullhorn-tokens";
+export * from "./email-send-logs";
 export * from "./firms";
 export * from "./firm-config";
+export * from "./user-mailboxes";
 export * from "./users";
 export * from "./seat-activity";
 export * from "./tool-usage";

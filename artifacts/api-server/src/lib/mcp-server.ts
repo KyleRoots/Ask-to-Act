@@ -83,6 +83,7 @@ import {
 import { matchCandidatesForJob } from "./matching.js";
 import { findCandidates } from "./find-candidates.js";
 import { scoutQualifiedByDepartment } from "./scout-screen.js";
+import { sendEmailToRecord } from "./send-email-to-record.js";
 
 // Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
 // a human, so whitespace is pure overhead — and multi-record reads are large
@@ -317,6 +318,7 @@ export const MCP_TOOL_PRIORITY: readonly string[] = [
   "get_entity",
   // High-use writes (still on the same universal connector)
   "add_note",
+  "send_email_to_record",
   "update_candidate",
   "update_candidate_status",
   "create_job_submission",
@@ -1375,34 +1377,83 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "add_note",
-    "WRITE: Adds a note to a candidate in Bullhorn, visible to all recruiters on the candidate's record. " +
+    "WRITE: Adds a note to a candidate or contact in Bullhorn, visible to all recruiters on the record. " +
       "Requires a personal Bullhorn account (not the shared read-only token) — the note is created as YOU and respects your Bullhorn write permissions. " +
       "The `action` field is the note type shown in Bullhorn (common values: 'Email', 'Call', 'Meeting', 'Comment', 'LinkedIn Message'). " +
       "Always confirm with the user what note text and action type to use before calling this tool. " +
-      "At least one of candidateId, jobOrderId, or placementId must be provided.",
+      "At least one of candidateId, clientContactId, jobOrderId, or placementId must be provided.",
     {
       comments: z.string().min(1).describe("The note body text — the full content of the note as it should appear in Bullhorn."),
       action: z.string().min(1).describe("Note type/category displayed in Bullhorn, e.g. 'Email', 'Call', 'Meeting', 'Comment', 'LinkedIn Message'."),
       candidateId: z.number().int().positive().optional().describe("Bullhorn candidate ID to attach this note to."),
+      clientContactId: z.number().int().positive().optional().describe("Bullhorn client contact ID to attach this note to."),
       jobOrderId: z.number().int().positive().optional().describe("Bullhorn job order ID to also associate this note with (optional)."),
       placementId: z.number().int().positive().optional().describe("Bullhorn placement ID to also associate this note with (optional)."),
     },
-    async ({ comments, action, candidateId, jobOrderId, placementId }) => {
-      if (!candidateId && !jobOrderId && !placementId) {
+    async ({ comments, action, candidateId, clientContactId, jobOrderId, placementId }) => {
+      if (!candidateId && !clientContactId && !jobOrderId && !placementId) {
         return {
           content: [
             {
               type: "text" as const,
-              text: formatResult({ error: "validation_error", message: "At least one of candidateId, jobOrderId, or placementId must be provided." }),
+              text: formatResult({ error: "validation_error", message: "At least one of candidateId, clientContactId, jobOrderId, or placementId must be provided." }),
             },
           ],
         };
       }
-      return runWriteTool("add_note", { comments, action, candidateId, jobOrderId, placementId }, async () => {
+      return runWriteTool("add_note", { comments, action, candidateId, clientContactId, jobOrderId, placementId }, async () => {
         const session = await resolveWriteSession();
-        return addNote(session, { comments, action, candidateId, jobOrderId, placementId });
+        return addNote(session, { comments, action, candidateId, clientContactId, jobOrderId, placementId });
       });
     },
+  );
+
+  writeTool(
+    "send_email_to_record",
+    "WRITE: Sends an email to a Bullhorn candidate or contact through YOUR connected Microsoft 365 mailbox, then logs the outreach to Bullhorn as an Email note and to AskToAct's internal delivery ledger. " +
+      "Requires your personal Bullhorn account plus a connected Microsoft 365 mailbox. " +
+      "ALWAYS show the user the exact recipient, subject, and body and get explicit confirmation before calling this tool. " +
+      "The tool fetches the recipient email from Bullhorn (do not trust a caller-supplied address), blocks obvious do-not-contact / opted-out statuses, and returns a connectUrl if the mailbox is not connected yet. " +
+      "Use dryRun=true to preview the recipient and mailbox-connect state before a live send.",
+    {
+      entityType: z
+        .enum(["Candidate", "ClientContact"])
+        .describe("Which Bullhorn record type to email."),
+      recordId: z.number().int().positive().describe("Bullhorn Candidate or ClientContact ID."),
+      subject: z.string().min(1).describe("Email subject line."),
+      body: z.string().min(1).describe("Email body to send. Plain text is safest; the service will render line breaks for the mailbox."),
+      jobOrderId: z.number().int().positive().optional().describe("Optional related Bullhorn job order ID for context and note logging."),
+      dryRun: z.boolean().optional().describe("If true, do not send anything — only resolve the recipient, consent gate, and mailbox connection status."),
+    },
+    async ({ entityType, recordId, subject, body, jobOrderId, dryRun }) =>
+      runWriteTool("send_email_to_record", { entityType, recordId, subject, jobOrderId, dryRun: !!dryRun }, async () => {
+        if (!caller || caller.kind !== "user") {
+          throw new Error(
+            "Sending email requires a personal AskToAct user API key so the message can be sent from your own Microsoft 365 mailbox.",
+          );
+        }
+        if (dryRun) {
+          const { previewEmailToRecord } = await import("./send-email-to-record.js");
+          return previewEmailToRecord({
+            userId: caller.userId,
+            entityType,
+            recordId,
+            subject,
+            body,
+            jobOrderId,
+          });
+        }
+        const session = await resolveWriteSession();
+        return sendEmailToRecord({
+          userId: caller.userId,
+          bullhornSession: session,
+          entityType,
+          recordId,
+          subject,
+          body,
+          jobOrderId,
+        });
+      }),
   );
 
   writeTool(

@@ -7,6 +7,7 @@ import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
+import { getUserMailboxStatus } from "../lib/m365-auth.js";
 import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
 import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses } from "../lib/bullhorn-auth.js";
 
@@ -292,6 +293,18 @@ router.get(
 
     const baseUrl = getBaseUrl();
     const now = new Date();
+    const mailboxStatuses = await Promise.all(
+      users.map(async (u) => ({
+        id: u.id,
+        ...(await getUserMailboxStatus(u.id).catch(() => ({
+          connected: false,
+          mailboxEmail: null,
+        }))),
+      })),
+    );
+    const mailboxByUser = new Map(
+      mailboxStatuses.map((s) => [s.id, s] as const),
+    );
 
     const tokenUpdates: { id: string; token: string; expires: Date }[] = [];
     const usersWithTokens = users.map((u) => {
@@ -301,7 +314,16 @@ router.get(
         const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
         tokenUpdates.push({ id: u.id, token, expires });
       }
-      return { ...u, enrolled: u.enrolled != null, invitedAt: u.invitedAt ?? null, enrollUrl: u.enrolled != null ? null : `${baseUrl}/api/auth/user/enroll?token=${token}` };
+      const mailbox = mailboxByUser.get(u.id);
+      return {
+        ...u,
+        enrolled: u.enrolled != null,
+        mailboxConnected: mailbox?.connected ?? false,
+        mailboxEmail: mailbox?.mailboxEmail ?? null,
+        invitedAt: u.invitedAt ?? null,
+        enrollUrl:
+          u.enrolled != null ? null : `${baseUrl}/api/auth/user/enroll?token=${token}`,
+      };
     });
     await bulkSetEnrollTokens(tokenUpdates);
 

@@ -2998,6 +2998,7 @@ export async function addNote(
     comments: string;
     action: string;
     candidateId?: number;
+    clientContactId?: number;
     jobOrderId?: number;
     placementId?: number;
   },
@@ -3005,8 +3006,8 @@ export async function addNote(
   // personReference is the required primary person link on every Bullhorn Note.
   // Without it Bullhorn returns 400 "error persisting an entity of type: Note".
   // noteEntities uses targetEntityID (not person.id) per Bullhorn REST schema.
-  if (!args.candidateId && !args.jobOrderId && !args.placementId) {
-    throw new Error("At least one of candidateId, jobOrderId, or placementId is required to add a note.");
+  if (!args.candidateId && !args.clientContactId && !args.jobOrderId && !args.placementId) {
+    throw new Error("At least one of candidateId, clientContactId, jobOrderId, or placementId is required to add a note.");
   }
 
   const body: Record<string, unknown> = {
@@ -3017,6 +3018,10 @@ export async function addNote(
   if (args.candidateId) {
     body.personReference = { id: args.candidateId };
     body.noteEntities = [{ targetName: "Candidate", targetEntityID: args.candidateId }];
+  }
+  if (args.clientContactId) {
+    body.personReference = { id: args.clientContactId };
+    body.noteEntities = [{ targetName: "ClientContact", targetEntityID: args.clientContactId }];
   }
   if (args.jobOrderId) body.jobOrder = { id: args.jobOrderId };
   if (args.placementId) body.placement = { id: args.placementId };

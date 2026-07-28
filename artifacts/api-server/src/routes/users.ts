@@ -8,6 +8,10 @@ import {
   enrollUserHeadless,
   getAuthorizeUrl,
 } from "../lib/bullhorn-auth.js";
+import {
+  disconnectUserMailbox,
+  getUserMailboxStatus,
+} from "../lib/m365-auth.js";
 import { rememberState } from "../lib/oauth-state.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
@@ -184,14 +188,29 @@ router.get("/users", bearerAuth, requireService, async (_req: Request, res: Resp
       })
       .from(usersTable);
     const now = new Date();
+    const mailboxStatuses = await Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        ...(await getUserMailboxStatus(r.id).catch(() => ({
+          connected: false,
+          mailboxEmail: null,
+        }))),
+      })),
+    );
+    const mailboxByUser = new Map(
+      mailboxStatuses.map((s) => [s.id, s] as const),
+    );
     res.json(
       rows.map((r) => {
         const tokenValid = r.enrollToken && r.enrollTokenExpiresAt && r.enrollTokenExpiresAt > now;
+        const mailbox = mailboxByUser.get(r.id);
         return {
           id: r.id,
           name: r.name,
           email: r.email,
           enrolled: r.enrolled !== null,
+          mailboxConnected: mailbox?.connected ?? false,
+          mailboxEmail: mailbox?.mailboxEmail ?? null,
           enrollUrl: tokenValid ? `${getBaseUrl()}/api/auth/user/enroll?token=${r.enrollToken}` : null,
           createdAt: r.createdAt,
         };
@@ -285,6 +304,7 @@ router.delete("/users/:id", bearerAuth, requireService, async (req: Request, res
     }
 
     invalidateUserSession(id);
+    await disconnectUserMailbox(id).catch(() => {});
     await db.delete(usersTable).where(eq(usersTable.id, id));
     logger.info({ userId: id }, "User deleted");
     res.json({ deleted: true, id });
@@ -382,6 +402,7 @@ router.post("/users/:id/reset", bearerAuth, requireService, async (req: Request,
     const enrollTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     invalidateUserSession(id);
+    await disconnectUserMailbox(id).catch(() => {});
 
     await db
       .update(usersTable)
