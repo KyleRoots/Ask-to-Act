@@ -88,6 +88,11 @@ import { matchCandidatesForJob } from "./matching.js";
 import { findCandidates } from "./find-candidates.js";
 import { scoutQualifiedByDepartment } from "./scout-screen.js";
 import { sendEmailToRecord } from "./send-email-to-record.js";
+import {
+  previewEmailsToRecords,
+  sendEmailsToRecords,
+  BULK_EMAIL_MAX_RECIPIENTS,
+} from "./send-email-to-records.js";
 
 // Serialize compactly (no pretty-print indentation). The consumer is an LLM, not
 // a human, so whitespace is pure overhead — and multi-record reads are large
@@ -323,6 +328,7 @@ export const MCP_TOOL_PRIORITY: readonly string[] = [
   // High-use writes (still on the same universal connector)
   "add_note",
   "send_email_to_record",
+  "send_email_to_records",
   "update_candidate",
   "update_candidate_status",
   "create_job_submission",
@@ -1435,7 +1441,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "Requires your personal Bullhorn account plus a connected Microsoft 365 mailbox. " +
       "ALWAYS preview first: show the user the exact recipient name (as a Markdown link to recipient.bullhornUrl when present), recipient email as plain text, subject, and body, then get explicit confirmation before a live send. " +
       "Prefer dryRun=true for that preview. After a successful send, again render the recipient NAME as a Markdown link to recipient.bullhornUrl and mention that an Email note was logged on the Bullhorn record. " +
-      "The tool fetches the recipient email from Bullhorn (do not trust a caller-supplied address), blocks obvious do-not-contact / opted-out statuses, and returns a connectUrl if the mailbox is not connected yet.",
+      "The tool fetches the recipient email from Bullhorn (do not trust a caller-supplied address), blocks obvious do-not-contact / opted-out statuses, and returns a connectUrl if the mailbox is not connected yet. " +
+      "For multiple recipients, use send_email_to_records instead of calling this tool in a loop.",
     {
       entityType: z
         .enum(["Candidate", "ClientContact"])
@@ -1475,6 +1482,87 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
           jobOrderId,
         });
       }),
+  );
+
+  writeTool(
+    "send_email_to_records",
+    "WRITE: Sends ONE shared email to multiple Bullhorn candidates/contacts through YOUR Microsoft 365 mailbox (serial), logging each success as a Bullhorn Email note plus an AskToAct ledger row. " +
+      `Hard max ${BULK_EMAIL_MAX_RECIPIENTS} recipients per run — split larger lists. ` +
+      "REQUIRED WORKFLOW: (1) dryRun=true preview — show ready vs skipped tables in chat (NAME linked via bullhornUrl; email plain text), subject, body, and mailbox status; (2) get explicit user confirmation in chat; (3) live send with the SAME recipients/subject/body plus confirmToken from the preview. " +
+      "Do NOT use ChatGPT's native email draft / Send card — confirm AskToAct send in chat only. " +
+      "Do NOT loop send_email_to_record for the same batch. Skips missing-email and do-not-contact rows; stops early on mailbox reconnect failures. Shared subject/body only (no per-recipient merge fields).",
+    {
+      recipients: z
+        .array(
+          z.object({
+            entityType: z
+              .enum(["Candidate", "ClientContact"])
+              .describe("Bullhorn record type."),
+            recordId: z.number().int().positive().describe("Bullhorn Candidate or ClientContact ID."),
+          }),
+        )
+        .min(1)
+        .max(BULK_EMAIL_MAX_RECIPIENTS)
+        .describe(`Recipients to email (max ${BULK_EMAIL_MAX_RECIPIENTS}). Pass the same array on preview and confirm.`),
+      subject: z.string().min(1).describe("Shared email subject for every recipient."),
+      body: z.string().min(1).describe("Shared email body for every recipient. Plain text is safest."),
+      jobOrderId: z.number().int().positive().optional().describe("Optional related Bullhorn job order ID for note logging."),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe("If true (required first), resolve recipients and return confirmToken without sending."),
+      confirmToken: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Required for live send — copy from the dryRun preview response."),
+    },
+    async ({ recipients, subject, body, jobOrderId, dryRun, confirmToken }) =>
+      runWriteTool(
+        "send_email_to_records",
+        {
+          count: recipients.length,
+          subject,
+          jobOrderId,
+          dryRun: !!dryRun,
+          hasConfirmToken: !!confirmToken,
+        },
+        async () => {
+          if (!caller || caller.kind !== "user") {
+            throw new Error(
+              "Bulk email requires a personal AskToAct user API key so messages can be sent from your own Microsoft 365 mailbox.",
+            );
+          }
+          if (dryRun !== false) {
+            // Default to preview when dryRun is omitted — safer than accidental live send.
+            return previewEmailsToRecords({
+              userId: caller.userId,
+              recipients,
+              subject,
+              body,
+              jobOrderId,
+            });
+          }
+          if (!confirmToken) {
+            return {
+              ok: false,
+              error: "confirm_required",
+              message:
+                "Live bulk send requires confirmToken from a dryRun preview. Call again with dryRun=true first, show the preview, then confirm with confirmToken.",
+            };
+          }
+          const session = await resolveWriteSession();
+          return sendEmailsToRecords({
+            userId: caller.userId,
+            bullhornSession: session,
+            recipients,
+            subject,
+            body,
+            jobOrderId,
+            confirmToken,
+          });
+        },
+      ),
   );
 
   writeTool(
