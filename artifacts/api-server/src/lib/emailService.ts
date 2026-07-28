@@ -211,6 +211,148 @@ export async function sendInviteEmail(payload: InvitePayload): Promise<void> {
   });
 }
 
+function reconnectHtml(opts: {
+  userName: string;
+  firmName: string;
+  enrollUrl: string;
+}): string {
+  const { userName, firmName, enrollUrl } = opts;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reconnect Bullhorn for ${firmName}'s AskToAct workspace</title>
+</head>
+<body style="margin:0;padding:0;background:#0b1020;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0b1020;padding:40px 20px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+      <tr><td style="padding-bottom:32px;">
+        ${logoHtml()}
+      </td></tr>
+
+      <tr><td style="background:#141927;border:1px solid #1e2a3a;border-radius:16px;padding:40px;">
+
+        <p style="margin:0 0 8px;font-size:12px;color:#38bdf8;letter-spacing:0.12em;text-transform:uppercase;font-weight:600;">
+          Bullhorn session refresh
+        </p>
+
+        <h1 style="margin:0 0 20px;font-size:26px;font-weight:800;color:#f8fafc;line-height:1.2;letter-spacing:-0.02em;">
+          Hi ${userName},
+        </h1>
+
+        <p style="margin:0 0 24px;font-size:16px;color:#cbd5e1;line-height:1.6;">
+          Your Bullhorn session for <strong style="color:#f8fafc;">${firmName}</strong> needs a quick reconnect
+          so AskToAct can keep writing notes, sending email, and updating records as you.
+        </p>
+
+        <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:28px;">
+          <tr><td style="background:#0f1622;border:1px solid #1e2a3a;border-radius:12px;padding:20px 24px;">
+            <p style="margin:0 0 14px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.1em;">What to expect</p>
+            <table cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="vertical-align:top;padding-bottom:12px;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">1</span>
+                </td>
+                <td style="padding-left:12px;padding-bottom:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  Click <strong style="color:#f8fafc;">Reconnect Bullhorn</strong> below
+                </td>
+              </tr>
+              <tr>
+                <td style="vertical-align:top;padding-bottom:12px;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">2</span>
+                </td>
+                <td style="padding-left:12px;padding-bottom:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  Sign in again with your Bullhorn username and password
+                </td>
+              </tr>
+              <tr>
+                <td style="vertical-align:top;">
+                  <span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#1e3a5f;font-size:12px;font-weight:700;color:#38bdf8;text-align:center;line-height:22px;">3</span>
+                </td>
+                <td style="padding-left:12px;vertical-align:top;font-size:14px;color:#cbd5e1;line-height:1.5;">
+                  Return to your AI chat and retry — <strong style="color:#f8fafc;">you do not need to reinstall the connector</strong>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+
+        <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:28px;">
+          <tr>
+            <td align="center" bgcolor="#4F46E5" style="background-color:#4F46E5;border-radius:12px;">
+              <a href="${enrollUrl}"
+                 style="display:block;padding:16px 28px;font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;text-align:center;letter-spacing:-0.01em;border-radius:12px;">
+                Reconnect Bullhorn
+              </a>
+            </td>
+          </tr>
+        </table>
+
+        <div style="border-top:1px solid #1e2a3a;padding-top:20px;">
+          <p style="margin:0;font-size:12px;color:#4a5568;line-height:1.6;">
+            Button not working? Copy and paste this link into your browser:<br />
+            <a href="${enrollUrl}" style="color:#38bdf8;word-break:break-all;text-decoration:none;">${enrollUrl}</a>
+          </p>
+        </div>
+
+      </td></tr>
+
+      <tr><td style="padding-top:24px;text-align:center;">
+        <p style="margin:0 0 6px;font-size:12px;color:#2d3748;">
+          AskToAct &nbsp;·&nbsp;
+          <a href="${PROD_URL}" style="color:#38bdf8;text-decoration:none;">connect.asktoact.ai</a>
+          &nbsp;·&nbsp; If you did not expect this message, you can safely ignore it.
+        </p>
+        <p style="margin:0;font-size:12px;color:#2d3748;">
+          Questions or issues? Email us at <a href="mailto:support@asktoact.ai" style="color:#38bdf8;text-decoration:none;">support@asktoact.ai</a>
+        </p>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/** Reconnect email for enrolled recruiters whose Bullhorn session needs a refresh. */
+export async function sendReconnectEmail(payload: InvitePayload): Promise<void> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) {
+    logger.warn({ toEmail: payload.toEmail }, "SENDGRID_API_KEY not set — reconnect email skipped");
+    return;
+  }
+
+  const sgMail = await import("@sendgrid/mail");
+  sgMail.default.setApiKey(apiKey);
+
+  await sgMail.default.send({
+    to: { name: payload.userName, email: payload.toEmail },
+    from: { name: FROM_NAME, email: FROM_EMAIL },
+    subject: `Reconnect Bullhorn for ${payload.firmName}'s AskToAct workspace`,
+    html: reconnectHtml(payload),
+    text: [
+      `Hi ${payload.userName},`,
+      ``,
+      `Your Bullhorn session for ${payload.firmName} needs a quick reconnect so AskToAct can keep writing notes, sending email, and updating records as you.`,
+      ``,
+      `1. Open the link below`,
+      `2. Sign in again with your Bullhorn username and password`,
+      `3. Return to your AI chat and retry — you do not need to reinstall the connector`,
+      ``,
+      `Reconnect here:`,
+      payload.enrollUrl,
+      ``,
+      `Questions? Email support@asktoact.ai`,
+      ``,
+      `AskToAct Team`,
+    ].join("\n"),
+  });
+}
+
 export interface SupportPayload {
   userEmail: string;
   userName: string;

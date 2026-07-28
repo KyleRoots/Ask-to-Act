@@ -30,6 +30,9 @@ const router: IRouter = Router();
  */
 const ENROLL_ATTEMPT_COOKIE = "a2a_enroll_started";
 
+/** Marks an enroll session as a Bullhorn reconnect (not first-time setup). */
+export const ENROLL_RECONNECT_COOKIE = "a2a_enroll_reconnect";
+
 /** Reads a single cookie value from the raw Cookie header (no cookie-parser). */
 function readCookie(req: Request, name: string): string | undefined {
   const header = req.headers.cookie;
@@ -42,6 +45,15 @@ function readCookie(req: Request, name: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/** True when this browser is mid-reconnect (force=1 enroll flow). */
+export function isEnrollReconnectRequest(req: Request): boolean {
+  return readCookie(req, ENROLL_RECONNECT_COOKIE) === "1";
+}
+
+export function clearEnrollReconnectCookie(res: Response): void {
+  res.clearCookie(ENROLL_RECONNECT_COOKIE, { path: "/" });
 }
 
 /**
@@ -316,15 +328,24 @@ router.delete("/users/:id", bearerAuth, requireService, async (req: Request, res
 
 /**
  * POST /api/users/:id/invite
- * Admin-only: generates a fresh one-time enrollment token for an existing user
- * and returns the enrollment URL. Use this when the original link has expired
- * or was consumed. If the user has an email address, also sends a new invite email.
+ * Admin-only: generates a fresh one-time enrollment/reconnect token for an
+ * existing user and returns the URL. Use this when the original link has
+ * expired, or when an enrolled recruiter's Bullhorn session must be refreshed.
+ * If the user has an email, sends an invite (first-time) or reconnect email.
+ * Body (optional): { reconnect: true } forces reconnect email copy even when
+ * the refresh token was already cleared (e.g. by a prior GPT reconnect mint).
  */
 router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request, res: Response) => {
   const id = String(req.params["id"]);
   try {
     const [user] = await db
-      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, firmId: usersTable.firmId })
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        email: usersTable.email,
+        firmId: usersTable.firmId,
+        refreshToken: usersTable.refreshToken,
+      })
       .from(usersTable)
       .where(eq(usersTable.id, id))
       .limit(1);
@@ -337,7 +358,14 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
     const enrollToken = randomBytes(32).toString("hex");
     const enrollTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    // For enrolled users, "Resend access link" is used as a reconnect path.
+    // Admin "Reconnect Bullhorn" (and GPT reconnect links) use this endpoint.
+    // Detect enrollment before clearing tokens so we send reconnect copy, not a
+    // first-time invite. Body.reconnect=true covers the case where GPT already
+    // cleared the refresh token before the admin regenerates the link.
+    const bodyReconnect =
+      req.body && typeof req.body === "object" && (req.body as { reconnect?: unknown }).reconnect === true;
+    const isReconnect = Boolean(bodyReconnect || user.refreshToken);
+
     // Clear the stale Bullhorn session so the enroll page does not short-circuit
     // to "already connected" without replacing the refresh token.
     invalidateUserSession(id);
@@ -356,28 +384,33 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
       .where(eq(usersTable.id, id));
 
     const enrollUrl = `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}&force=1&manual=1`;
-    logger.info({ userId: id }, "Enrollment token regenerated");
+    logger.info({ userId: id, isReconnect }, "Enrollment / reconnect token regenerated");
 
     if (user.email) {
       try {
-        const { sendInviteEmail } = await import("../lib/emailService.js");
+        const { sendInviteEmail, sendReconnectEmail } = await import("../lib/emailService.js");
         let firmName = "your organization";
         if (user.firmId) {
           const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, user.firmId)).limit(1);
           if (firm) firmName = firm.name;
         }
-        await sendInviteEmail({
+        const payload = {
           toEmail: user.email,
           userName: user.name,
           firmName,
           enrollUrl,
-        });
+        };
+        if (isReconnect) {
+          await sendReconnectEmail(payload);
+        } else {
+          await sendInviteEmail(payload);
+        }
       } catch (emailErr) {
-        logger.warn({ emailErr, userId: id }, "Failed to send re-invite email (token still valid)");
+        logger.warn({ emailErr, userId: id }, "Failed to send reconnect/invite email (token still valid)");
       }
     }
 
-    res.json({ id, enrollUrl });
+    res.json({ id, enrollUrl, reconnect: isReconnect });
   } catch (err) {
     logger.error({ err, userId: id }, "Failed to regenerate enrollment token");
     res.status(500).json({ error: "Failed to regenerate enrollment token" });
@@ -451,11 +484,19 @@ router.post("/users/:id/reset", bearerAuth, requireService, async (req: Request,
 });
 
 /**
- * Shared connector-setup page rendered both after a fresh Bullhorn connection
- * (alreadyConnected=false) and when a returning connected user re-opens their
- * access link (alreadyConnected=true).
+ * Shared connector-setup page rendered after a fresh Bullhorn connection,
+ * when a returning connected user re-opens their access link, or after an
+ * intentional Bullhorn session reconnect.
  */
-export function connectorSetupPage(displayName: string, mcpUrl: string | null, alreadyConnected: boolean): string {
+export type ConnectorSetupMode = "fresh" | "already" | "reconnected";
+
+export function connectorSetupPage(
+  displayName: string,
+  mcpUrl: string | null,
+  mode: boolean | ConnectorSetupMode = "fresh",
+): string {
+  const resolvedMode: ConnectorSetupMode =
+    typeof mode === "boolean" ? (mode ? "already" : "fresh") : mode;
   const e = escapeHtml;
   const toolSteps: Record<string, { label: string; tagline: string; steps: string[] }> = {
     chatgpt: {
@@ -544,14 +585,35 @@ export function connectorSetupPage(displayName: string, mcpUrl: string | null, a
     return `<div class="tool-panel" id="panel-${key}" style="display:none">${tagline}${stepsHtml}</div>`;
   }).join("");
 
-  const subtitle = alreadyConnected
-    ? `Welcome back, <strong style="color:#e8ecf3">${e(displayName)}</strong>. You're already connected to Bullhorn — here's your connector setup to complete or reference:`
-    : `Linked as <strong style="color:#e8ecf3">${e(displayName)}</strong>. Your AI connector is ready.`;
+  const subtitle =
+    resolvedMode === "already"
+      ? `Welcome back, <strong style="color:#e8ecf3">${e(displayName)}</strong>. You're already connected to Bullhorn — here's your connector setup to complete or reference:`
+      : resolvedMode === "reconnected"
+        ? `Welcome back, <strong style="color:#e8ecf3">${e(displayName)}</strong>. Your Bullhorn session was refreshed. Return to your AI chat and retry the action — <strong>you do not need to reinstall the connector</strong>.`
+        : `Linked as <strong style="color:#e8ecf3">${e(displayName)}</strong>. Your AI connector is ready.`;
+
+  const heading =
+    resolvedMode === "reconnected"
+      ? "Bullhorn reconnected"
+      : "Bullhorn account connected!";
+
+  const title =
+    resolvedMode === "reconnected" ? "Reconnected | AskToAct" : "Connected | AskToAct";
+
+  const toolSectionLabel =
+    resolvedMode === "reconnected"
+      ? "Optional reference — your connector is already installed"
+      : "Which AI tool are you using?";
+
+  const toolSectionNote =
+    resolvedMode === "reconnected"
+      ? "You do not need to paste the URL again or reinstall the connector. Return to your AI chat and retry the action that asked you to reconnect."
+      : "Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for \"MCP\" or \"custom connector.\"";
 
   const helpNameJson = JSON.stringify(displayName).replace(/</g, "\\u003c");
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connected | AskToAct</title>
+<title>${title}</title>
 <style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
@@ -619,7 +681,7 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
 </div>
 <div class="card">
   <div class="check">✓</div>
-  <h1>Bullhorn account connected!</h1>
+  <h1>${heading}</h1>
   <p class="sub">${subtitle}</p>
   ${mcpUrl ? `
   <p class="mcp-label">Your personal connector URL</p>
@@ -627,10 +689,10 @@ h1{font-size:20px;font-weight:800;margin:0 0 8px;letter-spacing:-0.02em}
   <button class="copy-btn" id="copy-btn">Copy connector URL</button>
   ` : ""}
   <div class="tool-section">
-    <p class="tool-label">Which AI tool are you using?</p>
+    <p class="tool-label">${toolSectionLabel}</p>
     <div class="tool-tabs">${toolTabsHtml}</div>
     ${toolPanelsHtml}
-    <p class="note">Navigation may vary slightly depending on your plan or version. If you cannot find Connectors, search your tool's help center for "MCP" or "custom connector."</p>
+    <p class="note">${toolSectionNote}</p>
   </div>
   <div class="help-row">
     <button type="button" class="help-toggle" id="help-toggle">✉️ Ask for help with setup</button>
@@ -733,7 +795,13 @@ if (helpForm) helpForm.addEventListener('submit', submitHelp);
 </body></html>`;
 }
 
-function enrollForm(token: string, userName: string, firmName?: string | null, errorMsg?: string): string {
+function enrollForm(
+  token: string,
+  userName: string,
+  firmName?: string | null,
+  errorMsg?: string,
+  isReconnect = false,
+): string {
   const e = escapeHtml;
   const err = errorMsg
     ? `<p style="color:#f87171;margin:0 0 16px;font-size:14px">${e(errorMsg)}</p>`
@@ -744,8 +812,19 @@ function enrollForm(token: string, userName: string, firmName?: string | null, e
         <span style="font-size:12px;color:#38bdf8;letter-spacing:0.05em">${e(firmName)}</span>
        </div>`
     : "";
+  const title = isReconnect ? "Reconnect Bullhorn" : "Connect Bullhorn";
+  const heading = isReconnect
+    ? "Reconnect your Bullhorn account"
+    : "Connect your Bullhorn account";
+  const sub = isReconnect
+    ? `Hi <strong>${e(userName)}</strong> — your Bullhorn session needs a quick refresh. Sign in again below. Your existing AI connector URL stays the same; you will not need to reinstall it in ChatGPT.`
+    : `Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn and are not stored by this server.`;
+  const button = isReconnect ? "Reconnect Bullhorn" : "Connect account";
+  const note = isReconnect
+    ? "This only refreshes your Bullhorn login for AskToAct writes (notes, emails, submissions). Your personal connector URL does not change."
+    : "This connects your personal Bullhorn login so the AI connector can write notes, update statuses, and submit candidates as you.";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect Bullhorn | ${e(userName)}</title>
+<title>${title} | ${e(userName)}</title>
 <style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;
@@ -755,7 +834,7 @@ main{max-width:420px;width:100%;padding:40px 32px;background:#141927;border-radi
 .logo-text{font-size:18px;font-weight:800;letter-spacing:-0.02em;color:#f8fafc}
 .logo-text span{color:#38BDF8}
 h1{font-size:20px;margin:0 0 6px}
-.sub{font-size:14px;color:#7a8ba0;margin:0 0 24px}
+.sub{font-size:14px;color:#7a8ba0;margin:0 0 24px;line-height:1.55}
 label{display:block;font-size:13px;color:#aab4c5;margin-bottom:6px}
 input{width:100%;padding:10px 14px;background:#0b1020;border:1px solid #1e2a3a;border-radius:8px;
   color:#e8ecf3;font-size:15px;margin-bottom:16px;outline:none}
@@ -763,7 +842,7 @@ input:focus{border-color:#3b82f6}
 button{width:100%;padding:12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;
   font-size:15px;font-weight:600;cursor:pointer}
 button:hover{background:#2563eb}
-.note{font-size:12px;color:#4a5568;margin-top:16px;text-align:center}
+.note{font-size:12px;color:#4a5568;margin-top:16px;text-align:center;line-height:1.5}
 .help-link{display:block;text-align:center;margin-top:16px;font-size:13px;color:#6B7A99;text-decoration:none}
 .help-link:hover{color:#94a3b8}
 </style></head>
@@ -773,19 +852,20 @@ button:hover{background:#2563eb}
 <span class="logo-text">Ask<span>To</span>Act</span>
 </div>
 ${firmBadge}
-<h1>Connect your Bullhorn account</h1>
-<p class="sub">Linking as <strong>${e(userName)}</strong>. Your credentials go directly to Bullhorn and are not stored by this server.</p>
+<h1>${heading}</h1>
+<p class="sub">${sub}</p>
 ${err}
 <form method="POST" action="/api/auth/user/enroll">
   <input type="hidden" name="token" value="${e(token)}">
+  ${isReconnect ? `<input type="hidden" name="reconnect" value="1">` : ""}
   <label for="u">Bullhorn username</label>
   <input id="u" type="text" name="bhUsername" autocomplete="username" required placeholder="Your Bullhorn username">
   <label for="p">Bullhorn password</label>
   <input id="p" type="password" name="bhPassword" autocomplete="current-password" required>
-  <button type="submit">Connect account</button>
+  <button type="submit">${button}</button>
 </form>
-<a class="help-link" href="mailto:support@asktoact.ai?subject=${encodeURIComponent("Help connecting my Bullhorn account")}&body=${encodeURIComponent("Hi AskToAct support,\n\nI'm trying to connect my Bullhorn account but I'm running into an issue.\n\nMy name: " + userName + (firmName ? "\nFirm: " + firmName : "") + "\n\nCould you help me get connected?\n\nThanks")}">Need help? Contact support</a>
-<p class="note">This connects your personal Bullhorn login so the AI connector can write notes, update statuses, and submit candidates as you.</p>
+<a class="help-link" href="mailto:support@asktoact.ai?subject=${encodeURIComponent(isReconnect ? "Help reconnecting my Bullhorn account" : "Help connecting my Bullhorn account")}&body=${encodeURIComponent("Hi AskToAct support,\n\nI'm trying to " + (isReconnect ? "reconnect" : "connect") + " my Bullhorn account but I'm running into an issue.\n\nMy name: " + userName + (firmName ? "\nFirm: " + firmName : "") + "\n\nCould you help?\n\nThanks")}">Need help? Contact support</a>
+<p class="note">${note}</p>
 </main></body></html>`;
 }
 
@@ -795,13 +875,33 @@ ${err}
  * a valid one-time enroll link. Manual is offered up front because Bullhorn's
  * first-time consent screen often bounces recruiters back to login.
  */
-function enrollChoicePage(token: string, userName: string, firmName?: string | null): string {
+function enrollChoicePage(
+  token: string,
+  userName: string,
+  firmName?: string | null,
+  isReconnect = false,
+): string {
   const e = escapeHtml;
   const firmLine = firmName ? ` for <strong>${e(firmName)}</strong>` : "";
-  const oauthUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&go=1`;
-  const manualUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&manual=1`;
+  const reconnectQs = isReconnect ? "&force=1" : "";
+  const oauthUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&go=1${reconnectQs}`;
+  const manualUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&manual=1${reconnectQs}`;
+  const title = isReconnect ? "Reconnect Bullhorn | AskToAct" : "Connect Bullhorn | AskToAct";
+  const heading = isReconnect
+    ? "Reconnect your Bullhorn account"
+    : "Connect your Bullhorn account";
+  const sub = isReconnect
+    ? `Hi ${e(userName)} — your Bullhorn session needs a quick refresh${firmLine}. Sign in again below. <strong>Your existing AI connector URL stays the same</strong> — you will not need to reinstall it.`
+    : `Hi ${e(userName)} — choose how to link Bullhorn${firmLine}. If Bullhorn's sign-in sends you back to its login screen after you click Agree, use <strong>Connect manually</strong> instead.`;
+  const primaryLabel = isReconnect ? "Reconnect manually" : "Connect manually";
+  const secondaryLabel = isReconnect
+    ? "Continue with Bullhorn sign-in"
+    : "Continue with Bullhorn sign-in";
+  const hint = isReconnect
+    ? "<strong>Reconnect manually</strong> is the most reliable path: enter your Bullhorn username and password once here; we refresh the session on the server. Your ChatGPT / Claude connector does not change."
+    : "<strong>Connect manually</strong> is the most reliable path: enter your Bullhorn username and password once here; we finish the connection on the server. <strong>Bullhorn sign-in</strong> uses Bullhorn's own login page (no password on this site), but Bullhorn sometimes interrupts first-time consent.";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect Bullhorn | AskToAct</title>
+<title>${title}</title>
 <style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
@@ -822,11 +922,11 @@ h1{font-size:20px;font-weight:800;margin:0 0 10px;letter-spacing:-0.02em}
 <body><main>
 <div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div>
 <div class="card">
-  <h1>Connect your Bullhorn account</h1>
-  <p class="sub">Hi ${e(userName)} — choose how to link Bullhorn${firmLine}. If Bullhorn's sign-in sends you back to its login screen after you click Agree, use <strong>Connect manually</strong> instead.</p>
-  <a class="btn btn-primary" href="${manualUrl}">Connect manually</a>
-  <a class="btn btn-secondary" href="${oauthUrl}">Continue with Bullhorn sign-in</a>
-  <p class="hint"><strong>Connect manually</strong> is the most reliable path: enter your Bullhorn username and password once here; we finish the connection on the server. <strong>Bullhorn sign-in</strong> uses Bullhorn's own login page (no password on this site), but Bullhorn sometimes interrupts first-time consent.</p>
+  <h1>${heading}</h1>
+  <p class="sub">${sub}</p>
+  <a class="btn btn-primary" href="${manualUrl}">${primaryLabel}</a>
+  <a class="btn btn-secondary" href="${oauthUrl}">${secondaryLabel}</a>
+  <p class="hint">${hint}</p>
 </div>
 </main></body></html>`;
 }
@@ -837,13 +937,29 @@ h1{font-size:20px;font-weight:800;margin:0 0 10px;letter-spacing:-0.02em}
  * completing. Offers manual connect first (most reliable) plus an OAuth retry.
  * Reachable ONLY with a valid one-time enroll token.
  */
-function bounceRecoveryPage(token: string, userName: string, firmName?: string | null): string {
+function bounceRecoveryPage(
+  token: string,
+  userName: string,
+  firmName?: string | null,
+  isReconnect = false,
+): string {
   const e = escapeHtml;
   const firmLine = firmName ? ` for <strong>${e(firmName)}</strong>` : "";
-  const retryUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&go=1`;
-  const manualUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&manual=1`;
+  const reconnectQs = isReconnect ? "&force=1" : "";
+  const retryUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&go=1${reconnectQs}`;
+  const manualUrl = `/api/auth/user/enroll?token=${encodeURIComponent(token)}&manual=1${reconnectQs}`;
+  const heading = isReconnect
+    ? "Let's finish reconnecting Bullhorn"
+    : "Let's finish connecting Bullhorn";
+  const sub = isReconnect
+    ? `Hi ${e(userName)} — the Bullhorn reconnect${firmLine} didn't complete. Use <strong>Reconnect manually</strong> to finish. Your AI connector URL stays the same.`
+    : `Hi ${e(userName)} — it looks like the Bullhorn connection${firmLine} didn't complete. Bullhorn often interrupts the very first sign-in and sends you back to its own login screen. Use <strong>Connect manually</strong> to finish:`;
+  const primaryLabel = isReconnect ? "Reconnect manually" : "Connect manually";
+  const hint = isReconnect
+    ? "\"Reconnect manually\" lets you enter your Bullhorn username and password once on this page — we refresh the session on the server."
+    : "\"Connect manually\" lets you enter your Bullhorn username and password once on this page — we complete the connection securely on the server, which avoids Bullhorn's first-time interruption entirely.";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Finish connecting | AskToAct</title>
+<title>${isReconnect ? "Finish reconnecting" : "Finish connecting"} | AskToAct</title>
 <style${nonceAttr()}>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1020;color:#e8ecf3;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:20px}
@@ -864,11 +980,11 @@ h1{font-size:20px;font-weight:800;margin:0 0 10px;letter-spacing:-0.02em}
 <body><main>
 <div class="logo">${brandLogo}<span class="logo-text">Ask<span>To</span>Act</span></div>
 <div class="card">
-  <h1>Let's finish connecting Bullhorn</h1>
-  <p class="sub">Hi ${e(userName)} — it looks like the Bullhorn connection${firmLine} didn't complete. Bullhorn often interrupts the very first sign-in and sends you back to its own login screen. Use <strong>Connect manually</strong> to finish:</p>
-  <a class="btn btn-primary" href="${manualUrl}">Connect manually</a>
+  <h1>${heading}</h1>
+  <p class="sub">${sub}</p>
+  <a class="btn btn-primary" href="${manualUrl}">${primaryLabel}</a>
   <a class="btn btn-secondary" href="${retryUrl}">Try the Bullhorn sign-in again</a>
-  <p class="hint">"Connect manually" lets you enter your Bullhorn username and password once on this page — we complete the connection securely on the server, which avoids Bullhorn's first-time interruption entirely.</p>
+  <p class="hint">${hint}</p>
 </div>
 </main></body></html>`;
 }
@@ -945,11 +1061,23 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       return;
     }
 
+    // Plant reconnect intent for OAuth callback success copy (manual form
+    // carries reconnect=1 in the POST body instead).
+    if (forceReconnect) {
+      res.cookie(ENROLL_RECONNECT_COOKIE, "1", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000,
+        path: "/",
+      });
+    }
+
     // ?manual=1 — server-side credential form (headless OAuth). Token-gated so
     // crawlers without a valid enroll link never see a Bullhorn password field
     // (that pattern previously got the domain flagged as a "deceptive site").
     if (req.query["manual"] === "1") {
-      res.send(enrollForm(token, rows[0].name, firmName));
+      res.send(enrollForm(token, rows[0].name, firmName, undefined, forceReconnect));
       return;
     }
 
@@ -960,7 +1088,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     const forceRedirect = req.query["go"] === "1";
     if (!forceRedirect && readCookie(req, ENROLL_ATTEMPT_COOKIE) === rows[0].id) {
       res.set("Cache-Control", "no-store");
-      res.send(bounceRecoveryPage(token, rows[0].name, firmName));
+      res.send(bounceRecoveryPage(token, rows[0].name, firmName, forceReconnect));
       return;
     }
 
@@ -986,7 +1114,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     // redirecting to Bullhorn first caused most new users to hit the consent
     // bounce with no obvious way out until they re-opened the link.
     res.set("Cache-Control", "no-store");
-    res.send(enrollChoicePage(token, rows[0].name, firmName));
+    res.send(enrollChoicePage(token, rows[0].name, firmName, forceReconnect));
   } catch (err) {
     logger.error({ err }, "Enrollment form failed");
     res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));
@@ -1000,11 +1128,14 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
  * Requires a valid one-time enrollment token; the token is consumed on success.
  */
 router.post("/auth/user/enroll", async (req: Request, res: Response) => {
-  const { token, bhUsername, bhPassword } = req.body as {
+  const { token, bhUsername, bhPassword, reconnect } = req.body as {
     token?: string;
     bhUsername?: string;
     bhPassword?: string;
+    reconnect?: string;
   };
+  const isReconnect =
+    reconnect === "1" || isEnrollReconnectRequest(req);
 
   if (!token || !bhUsername || !bhPassword) {
     res.status(400).send(page("Missing fields", "Enrollment token, username, and password are all required."));
@@ -1037,7 +1168,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     const id = rows[0].id;
 
     await enrollUserHeadless(id, bhUsername.trim(), bhPassword);
-    logger.info({ userId: id }, "Bullhorn: per-user headless enrollment complete via form");
+    logger.info({ userId: id, isReconnect }, "Bullhorn: per-user headless enrollment complete via form");
 
     await db
       .update(usersTable)
@@ -1053,7 +1184,14 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     const baseUrl = getBaseUrl();
     const mcpUrl = enrolledUser ? `${baseUrl}/api/mcp/${enrolledUser.apiKey}` : null;
 
-    res.send(connectorSetupPage(bhUsername.trim(), mcpUrl, false));
+    clearEnrollReconnectCookie(res);
+    res.send(
+      connectorSetupPage(
+        bhUsername.trim(),
+        mcpUrl,
+        isReconnect ? "reconnected" : "fresh",
+      ),
+    );
   } catch (err) {
     const msg = (err as Error).message ?? "Unknown error";
     logger.error({ err }, "Per-user headless enrollment failed");
@@ -1070,7 +1208,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, fId)).limit(1).catch(() => []);
       firmName = firm?.name ?? null;
     }
-    res.status(400).send(enrollForm(token, name, firmName, msg));
+    res.status(400).send(enrollForm(token, name, firmName, msg, isReconnect));
   }
 });
 

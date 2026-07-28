@@ -514,9 +514,15 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
 
   const resendAccessLinkMutation = useMutation({
     mutationFn: (userId: string) => api.resendAccessLink(userId),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
-      toast({ title: "Access link resent ✓" });
+      navigator.clipboard?.writeText(data.enrollUrl).catch(() => {});
+      toast({
+        title: "Bullhorn reconnect link ready ✓",
+        description: data.reconnect
+          ? "Reconnect email sent (if the user has an email). Link copied — open it to refresh Bullhorn. Their AI connector URL stays the same."
+          : "Access link regenerated and copied. Open it to connect Bullhorn.",
+      });
     },
     onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
   });
@@ -1178,9 +1184,9 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                 disabled={resendAccessLinkMutation.isPending}
                                 className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
                                 style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
-                                title="Regenerate and resend the connector setup link"
+                                title="Issue a Bullhorn reconnect link. Clears the stale session so they can sign in again — connector URL unchanged."
                               >
-                                ↺ Resend access link
+                                ↺ Reconnect Bullhorn
                               </button>
                             )}
                             <button
@@ -1349,9 +1355,9 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                       style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
                                       onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.16)"; }}
                                       onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.08)"; }}
-                                      title="Regenerate and resend the connector setup link"
+                                      title="Issue a Bullhorn reconnect link. Clears the stale session so they can sign in again — connector URL unchanged."
                                     >
-                                      ↺ Resend access link
+                                      ↺ Reconnect Bullhorn
                                     </button>
                                   )}
                                   <button

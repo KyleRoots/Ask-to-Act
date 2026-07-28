@@ -16,8 +16,9 @@ const USER_ENROLL_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export class BullhornReconnectRequiredError extends Error {
   constructor(public readonly connectUrl: string) {
     super(
-      "Your Bullhorn session could not be refreshed and must be reconnected first. " +
-        "Open the reconnect link, finish Bullhorn sign-in, then retry.",
+      "Your Bullhorn session needs a quick reconnect before this action can continue. " +
+        "Open the reconnect link, sign in with your Bullhorn credentials, then retry. " +
+        "Your existing AI connector URL stays the same — you do not need to reinstall it.",
     );
     this.name = "BullhornReconnectRequiredError";
   }

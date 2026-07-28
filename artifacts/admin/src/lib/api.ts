@@ -236,8 +236,9 @@ export const api = {
     }),
 
   resendAccessLink: (userId: string) =>
-    apiFetch<{ id: string; enrollUrl: string }>(`/users/${userId}/invite`, {
+    apiFetch<{ id: string; enrollUrl: string; reconnect?: boolean }>(`/users/${userId}/invite`, {
       method: "POST",
+      body: JSON.stringify({ reconnect: true }),
     }),
 
   resetUser: (userId: string) =>

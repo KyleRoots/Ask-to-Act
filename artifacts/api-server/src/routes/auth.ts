@@ -22,7 +22,7 @@ import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 import { page } from "../lib/html.js";
-import { connectorSetupPage } from "./users.js";
+import { connectorSetupPage, clearEnrollReconnectCookie, isEnrollReconnectRequest } from "./users.js";
 
 const router: IRouter = Router();
 
@@ -177,8 +177,16 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
         ? `${baseUrl}/api/mcp/${userRow.apiKey}`
         : null;
 
+      const isReconnect = isEnrollReconnectRequest(req);
+      clearEnrollReconnectCookie(res);
       res.set("Cache-Control", "no-store");
-      res.send(connectorSetupPage(userRow?.name ?? "there", mcpUrl, false));
+      res.send(
+        connectorSetupPage(
+          userRow?.name ?? "there",
+          mcpUrl,
+          isReconnect ? "reconnected" : "fresh",
+        ),
+      );
     } catch (err) {
       logger.error({ err, userId }, "User enrollment code exchange failed");
       res
