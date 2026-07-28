@@ -1433,9 +1433,9 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "send_email_to_record",
     "WRITE: Sends an email to a Bullhorn candidate or contact through YOUR connected Microsoft 365 mailbox, then logs the outreach to Bullhorn as an Email note and to AskToAct's internal delivery ledger. " +
       "Requires your personal Bullhorn account plus a connected Microsoft 365 mailbox. " +
-      "ALWAYS show the user the exact recipient, subject, and body and get explicit confirmation before calling this tool. " +
-      "The tool fetches the recipient email from Bullhorn (do not trust a caller-supplied address), blocks obvious do-not-contact / opted-out statuses, and returns a connectUrl if the mailbox is not connected yet. " +
-      "Use dryRun=true to preview the recipient and mailbox-connect state before a live send.",
+      "ALWAYS preview first: show the user the exact recipient name (as a Markdown link to recipient.bullhornUrl when present), recipient email as plain text, subject, and body, then get explicit confirmation before a live send. " +
+      "Prefer dryRun=true for that preview. After a successful send, again render the recipient NAME as a Markdown link to recipient.bullhornUrl and mention that an Email note was logged on the Bullhorn record. " +
+      "The tool fetches the recipient email from Bullhorn (do not trust a caller-supplied address), blocks obvious do-not-contact / opted-out statuses, and returns a connectUrl if the mailbox is not connected yet.",
     {
       entityType: z
         .enum(["Candidate", "ClientContact"])
