@@ -4,6 +4,38 @@ import { randomBytes } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "./logger.js";
 import { decryptToken, encryptToken } from "./token-crypto.js";
+import { getBaseUrl } from "./getBaseUrl.js";
+
+const USER_ENROLL_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Thrown when a recruiter's personal Bullhorn session is missing or can no
+ * longer be refreshed. Carries a one-time absolute reconnect URL so MCP
+ * clients can show a working link (never /enroll?id=…).
+ */
+export class BullhornReconnectRequiredError extends Error {
+  constructor(public readonly connectUrl: string) {
+    super(
+      "Your Bullhorn session could not be refreshed and must be reconnected first. " +
+        "Open the reconnect link, finish Bullhorn sign-in, then retry.",
+    );
+    this.name = "BullhornReconnectRequiredError";
+  }
+}
+
+/**
+ * Issues a fresh one-time enrollment/reconnect token for an existing user and
+ * returns the absolute browser URL GPT/clients should present.
+ */
+export async function getBullhornReconnectUrlForUser(userId: string): Promise<string> {
+  const enrollToken = randomBytes(32).toString("hex");
+  const enrollTokenExpiresAt = new Date(Date.now() + USER_ENROLL_TOKEN_TTL_MS);
+  await db
+    .update(usersTable)
+    .set({ enrollToken, enrollTokenExpiresAt, updatedAt: new Date() })
+    .where(eq(usersTable.id, userId));
+  return `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}`;
+}
 
 const BULLHORN_LOGIN_INFO_URL =
   "https://rest.bullhornstaffing.com/rest-services/loginInfo";
@@ -977,10 +1009,8 @@ export async function getUserSession(userId: string): Promise<Session> {
   const user = rows[0];
   if (!user) throw new Error(`User ${userId} not found.`);
   if (!user.refreshToken) {
-    throw new Error(
-      `Your Bullhorn account is not enrolled yet. Please visit ` +
-        `/api/auth/user/enroll?id=${userId} to connect your Bullhorn account.`,
-    );
+    const connectUrl = await getBullhornReconnectUrlForUser(userId);
+    throw new BullhornReconnectRequiredError(connectUrl);
   }
 
   const work = (async (): Promise<Session> => {
@@ -1001,10 +1031,8 @@ export async function getUserSession(userId: string): Promise<Session> {
     } catch (err) {
       userSessions.delete(userId);
       logger.error({ userId, err }, "Bullhorn: user session refresh failed — re-enrollment may be required");
-      throw new Error(
-        `Your Bullhorn session could not be refreshed. Please re-enroll at ` +
-          `/api/auth/user/enroll?id=${userId} to reconnect your account.`,
-      );
+      const connectUrl = await getBullhornReconnectUrlForUser(userId);
+      throw new BullhornReconnectRequiredError(connectUrl);
     }
   })().finally(() => {
     userAuthInProgress.delete(userId);

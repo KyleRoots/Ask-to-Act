@@ -65,7 +65,11 @@ import {
   archiveOrCancelPlacement,
   SOFT_DELETABLE_ENTITIES,
 } from "./bullhorn-client.js";
-import { getUserSession, currentFirmContextId } from "./bullhorn-auth.js";
+import {
+  BullhornReconnectRequiredError,
+  getUserSession,
+  currentFirmContextId,
+} from "./bullhorn-auth.js";
 import { sendSupportEmail } from "./emailService.js";
 import type { CallerIdentity } from "../middlewares/bearer-auth.js";
 import { trackSeatActivity, trackToolUsage } from "./seat-activity.js";
@@ -439,7 +443,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       throw new Error(
         "Write operations require a personal Bullhorn account. " +
           "Configure your AI connector with your personal API key (not the shared read-only token) " +
-          "and complete enrollment at /api/auth/user/enroll?id=<your-user-id>. " +
+          "and ask your administrator for a fresh enrollment / reconnect link. " +
           "Contact your administrator to set up your account.",
       );
     }
@@ -466,6 +470,21 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
               text: formatResult({
                 error: "permission_denied",
                 message: err.message,
+              }),
+            },
+          ],
+        };
+      }
+      if (err instanceof BullhornReconnectRequiredError) {
+        track(toolName, true);
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatResult({
+                error: "bullhorn_reconnect_required",
+                message: err.message,
+                connectUrl: err.connectUrl,
               }),
             },
           ],
@@ -1369,11 +1388,13 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   // enforces their individual permission gates. The shared read-only service
   // token is rejected with a clear plain-English message. To use write tools:
   //   1. Admin creates a user: POST /api/users
-  //   2. User enrolls their Bullhorn account: GET /api/auth/user/enroll?id=<id>
+  //   2. User enrolls their Bullhorn account via a one-time /api/auth/user/enroll?token=… link
   //   3. Configure the AI connector with the user's personal apiKey
   //
   // Permission errors from Bullhorn (403) are returned as structured JSON with
   // error:"permission_denied" so the AI can explain them in plain English.
+  // Refresh/enroll failures return error:"bullhorn_reconnect_required" with a
+  // working connectUrl (absolute /enroll?token=… link).
 
   writeTool(
     "add_note",
