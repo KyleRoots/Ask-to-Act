@@ -185,35 +185,45 @@ export async function previewEmailsToRecords(args: {
   }> = [];
 
   for (const recipient of recipients) {
-    const preview = await previewEmailToRecord({
-      userId: args.userId,
-      entityType: recipient.entityType,
-      recordId: recipient.recordId,
-      subject: args.subject,
-      body: args.body,
-      jobOrderId: args.jobOrderId,
-    });
-    if (!preview.ok) {
+    try {
+      const preview = await previewEmailToRecord({
+        userId: args.userId,
+        entityType: recipient.entityType,
+        recordId: recipient.recordId,
+        subject: args.subject,
+        body: args.body,
+        jobOrderId: args.jobOrderId,
+      });
+      if (!preview.ok) {
+        skipped.push({
+          entityType: recipient.entityType,
+          recordId: recipient.recordId,
+          name: preview.recipient?.name,
+          email: preview.recipient?.email ?? null,
+          status: preview.recipient?.status,
+          bullhornUrl: preview.recipient?.bullhornUrl ?? null,
+          error: preview.error ?? "skipped",
+          message: preview.message ?? "Recipient was skipped.",
+        });
+        continue;
+      }
+      ready.push({
+        entityType: preview.recipient.entityType,
+        recordId: preview.recipient.recordId,
+        name: preview.recipient.name,
+        email: preview.recipient.email!,
+        status: preview.recipient.status,
+        bullhornUrl: preview.recipient.bullhornUrl,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       skipped.push({
         entityType: recipient.entityType,
         recordId: recipient.recordId,
-        name: preview.recipient?.name,
-        email: preview.recipient?.email ?? null,
-        status: preview.recipient?.status,
-        bullhornUrl: preview.recipient?.bullhornUrl ?? null,
-        error: preview.error ?? "skipped",
-        message: preview.message ?? "Recipient was skipped.",
+        error: "resolve_failed",
+        message,
       });
-      continue;
     }
-    ready.push({
-      entityType: preview.recipient.entityType,
-      recordId: preview.recipient.recordId,
-      name: preview.recipient.name,
-      email: preview.recipient.email!,
-      status: preview.recipient.status,
-      bullhornUrl: preview.recipient.bullhornUrl,
-    });
   }
 
   const mailbox = await getUserMailboxStatus(args.userId);

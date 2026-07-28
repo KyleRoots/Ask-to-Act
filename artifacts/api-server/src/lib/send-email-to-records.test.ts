@@ -265,6 +265,47 @@ describe("send-email-to-records bulk orchestration", () => {
     );
   });
 
+  it("skips recipients that fail to resolve instead of aborting the batch", async () => {
+    previewEmailToRecord
+      .mockRejectedValueOnce(new Error("Bullhorn API error (404): Entity not found."))
+      .mockResolvedValueOnce({
+        ok: true,
+        recipient: {
+          entityType: "Candidate",
+          recordId: 3,
+          name: "Ready Person",
+          email: "ready@example.com",
+          status: "Active",
+          bullhornUrl: "https://bh/3",
+        },
+      });
+    getUserMailboxStatus.mockResolvedValue({
+      connected: true,
+      mailboxEmail: "recruiter@example.com",
+    });
+
+    const { previewEmailsToRecords } = await load();
+    const result = await previewEmailsToRecords({
+      userId: "user-1",
+      recipients: [
+        { entityType: "Candidate", recordId: 1 },
+        { entityType: "Candidate", recordId: 3 },
+      ],
+      subject: "Hello",
+      body: "Body text",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.readyCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    expect(result.skipped[0]).toMatchObject({
+      recordId: 1,
+      error: "resolve_failed",
+    });
+    expect(result.confirmToken).toBeTruthy();
+  });
+
   it("stops early on mailbox reconnect failure and does not continue", async () => {
     previewEmailToRecord
       .mockResolvedValueOnce({
@@ -293,21 +334,20 @@ describe("send-email-to-records bulk orchestration", () => {
       connected: true,
       mailboxEmail: "recruiter@example.com",
     });
-    sendEmailToRecord
-      .mockResolvedValueOnce({
-        ok: false,
-        error: "mailbox_reconnect_required",
-        message: "reconnect",
-        connectUrl: "https://connect.example/m365",
-        recipient: {
-          entityType: "Candidate",
-          recordId: 1,
-          name: "One",
-          email: "one@example.com",
-          status: "Active",
-          bullhornUrl: null,
-        },
-      });
+    sendEmailToRecord.mockResolvedValueOnce({
+      ok: false,
+      error: "mailbox_reconnect_required",
+      message: "reconnect",
+      connectUrl: "https://connect.example/m365",
+      recipient: {
+        entityType: "Candidate",
+        recordId: 1,
+        name: "One",
+        email: "one@example.com",
+        status: "Active",
+        bullhornUrl: null,
+      },
+    });
 
     const { previewEmailsToRecords, sendEmailsToRecords } = await load();
     const recipients = [
