@@ -297,10 +297,15 @@ export function extractJobRequirements(args: ExtractJobRequirementsArgs): JobReq
     });
   }
 
+  // Bullhorn often stores unset pay as 0 — treat non-positive as absent.
+  const positiveMoney = (v: unknown): number | null => {
+    const n = num(v);
+    return n !== null && n > 0 ? n : null;
+  };
   const compensation: JobCompensation = {
-    low: num(job.salary),
-    high: num(job.customFloat1),
-    payRate: num(job.payRate),
+    low: positiveMoney(job.salary),
+    high: positiveMoney(job.customFloat1),
+    payRate: positiveMoney(job.payRate),
     unit: str(job.salaryUnit) || null,
   };
   if (

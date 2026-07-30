@@ -80,6 +80,24 @@ describe("extractJobRequirements", () => {
     expect(req.skillDerivation).toBe("title_fallback");
     expect(req.mustHaveSkills).toContain("Python");
   });
+
+  it("treats Bullhorn zero pay placeholders as unset compensation", () => {
+    const req = extractJobRequirements({
+      job: {
+        title: "Software Developer",
+        salary: 0,
+        payRate: 0,
+        salaryUnit: "Yearly",
+      },
+    });
+    expect(req.compensation).toEqual({
+      low: null,
+      high: null,
+      payRate: null,
+      unit: "Yearly",
+    });
+    expect(req.parsedRequirements.some((p) => p.key === "compensation")).toBe(false);
+  });
 });
 
 describe("evaluateCandidate", () => {
