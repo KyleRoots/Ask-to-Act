@@ -818,7 +818,10 @@ export function sanitizeJobRecord(result: unknown): unknown {
 export async function getJob(args: { id: number; fields?: string }) {
   const fields =
     args.fields ??
-    "id,title,status,type,clientCorporation,owner,dateAdded,salary,employmentType,numOpenings,isOpen,dateEnd,address,publicDescription,skills,educationDegree,yearsRequired,startDate,correlatedCustomText1,customText2";
+    // Matching / qualification fields: onSite + isWorkFromHome drive work
+    // arrangement; salary/customFloat1/payRate/salaryUnit drive pay bands;
+    // willSponsor gates authorization when false; skillList supplements TO_MANY skills.
+    "id,title,status,type,clientCorporation,owner,dateAdded,salary,customFloat1,payRate,salaryUnit,employmentType,numOpenings,isOpen,dateEnd,address,location,publicDescription,skills,skillList,educationDegree,yearsRequired,startDate,onSite,isWorkFromHome,travelRequirements,willSponsor,willRelocate,correlatedCustomText1,customText2";
   const result = await getEntity("JobOrder", args.id, fields);
   return sanitizeJobRecord(result);
 }

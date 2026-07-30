@@ -1,19 +1,13 @@
 /**
  * Deterministic "match candidates for a job" capability.
  *
- * WHY this exists: matching used to be improvised by the AI across three separate
- * tools (get_job -> search_candidates -> list_submissions_for_job). The AI
- * cross-referenced submissions by NAME, which collides (multiple "Ivan Novikov"),
- * so it reported people as "already submitted" when their pipeline was empty. This
- * module does the trust-critical work server-side and deterministically:
- *   - reads the job and surfaces the requirements it matched against,
- *   - searches candidates against those requirements,
- *   - reliably EXCLUDES unwanted statuses (Placed / Do-Not-Contact / Inactive-
- *     Archived) and anyone ALREADY SUBMITTED TO THIS JOB (matched by candidate ID),
- *   - prioritizes local/onsite candidates while still surfacing strong remote ones,
- *   - returns verifiable Bullhorn deep links plus short résumé evidence quotes.
- *
- * Defaults are user-confirmed; every exclusion is overridable via an include* flag.
+ * Matching is server-side and evidence-aware:
+ *   - reads structured JobOrder requirements (onSite, years, sponsorship, pay),
+ *   - searches with concept expansion (nice-to-haves never AND into the query),
+ *   - excludes unwanted statuses and true submissions by candidate ID,
+ *   - evaluates location / experience / authorization / skills as pass|fail|unknown,
+ *   - ranks with shared recruiter signals (no unconditional local boost for remote roles),
+ *   - returns eligible vs needs-verification buckets with transparent criterion outcomes.
  */
 import {
   getJob,
@@ -21,16 +15,18 @@ import {
   listSubmissionsForJob,
   getCandidate,
 } from "./bullhorn-client.js";
-import { asArray, entityOf, mapLimit, str } from "./record-utils.js";
-import { toConcepts, type Concept } from "./search-taxonomy.js";
-import { isLocalMatch as isLocalMatchShared, structuredConceptHits as structuredConceptHitsShared } from "./search-ranking.js";
+import { asArray, entityOf, mapLimit, num, str } from "./record-utils.js";
+import { toConcepts } from "./search-taxonomy.js";
+import { rankCandidates } from "./search-ranking.js";
 import { verifyConcepts } from "./search-verify.js";
 import { deriveExperience } from "./candidate-experience.js";
 import { isTrueSubmission } from "./submission-status.js";
+import { extractJobRequirements } from "./match-requirements.js";
+import { evaluateCandidate } from "./match-criteria.js";
 
 export interface MatchCandidatesArgs {
   jobId: number;
-  /** Override the must-have skills; otherwise derived from the job's `skills` field. */
+  /** Override the must-have skills; otherwise derived from the job's skills/skillList. */
   mustHaveSkills?: string[];
   /** Extra nice-to-have terms that boost ranking but are not required. */
   niceToHaveSkills?: string[];
@@ -40,7 +36,6 @@ export interface MatchCandidatesArgs {
   poolSize?: number;
   /** Drop candidates whose location does not match the job's. Default false. */
   localOnly?: boolean;
-  // --- override the default exclusions ---
   includePlaced?: boolean;
   includeSubmitted?: boolean;
   includeDoNotContact?: boolean;
@@ -54,47 +49,45 @@ const MAX_POOL = 100;
 const RESUME_CONCURRENCY = 4;
 const EXPERIENCE_CONCURRENCY = 4;
 
-/** Status substrings that mark a candidate as not-to-surface, grouped by reason. */
 const STATUS_MARKERS = {
   placed: ["placed"],
   inactive: ["archive", "inactive", "do not place", "unavailable"],
   doNotContact: ["do not contact", "do-not-contact", "dnc", "opted out", "opt out", "opt-out"],
 } as const;
 
-interface CandidateRecord {
-  id: number;
-  firstName?: string;
-  lastName?: string;
-  name?: string;
-  status?: string;
-  occupation?: string;
-  skillSet?: string;
-  address?: { city?: string; state?: string; countryName?: string } | null;
-}
+const SEARCH_FIELDS = [
+  "id",
+  "firstName",
+  "lastName",
+  "name",
+  "status",
+  "occupation",
+  "skillSet",
+  "primarySkills(id,name)",
+  "secondarySkills(id,name)",
+  "address(city,state,countryName)",
+  "desiredLocations",
+  "willRelocate",
+  "workAuthorized",
+  "employmentPreference",
+  "employeeType",
+  "experience",
+  "salary",
+  "hourlyRate",
+  "dateAvailable",
+  "dateLastModified",
+  "dateAdded",
+].join(",");
 
-/**
- * Collect, for a job, the candidate IDs of everyone in its JobSubmission pile,
- * SPLIT by pipeline stage — paginating exhaustively. A job with more rows than a
- * single page would otherwise yield an incomplete set and re-introduce the
- * "shown as not submitted when they actually are" trust bug. Matched by
- * candidate ID only — never by name.
- *
- * Bullhorn stores inbound applicants (the "Response" bucket: New Lead / Online
- * Applicant) and recruiter-actioned submissions as the same JobSubmission
- * object, separated only by status. We must NOT treat a mere applicant as
- * "already submitted":
- *   - `submitted` = true submissions (Internally Submitted, Client Submission,
- *     and later stages) → excluded from matches by default.
- *   - `applied`   = inbound applicants (Response bucket) → still shown as
- *     matches, just flagged `alreadyApplied`.
- */
 async function fetchJobPipelineCandidateIds(
   jobId: number,
-): Promise<{ submitted: Set<number>; applied: Set<number> }> {
+): Promise<{ submitted: Set<number>; applied: Set<number>; pagesFetched: number; truncated: boolean }> {
   const submitted = new Set<number>();
   const applied = new Set<number>();
   const PAGE = 200;
-  const MAX_PAGES = 50; // safety ceiling: 10k submissions
+  const MAX_PAGES = 50;
+  let pagesFetched = 0;
+  let truncated = false;
   for (let page = 0; page < MAX_PAGES; page++) {
     const res = await listSubmissionsForJob({
       jobId,
@@ -102,6 +95,7 @@ async function fetchJobPipelineCandidateIds(
       start: page * PAGE,
       fields: "id,candidate(id),status,dateAdded",
     });
+    pagesFetched++;
     const rows = asArray(res);
     for (const s of rows) {
       const cid = (s as { candidate?: { id?: number } }).candidate?.id;
@@ -111,32 +105,22 @@ async function fetchJobPipelineCandidateIds(
       else applied.add(cid);
     }
     if (rows.length < PAGE) break;
+    if (page === MAX_PAGES - 1) truncated = true;
   }
-  return { submitted, applied };
+  return { submitted, applied, pagesFetched, truncated };
 }
 
-function fullName(c: CandidateRecord): string {
-  return (c.name ?? `${c.firstName ?? ""} ${c.lastName ?? ""}`).trim() || `Candidate ${c.id}`;
+function fullName(c: Record<string, unknown>): string {
+  const name = str(c.name).trim();
+  if (name) return name;
+  return `${str(c.firstName)} ${str(c.lastName)}`.trim() || `Candidate ${num(c.id) ?? "?"}`;
 }
 
-/** Split a comma/semicolon/newline-delimited skills string into clean terms. */
-function splitSkills(raw: string): string[] {
-  return raw
-    .split(/[,;\n|]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 1 && s.length <= 40);
+function locationOf(c: Record<string, unknown>): string {
+  const addr = entityOf(c.address);
+  return [str(addr.city), str(addr.state)].filter(Boolean).join(", ") || "Unknown";
 }
 
-/** Detect the job's location requirement from its description. */
-function detectLocationRequirement(description: string): "onsite" | "hybrid" | "remote" | "unspecified" {
-  const d = description.toLowerCase();
-  if (/\bhybrid\b/.test(d)) return "hybrid";
-  if (/\b(on-?site|in[- ]office|in[- ]person)\b/.test(d)) return "onsite";
-  if (/\b(remote|work from home|wfh|fully remote)\b/.test(d)) return "remote";
-  return "unspecified";
-}
-
-/** Which exclusion markers are active given the include* overrides. */
 function activeExclusionMarkers(args: MatchCandidatesArgs): string[] {
   const markers: string[] = [];
   if (!args.includePlaced) markers.push(...STATUS_MARKERS.placed);
@@ -151,17 +135,25 @@ function statusExcludedBy(status: string, markers: string[]): string | null {
   return null;
 }
 
-/** Local-match against the job's city/state, via the shared ranking helper. */
-function isLocalMatch(cand: CandidateRecord, jobCity: string, jobState: string): boolean {
-  return isLocalMatchShared(cand as unknown as Record<string, unknown>, jobCity, jobState);
+function phrase(v: string): string {
+  return `"${v.replace(/"/g, '\\"')}"`;
 }
 
-/**
- * Which required CONCEPTS (canonical + synonyms) appear in the candidate's structured
- * skill fields, reported by canonical label, via the shared concept-aware helper.
- */
-function structuredConceptHits(cand: CandidateRecord, concepts: Concept[]): string[] {
-  return structuredConceptHitsShared(cand as unknown as Record<string, unknown>, concepts);
+function mergePools(
+  primary: Array<Record<string, unknown>>,
+  secondary: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  const seen = new Set<number>();
+  const out: Array<Record<string, unknown>> = [];
+  for (const pool of [primary, secondary]) {
+    for (const c of pool) {
+      const id = num(c.id);
+      if (id === null || seen.has(id)) continue;
+      seen.add(id);
+      out.push(c);
+    }
+  }
+  return out;
 }
 
 export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<unknown> {
@@ -171,74 +163,113 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   const limit = Math.min(Math.max(1, args.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   const poolSize = Math.min(Math.max(limit * 4, args.poolSize ?? DEFAULT_POOL), MAX_POOL);
 
-  // 1. Read the job and derive the requirements we will match against.
+  // 1. Read the job and extract structured requirements.
   const job = entityOf(await getJob({ id: args.jobId }));
   if (!job.id) {
     throw new Error(`Job ${args.jobId} not found (or not readable).`);
   }
-  const jobTitle = str(job.title);
-  const jobAddress = (job.address ?? {}) as { city?: string; state?: string };
-  const jobCity = str(jobAddress.city);
-  const jobState = str(jobAddress.state);
-  const description = str(job.publicDescription);
-  const locationRequirement = detectLocationRequirement(description);
+  const requirements = extractJobRequirements({
+    job,
+    mustHaveSkills: args.mustHaveSkills,
+    niceToHaveSkills: args.niceToHaveSkills,
+  });
 
-  const derivedSkills = splitSkills(str(job.skills));
-  const mustHave =
-    args.mustHaveSkills && args.mustHaveSkills.length > 0
-      ? args.mustHaveSkills
-      : derivedSkills.length > 0
-        ? derivedSkills
-        : // Fall back to the title so we never run an empty search.
-          jobTitle.split(/\s+/).filter((w) => w.length > 2);
-  const niceToHave = args.niceToHaveSkills ?? [];
-
-  if (mustHave.length === 0) {
-    throw new Error(
-      `Job ${args.jobId} has no skills/title to match on. Pass mustHaveSkills explicitly.`,
-    );
+  if (requirements.mustHaveSkills.length === 0) {
+    return {
+      status: "needs_clarification",
+      job: {
+        id: job.id,
+        title: requirements.title,
+        location: requirements.locationLabel,
+        locationRequirement: requirements.workArrangement,
+        bullhornUrl: (job as { bullhornUrl?: string }).bullhornUrl ?? null,
+      },
+      parsedRequirements: requirements.parsedRequirements,
+      message:
+        "This job has no usable skills/title to match on. Pass mustHaveSkills (e.g. key technologies) and retry.",
+      eligibleMatches: [],
+      needsVerification: [],
+      matches: [],
+    };
   }
 
-  // 2. Search candidates: each must-have is its own AND group (so all are required),
-  //    EXPANDED into curated synonyms/orthographic variants for recall (e.g. "react"
-  //    also matches "reactjs"/"react.js"). Nice-to-haves widen recall as a single OR
-  //    group. We restrict the search to the workable (non-archived) pool ONLY when
-  //    archived candidates are excluded — when the caller opts in via includeInactive,
-  //    we must NOT hard-filter them out here or the override could never surface them.
-  const mustConcepts = toConcepts(mustHave);
+  if (requirements.skillDerivation === "title_fallback") {
+    // Soft clarification signal — still run, but mark partial confidence.
+  }
+
+  const mustConcepts = toConcepts(requirements.mustHaveSkills);
+  // Nice-to-haves must NEVER become AND search groups (that would make them required).
   const keywords: Array<string | string[]> = mustConcepts.map((c) =>
     c.terms.length === 1 ? c.terms[0] : c.terms,
   );
-  if (niceToHave.length > 0) keywords.push(niceToHave);
 
-  const [searchRes, pipeline] = await Promise.all([
+  const baseQueryParts: string[] = [];
+  if (!args.includeInactive) baseQueryParts.push("NOT status:Archive");
+  const baseQuery = baseQueryParts.length ? baseQueryParts.join(" AND ") : undefined;
+
+  const preferLocal =
+    requirements.workArrangement !== "remote" &&
+    requirements.workArrangement !== "no_preference";
+
+  // Location-aware second pass for onsite/hybrid so locals aren't missed solely
+  // because they fell outside the first keyword-ranked page.
+  const locationQueryParts = [...baseQueryParts];
+  if (
+    preferLocal &&
+    (requirements.jobCity || requirements.jobState)
+  ) {
+    const locClauses: string[] = [];
+    if (requirements.jobCity) locClauses.push(`address.city:${phrase(requirements.jobCity)}`);
+    if (requirements.jobState) locClauses.push(`address.state:${phrase(requirements.jobState)}`);
+    locClauses.push("willRelocate:1");
+    locationQueryParts.push(`(${locClauses.join(" OR ")})`);
+  }
+  const locationQuery =
+    locationQueryParts.length > baseQueryParts.length
+      ? locationQueryParts.join(" AND ")
+      : null;
+
+  const [keywordSearch, locationSearch, pipeline] = await Promise.all([
     searchCandidates({
-      query: args.includeInactive ? undefined : "NOT status:Archive",
+      query: baseQuery,
       keywords,
       count: poolSize,
-      fields: "id,firstName,lastName,name,status,occupation,skillSet,address",
+      fields: SEARCH_FIELDS,
     }),
-    // 3. Build the candidate-ID sets for THIS JOB's pipeline — by candidate ID,
-    //    never by name (the trust fix). Paginate exhaustively: a job with >200
-    //    rows would otherwise yield an incomplete set and re-introduce the
-    //    "shown as not submitted when they are" bug at scale. Split into true
-    //    SUBMISSIONS (excluded by default) vs inbound APPLICANTS / Response
-    //    bucket (shown, just flagged).
+    locationQuery
+      ? searchCandidates({
+          query: locationQuery,
+          keywords,
+          count: Math.min(poolSize, 40),
+          fields: SEARCH_FIELDS,
+        })
+      : Promise.resolve({ data: [] }),
     fetchJobPipelineCandidateIds(args.jobId),
   ]);
+
+  const pool = mergePools(
+    asArray(keywordSearch) as Array<Record<string, unknown>>,
+    asArray(locationSearch) as Array<Record<string, unknown>>,
+  );
   const submittedIds = pipeline.submitted;
   const appliedIds = pipeline.applied;
 
-  const pool = asArray(searchRes) as CandidateRecord[];
-
-  // 4. Filter the pool deterministically.
+  // 2. Status / submission / localOnly hard filters (pre-evaluation).
   const markers = activeExclusionMarkers(args);
-  const excludedSummary = { placed: 0, inactive: 0, doNotContact: 0, alreadySubmitted: 0, outOfArea: 0 };
+  const excludedSummary = {
+    placed: 0,
+    inactive: 0,
+    doNotContact: 0,
+    alreadySubmitted: 0,
+    outOfArea: 0,
+    hardConstraintFail: 0,
+  };
   let alreadyAppliedShown = 0;
-  const kept: CandidateRecord[] = [];
+  const kept: Array<Record<string, unknown>> = [];
 
   for (const c of pool) {
-    if (!c || typeof c.id !== "number") continue;
+    const id = num(c.id);
+    if (id === null) continue;
     const status = str(c.status);
     const hit = statusExcludedBy(status, markers);
     if (hit) {
@@ -247,70 +278,136 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       else excludedSummary.inactive++;
       continue;
     }
-    if (!args.includeSubmitted && submittedIds.has(c.id)) {
+    if (!args.includeSubmitted && submittedIds.has(id)) {
       excludedSummary.alreadySubmitted++;
       continue;
     }
-    if (args.localOnly && !isLocalMatch(c, jobCity, jobState)) {
-      excludedSummary.outOfArea++;
-      continue;
-    }
-    // Inbound applicants (Response bucket) are NOT excluded — they are shown,
-    // just flagged `alreadyApplied` so the recruiter knows they're in the pile.
-    if (appliedIds.has(c.id)) alreadyAppliedShown++;
+    if (appliedIds.has(id)) alreadyAppliedShown++;
     kept.push(c);
   }
 
-  // 5. Score: local priority, then structured-skill overlap (concept-aware so a synonym
-  //    counts the same as an exact term), preserving Bullhorn's relevance order as the
-  //    final tiebreak.
-  const allConcepts = toConcepts([...mustHave, ...niceToHave]);
-  const scored = kept.map((c, idx) => {
-    const hits = structuredConceptHits(c, allConcepts);
-    const local = isLocalMatch(c, jobCity, jobState);
-    return { cand: c, hits, local, relevanceRank: idx };
-  });
-  scored.sort((a, b) => {
-    if (a.local !== b.local) return a.local ? -1 : 1;
-    if (a.hits.length !== b.hits.length) return b.hits.length - a.hits.length;
-    return a.relevanceRank - b.relevanceRank;
-  });
-
-  const shortlist = scored.slice(0, limit);
-
-  // 6. Résumé PRECISION + EXPERIENCE for the shortlist ONLY (small payload), via the
-  //    shared helpers so ad hoc search and matching fact-check identically. Verify the
-  //    must-have terms against the actual résumé; derive years/seniority/recency from
-  //    work-history dates (Bullhorn's structured experience field is usually empty).
-  const shortlistIds = shortlist.map((s) => s.cand.id);
   const now = Date.now();
+  const firstPass = rankCandidates(kept, {
+    mustTerms: requirements.mustHaveSkills,
+    mustConcepts,
+    niceTerms: requirements.niceToHaveSkills,
+    jobCity: requirements.jobCity,
+    jobState: requirements.jobState,
+    preferLocal,
+    now,
+  });
+
+  // Verify + experience for a slice larger than limit so we can fill both buckets.
+  const verifyCount = Math.min(firstPass.length, Math.max(limit * 3, limit));
+  const verifyPool = firstPass.slice(0, verifyCount);
+  const verifyIds = verifyPool.map((r) => r.id).filter((id) => id >= 0);
+
   const [verified, experiences] = await Promise.all([
-    verifyConcepts(shortlistIds, mustConcepts, { concurrency: RESUME_CONCURRENCY }),
-    mapLimit(shortlist, EXPERIENCE_CONCURRENCY, async (s) => {
+    verifyConcepts(verifyIds, mustConcepts, { concurrency: RESUME_CONCURRENCY }),
+    mapLimit(verifyPool, EXPERIENCE_CONCURRENCY, async (r) => {
       try {
-        return deriveExperience(entityOf(await getCandidate({ id: s.cand.id })), now);
+        return deriveExperience(entityOf(await getCandidate({ id: r.id })), now);
       } catch {
         return null;
       }
     }),
   ]);
 
-  const matches = shortlist.map((s, i) => {
-    const c = s.cand;
-    const v = verified.get(c.id);
-    const exp = experiences[i];
-    return {
-      rank: i + 1,
-      candidateId: c.id,
+  const verifiedTermsById = new Map<number, string[]>();
+  for (const [id, v] of verified) verifiedTermsById.set(id, v.matchedConcepts);
+  const experienceById = new Map<number, (typeof experiences)[number]>();
+  for (let i = 0; i < verifyPool.length; i++) {
+    experienceById.set(verifyPool[i].id, experiences[i] ?? null);
+  }
+
+  const reRanked = rankCandidates(
+    verifyPool.map((r) => r.candidate),
+    {
+      mustTerms: requirements.mustHaveSkills,
+      mustConcepts,
+      niceTerms: requirements.niceToHaveSkills,
+      jobCity: requirements.jobCity,
+      jobState: requirements.jobState,
+      preferLocal,
+      now,
+      verifiedTermsById,
+    },
+  );
+
+  type BuiltMatch = {
+    rank?: number;
+    candidateId: number;
+    name: string;
+    status: string;
+    location: string;
+    isLocal: boolean;
+    locationFit: string;
+    alreadySubmitted: boolean;
+    alreadyApplied: boolean;
+    matchedSkills: string[];
+    resumeConfirmed: string[];
+    resumeMissing: string[];
+    resumeEvidence: Array<{ term: string; text: string }>;
+    experience: {
+      yearsExperience: number | null;
+      seniority: string;
+      currentRole: { title: string; company: string } | null;
+      lastActivityMonthsAgo: number | null;
+    } | null;
+    matchScore: number;
+    reasons: string[];
+    criteria: ReturnType<typeof evaluateCandidate>["criteria"];
+    eligible: boolean;
+    needsVerification: boolean;
+    bullhornUrl: string | null;
+  };
+
+  const eligibleMatches: BuiltMatch[] = [];
+  const needsVerificationMatches: BuiltMatch[] = [];
+  const allBuilt: BuiltMatch[] = [];
+
+  for (let i = 0; i < reRanked.length; i++) {
+    const ranked = reRanked[i];
+    const c = ranked.candidate;
+    const id = ranked.id;
+    const v = verified.get(id);
+    const exp = experienceById.get(id) ?? null;
+    const resumeConfirmed = v?.matchedConcepts ?? [];
+    const resumeMissing = v?.missingConcepts ?? requirements.mustHaveSkills;
+
+    const evaluation = evaluateCandidate({
+      candidate: c,
+      requirements,
+      mustConcepts,
+      resumeConfirmed,
+      resumeMissing,
+      experience: exp,
+      localOnly: !!args.localOnly,
+    });
+
+    if (!evaluation.eligible) {
+      excludedSummary.hardConstraintFail++;
+      continue;
+    }
+
+    // localOnly already applied inside evaluateCandidate as a hard fail.
+    if (args.localOnly && evaluation.locationFit === "out_of_area") {
+      excludedSummary.outOfArea++;
+      continue;
+    }
+
+    const built: BuiltMatch = {
+      candidateId: id,
       name: fullName(c),
       status: str(c.status) || "Unknown",
-      location: [str(c.address?.city), str(c.address?.state)].filter(Boolean).join(", ") || "Unknown",
-      isLocal: s.local,
-      alreadySubmitted: submittedIds.has(c.id),
-      alreadyApplied: appliedIds.has(c.id),
-      matchedSkills: s.hits,
-      resumeConfirmed: v?.matchedConcepts ?? [],
-      resumeMissing: v?.missingConcepts ?? mustHave,
+      location: locationOf(c),
+      isLocal: ranked.signals.isLocal,
+      locationFit: evaluation.locationFit,
+      alreadySubmitted: submittedIds.has(id),
+      alreadyApplied: appliedIds.has(id),
+      matchedSkills: ranked.signals.structuredSkillHits,
+      resumeConfirmed,
+      resumeMissing,
       resumeEvidence: v?.excerpts ?? [],
       experience: exp
         ? {
@@ -320,22 +417,67 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
             lastActivityMonthsAgo: exp.lastActivityMonthsAgo,
           }
         : null,
-      bullhornUrl: (c as { bullhornUrl?: string }).bullhornUrl ?? null,
+      matchScore: ranked.score,
+      reasons: ranked.reasons,
+      criteria: evaluation.criteria,
+      eligible: evaluation.eligible,
+      needsVerification: evaluation.needsVerification,
+      bullhornUrl: typeof c.bullhornUrl === "string" ? c.bullhornUrl : null,
     };
-  });
+    allBuilt.push(built);
+    if (evaluation.needsVerification) needsVerificationMatches.push(built);
+    else eligibleMatches.push(built);
+  }
+
+  const takeEligible = eligibleMatches.slice(0, limit);
+  const remainingSlots = Math.max(0, limit - takeEligible.length);
+  const takeNeeds = needsVerificationMatches.slice(0, remainingSlots);
+  const matches = [...takeEligible, ...takeNeeds].map((m, i) => ({ ...m, rank: i + 1 }));
+
+  const poolCapped = pool.length >= poolSize || (locationQuery != null && asArray(locationSearch).length >= 40);
+  const verificationIncomplete = verifyCount < kept.length;
+  let status: "complete" | "partial" | "needs_clarification" | "no_eligible_matches" = "complete";
+  if (matches.length === 0) status = "no_eligible_matches";
+  else if (poolCapped || verificationIncomplete || pipeline.truncated || requirements.skillDerivation === "title_fallback") {
+    status = "partial";
+  }
+
+  const stopReasons: string[] = [];
+  if (poolCapped) stopReasons.push(`search_pool_capped_at_${poolSize}`);
+  if (verificationIncomplete) stopReasons.push("résumé_verification_limited_to_shortlist");
+  if (pipeline.truncated) stopReasons.push("submission_pagination_safety_ceiling");
+  if (requirements.skillDerivation === "title_fallback") {
+    stopReasons.push("skills_derived_from_title_tokens");
+  }
+
+  const presentationGuidance = [
+    status === "partial"
+      ? `Say "highest-ranked among ${kept.length} evaluated" — do NOT say best overall, fully qualified, or no better matches exist.`
+      : status === "no_eligible_matches"
+        ? "No eligible matches after hard constraints. Do not invent candidates; offer to relax constraints or clarify must-have skills."
+        : "Eligible matches passed hard constraints with verified evidence where required.",
+    "Never claim a skill without resumeEvidence. Treat clearance as UNVERIFIED until résumé-confirmed.",
+    "Link each candidate NAME to bullhornUrl. Leave emails/phones as plain text.",
+  ];
 
   return {
+    status,
     job: {
       id: job.id,
-      title: jobTitle || "(untitled)",
-      location: [jobCity, jobState].filter(Boolean).join(", ") || "Unspecified",
-      locationRequirement,
-      employmentType: str(job.employmentType) || null,
-      yearsRequired: typeof job.yearsRequired === "number" ? job.yearsRequired : null,
-      skillsMatchedAgainst: mustHave,
-      niceToHaves: niceToHave,
+      title: requirements.title,
+      location: requirements.locationLabel,
+      locationRequirement: requirements.workArrangement,
+      locationRequirementSource: requirements.workArrangementSource,
+      employmentType: requirements.employmentType,
+      yearsRequired: requirements.yearsRequired,
+      willSponsor: requirements.willSponsor,
+      compensation: requirements.compensation,
+      skillsMatchedAgainst: requirements.mustHaveSkills,
+      niceToHaves: requirements.niceToHaveSkills,
+      skillDerivation: requirements.skillDerivation,
       bullhornUrl: (job as { bullhornUrl?: string }).bullhornUrl ?? null,
     },
+    parsedRequirements: requirements.parsedRequirements,
     defaultsApplied: {
       excludedByDefault: [
         !args.includePlaced ? "Placed" : null,
@@ -343,21 +485,40 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
         !args.includeDoNotContact ? "Do Not Contact / Opted Out" : null,
         !args.includeInactive ? "Inactive / Archived" : null,
       ].filter(Boolean),
-      localPriority: !args.localOnly,
+      localPriority: preferLocal && !args.localOnly,
       localOnly: !!args.localOnly,
+      preferLocal,
     },
     totals: {
       candidatesScanned: pool.length,
+      candidatesEvaluated: verifyPool.length,
+      verificationAttempts: verifyIds.length,
       excluded: excludedSummary,
       alreadyAppliedShown,
+      eligibleCount: eligibleMatches.length,
+      needsVerificationCount: needsVerificationMatches.length,
       matchesReturned: matches.length,
+      poolSizeRequested: poolSize,
+      submissionPagesFetched: pipeline.pagesFetched,
     },
+    completeness: {
+      poolCapped,
+      verificationIncomplete,
+      submissionSetTruncated: pipeline.truncated,
+      stopReasons,
+    },
+    eligibleMatches: takeEligible.map((m, i) => ({ ...m, rank: i + 1 })),
+    needsVerification: takeNeeds.map((m, i) => ({ ...m, rank: takeEligible.length + i + 1 })),
+    // Backward-compatible flat list (eligible first, then needs-verification).
     matches,
+    presentationGuidance,
     notes: [
       "Submission status is matched by candidate ID (not name), so it is verifiable — open each bullhornUrl to confirm.",
-      "`alreadySubmitted` means a TRUE submission (Internally Submitted, Client Submission, or later) — these are excluded by default. `alreadyApplied` means the person is only in the job's inbound applicant / Response bucket (New Lead / Online Applicant); they are NOT a submission and are still shown as matches. Never describe an applicant as 'submitted'.",
-      "Security clearance is NOT a structured field in Bullhorn; it lives in résumé text. Treat any clearance as UNVERIFIED until confirmed via get_candidate_resume (VERIFY mode) and remember clearances can lapse.",
-      "matchedSkills come from structured fields; resumeEvidence quotes are the citable proof. Do not claim a skill without evidence.",
+      "`alreadySubmitted` means a TRUE submission (Internally Submitted, Client Submission, or later) — these are excluded by default. `alreadyApplied` means the person is only in the job's inbound applicant / Response bucket; they are NOT a submission and are still shown as matches.",
+      "Hard constraints use pass|fail|unknown. Unknowns go in needsVerification — never present them as fully qualified.",
+      "Work authorization is never inferred from nationality, address, or visa-type labels — only workAuthorized / job willSponsor.",
+      "matchedSkills come from structured fields; resumeEvidence quotes are the citable proof.",
+      ...presentationGuidance,
     ],
   };
 }

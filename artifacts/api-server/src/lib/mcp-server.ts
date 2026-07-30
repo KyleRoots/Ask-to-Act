@@ -220,6 +220,12 @@ function sanitizeParams(params: Record<string, unknown>): Record<string, unknown
 const SERVER_INSTRUCTIONS = [
   "AskToAct connects you to this firm's Bullhorn ATS via ONE universal connector (read and write tools).",
   "",
+  "SOURCING — for 'find candidates for job X' / vague job-ID matching requests:",
+  "- Call match_candidates_for_job with the job id directly (do not improvise get_job + search_candidates).",
+  "- Honor status/completeness: if status is partial, say 'highest-ranked among N evaluated' — never 'best overall' or 'fully qualified'.",
+  "- eligibleMatches passed hard constraints; needsVerification still has unknowns — do not present unknowns as qualified.",
+  "- Ask at most one focused clarifying question only when an unresolved job requirement (skills/location/auth) materially changes eligibility.",
+  "",
   "PRESENTING RECORDS — make every Bullhorn record open in one click:",
   "- Each linkable record in a tool result has a `bullhornUrl`: a deep link that opens THAT record in Bullhorn.",
   "- ALWAYS make the record itself clickable: render the record's NAME (candidate/contact/company name or job title) — or its Bullhorn ID — as a Markdown link to its `bullhornUrl`.",
@@ -715,19 +721,23 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "match_candidates_for_job",
-    "PREFERRED for sourcing candidates for a job: server reads job, searches, ranks, returns résumé evidence + bullhornUrl. Excludes placed/DNC/inactive and true submissions by default; inbound applicants flagged alreadyApplied (not submitted). Use get_candidate_resume to verify clearance.",
+    "PREFERRED for sourcing candidates for a job ID (including vague 'find profiles for job X' asks). " +
+      "Server reads structured JobOrder fields (onSite/isWorkFromHome, yearsRequired, willSponsor, pay, skills) plus description fallbacks; " +
+      "searches with synonym expansion; excludes placed/DNC/inactive and true submissions by candidate ID; " +
+      "evaluates location/experience/authorization/skills as pass|fail|unknown; returns eligibleMatches vs needsVerification with criterion evidence. " +
+      "If status=partial, say highest-ranked among N evaluated — never best/fully-qualified. Cite resumeEvidence for skills. Link NAME to bullhornUrl.",
     {
       jobId: z.number().int().positive().describe("Bullhorn job order ID to match candidates against."),
       mustHaveSkills: z
         .array(z.string())
         .optional()
         .describe(
-          "Override the required skills/criteria (each is AND-ed; all must be present). If omitted, the server derives them from the job's `skills` field (falling back to the title). Pass this to refine or correct what the role really needs.",
+          "Override the required skills/criteria (each is AND-ed; all must be present). If omitted, the server derives them from the job's skills/skillList (falling back to the title). Pass this to refine noisy title-token fallbacks.",
         ),
       niceToHaveSkills: z
         .array(z.string())
         .optional()
-        .describe("Optional bonus criteria (OR-ed) that boost ranking but are not required."),
+        .describe("Optional bonus criteria that boost ranking only — never required in search."),
       limit: z
         .number()
         .int()
@@ -738,7 +748,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .boolean()
         .optional()
         .describe(
-          "Default false. When false, local/on-site candidates are ranked first but strong remote candidates are still shown. Set true to EXCLUDE out-of-area candidates entirely.",
+          "Default false. For onsite/hybrid roles, local candidates are prioritized but unverified out-of-area may appear under needsVerification. Set true to hard-EXCLUDE out-of-area. Remote roles do not get local-address priority.",
         ),
       includePlaced: z
         .boolean()

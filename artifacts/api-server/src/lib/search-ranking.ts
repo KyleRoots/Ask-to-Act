@@ -25,6 +25,11 @@ export interface RankContext {
   niceTerms?: string[];
   jobCity?: string;
   jobState?: string;
+  /**
+   * When false (e.g. explicit remote roles), local-to-address does not boost score.
+   * Default true for onsite/hybrid/unspecified.
+   */
+  preferLocal?: boolean;
   now?: number;
   /** Optional résumé-confirmed concept labels per candidate id (from the verify step). */
   verifiedTermsById?: Map<number, string[]>;
@@ -180,7 +185,8 @@ export function scoreCandidate(
     score += niceHits.length * W.niceSkill;
     reasons.push(`bonus: ${niceHits.join(", ")}`);
   }
-  if (local) {
+  const preferLocal = ctx.preferLocal !== false;
+  if (local && preferLocal) {
     score += W.local;
     reasons.push("local to the role");
   }

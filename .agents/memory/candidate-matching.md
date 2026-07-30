@@ -28,11 +28,23 @@ pipeline state is unusable, so this is the single most important correctness pro
   just the post-fetch JS filter.
 - **Status filtering uses substring/marker matching, not exact spelling.** Bullhorn status
   spellings vary per tenant; match markers like "placed"/"archive"/"do not contact".
-- **Location:** prioritize local/onsite in ranking but still surface strong remote; honor the
-  job description's stated location requirement. `localOnly` hard-excludes out-of-area.
+- **Structured requirements first:** read JobOrder `onSite` / `isWorkFromHome` (work
+  arrangement), `yearsRequired`, `willSponsor`, pay fields, and skills/skillList before
+  falling back to description-text heuristics. Record each requirement's source.
+- **Location / work arrangement is applied, not just reported:**
+  - Remote / no-preference roles do **not** get unconditional local-address ranking.
+  - Onsite / hybrid: local, desiredLocations, and willRelocate are evidence; clear
+    out-of-area + willRelocate=false can hard-fail; ambiguous cases are `unknown`
+    (needsVerification), not silently “qualified”.
+  - `localOnly` hard-excludes out-of-area.
+- **Nice-to-have skills never AND into the Bullhorn search** — they only boost ranking.
+- **Hard criteria use pass|fail|unknown.** Missing data → needsVerification, never a
+  fabricated “qualified” claim. Never infer work authorization from nationality,
+  address, or visa-type labels — only `workAuthorized` / job `willSponsor`.
+- **Completeness language:** if `status=partial`, GPT must say “highest-ranked among N
+  evaluated”, never “best overall” / “fully qualified” / “no better matches”.
 - **Lean payload + evidence:** small shortlist, short résumé VERIFY-mode excerpts, and a
-  server-injected `bullhornUrl` per candidate. Clearance/skills are NOT structured (they live
-  in résumé text) — treat any clearance as UNVERIFIED and back every claim with an evidence quote.
-- **Skill derivation fallback:** if the job's `skills` field is empty, requirements fall back
-  to title tokens (noisier). The tool guidance tells the model to pass explicit must-have
-  skills to refine — prefer that over trusting auto-derived title tokens for important roles.
+  server-injected `bullhornUrl` per candidate. Clearance lives in résumé text — treat as
+  UNVERIFIED until confirmed and back every skill claim with an evidence quote.
+- **Skill derivation fallback:** if skills/skillList are empty, requirements fall back
+  to title tokens (noisier → `status=partial`). Prefer explicit `mustHaveSkills`.
