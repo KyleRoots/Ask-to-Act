@@ -174,6 +174,68 @@ export function extractJobSkills(job: Record<string, unknown>): {
   return { skills: [], source: "none" };
 }
 
+/**
+ * Words that appear in job titles but are never a skill to look for in a résumé.
+ * Matching a candidate on "PERM" or "Senior" is noise; matching on "SAP" is signal.
+ */
+const NON_SKILL_TITLE_WORDS = new Set([
+  // Employment type / contract vehicle
+  "perm", "permanent", "contract", "contractor", "contracts", "temp", "temporary",
+  "c2c", "w2", "1099", "fte", "direct", "hire", "hiring", "full", "part", "time",
+  // Work arrangement
+  "remote", "onsite", "on-site", "hybrid", "wfh", "telecommute", "telework",
+  // Seniority / level
+  "senior", "junior", "principal", "staff", "entry", "level", "mid",
+  "intermediate", "associate", "lead", "head", "chief",
+  // Requisition filler
+  "position", "positions", "opening", "openings", "role", "job", "req",
+  "requisition", "needed", "urgent", "opportunity", "new", "and", "the", "for",
+  "with", "our", "team", "bilingual",
+]);
+
+/** Job codes such as JPABB-001 or REQ12345 — never résumé evidence. */
+function looksLikeJobCode(token: string): boolean {
+  if (/^\d+$/.test(token)) return true;
+  return /^[a-z]{1,8}[-_]?\d{2,}$/i.test(token);
+}
+
+/**
+ * Last-resort skill guess when a job record has no skills filled in.
+ *
+ * Parenthesised fragments ("(JPABB-001)", "(Ottawa)") are dropped wholesale, then
+ * employment/seniority filler, job codes, and the job's own place names are removed —
+ * otherwise the matcher "confirms" candidates against terms like "(Ottawa)" and
+ * reports meaningless evidence.
+ */
+export function titleFallbackSkills(
+  title: string,
+  placeNames: string[] = [],
+  maxTerms = 6,
+): string[] {
+  const places = new Set(
+    placeNames.flatMap((p) => lc(p).split(/[\s,]+/)).filter(Boolean),
+  );
+  const withoutGroups = title.replace(/[([{][^)\]}]*[)\]}]?/g, " ");
+  const tokens = withoutGroups
+    .split(/[\s/|,&+]+/)
+    .map((t) => t.replace(/^[-–—.:;"']+|[-–—.:;"']+$/g, "").trim())
+    .filter(Boolean);
+
+  const kept: string[] = [];
+  for (const token of tokens) {
+    const key = lc(token);
+    if (key.length <= 2) continue;
+    if (NON_SKILL_TITLE_WORDS.has(key)) continue;
+    if (key.startsWith("non-")) continue;
+    if (places.has(key)) continue;
+    if (looksLikeJobCode(token)) continue;
+    if (kept.some((k) => lc(k) === key)) continue;
+    kept.push(token);
+    if (kept.length >= maxTerms) break;
+  }
+  return kept;
+}
+
 function boolOrNull(v: unknown): boolean | null {
   if (typeof v === "boolean") return v;
   if (v === 1 || v === "1" || v === "true") return true;
@@ -218,7 +280,11 @@ export function extractJobRequirements(args: ExtractJobRequirementsArgs): JobReq
       mustHave = extracted.skills;
       skillDerivation = extracted.source === "skillList" ? "skillList" : "skills";
     } else {
-      mustHave = title.split(/\s+/).filter((w) => w.length > 2);
+      mustHave = titleFallbackSkills(title, [
+        jobCity,
+        jobState,
+        str(recordOf(job.address).countryName),
+      ]);
       skillDerivation = "title_fallback";
     }
   }

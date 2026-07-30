@@ -81,6 +81,63 @@ describe("extractJobRequirements", () => {
     expect(req.mustHaveSkills).toContain("Python");
   });
 
+  it("drops parenthesised codes, employment type, and the job's own city from title fallback", () => {
+    // Real Myticas job 9968, which previously searched résumés for "(Ottawa)" and "PERM".
+    const req = extractJobRequirements({
+      job: {
+        title: "SAP Defence - PERM (Ottawa)",
+        skills: "",
+        address: { city: "Ottawa", state: "Ontario", countryName: "Canada" },
+      },
+    });
+    expect(req.skillDerivation).toBe("title_fallback");
+    expect(req.mustHaveSkills).toEqual(["SAP", "Defence"]);
+  });
+
+  it("drops job requisition codes and negative qualifiers", () => {
+    // Real Myticas job 14291.
+    const req = extractJobRequirements({
+      job: {
+        title: "Non-IT Project/Program Manager (JPABB-001)",
+        skills: "",
+        address: { city: "North Chicago", state: "Illinois" },
+      },
+    });
+    expect(req.mustHaveSkills).toEqual(["Project", "Program", "Manager"]);
+  });
+
+  it("drops seniority and position-count noise but keeps real technology tokens", () => {
+    const req = extractJobRequirements({
+      job: {
+        title: "Senior FPGA / RTL Design Engineer - EDGE Technologies (2 Positions)",
+        skills: "",
+        address: { state: "Ontario", countryName: "Canada" },
+      },
+    });
+    expect(req.mustHaveSkills).toContain("FPGA");
+    expect(req.mustHaveSkills).toContain("RTL");
+    expect(req.mustHaveSkills).not.toContain("Senior");
+    expect(req.mustHaveSkills).not.toContain("Positions");
+  });
+
+  it("does not let title fallback grow into an unbounded AND chain", () => {
+    const req = extractJobRequirements({
+      job: {
+        title: "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa",
+        skills: "",
+      },
+    });
+    expect(req.mustHaveSkills.length).toBeLessThanOrEqual(6);
+  });
+
+  it("still prefers structured skills over the title", () => {
+    const req = extractJobRequirements({
+      job: { title: "SAP Defence - PERM (Ottawa)", skillList: "SAP FICO, ABAP" },
+    });
+    expect(req.skillDerivation).toBe("skillList");
+    expect(req.mustHaveSkills).toEqual(["SAP FICO", "ABAP"]);
+  });
+
   it("treats Bullhorn zero pay placeholders as unset compensation", () => {
     const req = extractJobRequirements({
       job: {

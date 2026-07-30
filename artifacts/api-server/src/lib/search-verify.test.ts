@@ -101,7 +101,31 @@ describe("verifyConcepts (synonym-aware résumé confirmation)", () => {
       missingConcepts: [],
       matchedTerms: [],
       excerpts: [],
+      probeExcerpts: [],
     });
+  });
+
+  it("keeps probe hits out of skill evidence and out of matchedTerms", async () => {
+    mockState.byId = { 1: { matched: ["AWS", "years of experience"] } };
+    const r = await verifyConcepts([1], [aws], { probeTerms: ["years of experience"] });
+    const res = r.get(1)!;
+    expect(res.matchedConcepts).toEqual(["AWS"]);
+    // An experience phrase must never be citable as proof of a skill.
+    expect(res.matchedTerms).toEqual(["AWS"]);
+    expect(res.excerpts.map((e) => e.term)).toEqual(["AWS"]);
+    expect(res.probeExcerpts.map((e) => e.term)).toEqual(["years of experience"]);
+  });
+
+  it("cannot satisfy a concept using only a probe term", async () => {
+    mockState.byId = { 1: { matched: ["years of experience"] } };
+    const r = await verifyConcepts([1], [aws], { probeTerms: ["years of experience"] });
+    expect(r.get(1)!.missingConcepts).toEqual(["AWS"]);
+  });
+
+  it("still fetches résumés for probes when there are no skill concepts", async () => {
+    mockState.byId = { 1: { matched: ["years of experience"] } };
+    const r = await verifyConcepts([1], [], { probeTerms: ["years of experience"] });
+    expect(r.get(1)!.probeExcerpts).toHaveLength(1);
   });
 });
 

@@ -27,6 +27,12 @@ export interface ConceptVerifyResult {
   /** The raw synonym terms that actually matched (for transparency). */
   matchedTerms: string[];
   excerpts: Array<{ term: string; text: string }>;
+  /**
+   * Excerpts for non-skill probe terms (e.g. "years of experience"), kept apart from
+   * `excerpts` so they can never be quoted as proof of a skill or crowd out real
+   * skill evidence.
+   */
+  probeExcerpts: Array<{ term: string; text: string }>;
 }
 
 const DEFAULT_CONCURRENCY = 4;
@@ -101,18 +107,27 @@ export function confirmedIds(
 export async function verifyConcepts(
   ids: number[],
   concepts: Concept[],
-  opts: { concurrency?: number } = {},
+  opts: { concurrency?: number; probeTerms?: readonly string[] } = {},
 ): Promise<Map<number, ConceptVerifyResult>> {
   const out = new Map<number, ConceptVerifyResult>();
-  if (concepts.length === 0) {
+  const probeTerms = [...new Set(opts.probeTerms ?? [])];
+  const probeSet = new Set(probeTerms.map((t) => t.toLowerCase()));
+  if (concepts.length === 0 && probeTerms.length === 0) {
     for (const id of ids) {
-      out.set(id, { matchedConcepts: [], missingConcepts: [], matchedTerms: [], excerpts: [] });
+      out.set(id, {
+        matchedConcepts: [],
+        missingConcepts: [],
+        matchedTerms: [],
+        excerpts: [],
+        probeExcerpts: [],
+      });
     }
     return out;
   }
 
-  // One highlight call per candidate across the union of all synonyms.
-  const highlight = [...new Set(concepts.flatMap((c) => c.terms))];
+  // One highlight call per candidate across the union of all synonyms plus any probes,
+  // so probe terms never cost an extra résumé fetch.
+  const highlight = [...new Set([...concepts.flatMap((c) => c.terms), ...probeTerms])];
 
   const results = await mapLimit(ids, opts.concurrency ?? DEFAULT_CONCURRENCY, async (id) => {
     try {
@@ -120,7 +135,10 @@ export async function verifyConcepts(
         matchedTerms?: string[];
         excerpts?: Array<{ term: string; text: string }>;
       };
-      const matchedTerms = r.matchedTerms ?? [];
+      const allMatched = r.matchedTerms ?? [];
+      // Probe hits are not skills — keep them out of matchedTerms so no concept can be
+      // satisfied by, or evidenced with, an experience phrase.
+      const matchedTerms = allMatched.filter((t) => !probeSet.has(t.toLowerCase()));
       const matchedSet = new Set(matchedTerms.map((t) => t.toLowerCase()));
       const matchedConcepts: string[] = [];
       const missingConcepts: string[] = [];
@@ -128,13 +146,17 @@ export async function verifyConcepts(
         const hit = c.terms.some((t) => matchedSet.has(t.toLowerCase()));
         (hit ? matchedConcepts : missingConcepts).push(c.canonical);
       }
+      const allExcerpts = r.excerpts ?? [];
+      const isProbe = (e: { term?: string }) =>
+        typeof e.term === "string" && probeSet.has(e.term.toLowerCase());
       return {
         id,
         res: {
           matchedConcepts,
           missingConcepts,
           matchedTerms,
-          excerpts: (r.excerpts ?? []).slice(0, MAX_EXCERPTS),
+          excerpts: allExcerpts.filter((e) => !isProbe(e)).slice(0, MAX_EXCERPTS),
+          probeExcerpts: allExcerpts.filter(isProbe).slice(0, MAX_EXCERPTS),
         },
       };
     } catch {
@@ -145,6 +167,7 @@ export async function verifyConcepts(
           missingConcepts: concepts.map((c) => c.canonical),
           matchedTerms: [],
           excerpts: [],
+          probeExcerpts: [],
         },
       };
     }

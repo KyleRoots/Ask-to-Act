@@ -20,6 +20,12 @@ import { toConcepts } from "./search-taxonomy.js";
 import { rankCandidates } from "./search-ranking.js";
 import { verifyConcepts } from "./search-verify.js";
 import { deriveExperience } from "./candidate-experience.js";
+import {
+  RESUME_EXPERIENCE_PROBE_TERMS,
+  parseResumeYears,
+  reconcileExperience,
+} from "./resume-experience.js";
+import type { ReconciledExperience } from "./resume-experience.js";
 import { isTrueSubmission } from "./submission-status.js";
 import { extractJobRequirements } from "./match-requirements.js";
 import { evaluateCandidate } from "./match-criteria.js";
@@ -303,7 +309,10 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   const verifyIds = verifyPool.map((r) => r.id).filter((id) => id >= 0);
 
   const [verified, experiences] = await Promise.all([
-    verifyConcepts(verifyIds, mustConcepts, { concurrency: RESUME_CONCURRENCY }),
+    verifyConcepts(verifyIds, mustConcepts, {
+      concurrency: RESUME_CONCURRENCY,
+      probeTerms: RESUME_EXPERIENCE_PROBE_TERMS,
+    }),
     mapLimit(verifyPool, EXPERIENCE_CONCURRENCY, async (r) => {
       try {
         return deriveExperience(entityOf(await getCandidate({ id: r.id })), now);
@@ -353,6 +362,10 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       seniority: string;
       currentRole: { title: string; company: string } | null;
       lastActivityMonthsAgo: number | null;
+      yearsFromWorkHistory: number | null;
+      yearsFromResume: number | null;
+      experienceAgreement: ReconciledExperience["agreement"];
+      resumeExperienceQuote: string | null;
     } | null;
     matchScore: number;
     reasons: string[];
@@ -374,6 +387,12 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     const exp = experienceById.get(id) ?? null;
     const resumeConfirmed = v?.matchedConcepts ?? [];
     const resumeMissing = v?.missingConcepts ?? requirements.mustHaveSkills;
+    const resumeYears = parseResumeYears(v?.probeExcerpts);
+    const reconciledExperience = reconcileExperience(
+      resumeYears?.years ?? null,
+      exp?.yearsExperience ?? null,
+      resumeYears?.evidence ?? null,
+    );
 
     const evaluation = evaluateCandidate({
       candidate: c,
@@ -382,6 +401,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       resumeConfirmed,
       resumeMissing,
       experience: exp,
+      reconciledExperience,
       localOnly: !!args.localOnly,
     });
 
@@ -411,10 +431,16 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       resumeEvidence: v?.excerpts ?? [],
       experience: exp
         ? {
-            yearsExperience: exp.yearsExperience,
+            yearsExperience: reconciledExperience.years ?? exp.yearsExperience,
             seniority: exp.seniority,
             currentRole: exp.currentRole,
             lastActivityMonthsAgo: exp.lastActivityMonthsAgo,
+            // Bullhorn's parsed work history is unreliable on this instance, so both
+            // sources are shown and disagreement is stated rather than hidden.
+            yearsFromWorkHistory: exp.yearsExperience,
+            yearsFromResume: reconciledExperience.resumeYears,
+            experienceAgreement: reconciledExperience.agreement,
+            resumeExperienceQuote: reconciledExperience.evidence,
           }
         : null,
       matchScore: ranked.score,

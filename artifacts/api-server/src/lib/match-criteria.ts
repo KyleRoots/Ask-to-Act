@@ -5,6 +5,7 @@
  * Missing data never silently becomes a pass or a fabricated fail.
  */
 import type { ExperienceSummary } from "./candidate-experience.js";
+import type { ReconciledExperience } from "./resume-experience.js";
 import type { JobRequirements, WorkArrangement } from "./match-requirements.js";
 import { isLocalMatch, structuredConceptHits } from "./search-ranking.js";
 import type { Concept } from "./search-taxonomy.js";
@@ -126,6 +127,8 @@ export interface EvaluateCandidateArgs {
   /** Résumé-missing concept labels (canonical). */
   resumeMissing: string[];
   experience: ExperienceSummary | null;
+  /** Résumé-vs-work-history reconciliation; absent means work history only. */
+  reconciledExperience?: ReconciledExperience | null;
   /** When true, out-of-area is a hard fail for onsite/hybrid. */
   localOnly: boolean;
 }
@@ -268,9 +271,11 @@ export function evaluateCandidate(args: EvaluateCandidateArgs): CandidateEvaluat
 
   // --- Experience ---
   if (req.yearsRequired !== null) {
-    const years = args.experience?.yearsExperience ?? null;
+    const reconciled = args.reconciledExperience ?? null;
+    const historyYears = args.experience?.yearsExperience ?? null;
     const structuredYears = num(cand.experience);
-    const effective = years ?? structuredYears;
+    const effective = reconciled?.years ?? historyYears ?? structuredYears;
+    const conflicting = reconciled?.agreement === "conflict";
     if (effective === null) {
       criteria.push({
         key: "experience",
@@ -278,12 +283,25 @@ export function evaluateCandidate(args: EvaluateCandidateArgs): CandidateEvaluat
         outcome: "unknown",
         evidence: `Need ≥${req.yearsRequired} years; candidate tenure not derivable`,
       });
+    } else if (conflicting) {
+      // Bullhorn's parsed work history and the résumé disagree materially. Saying either
+      // "qualified" or "too junior" here would be a guess dressed up as a finding.
+      criteria.push({
+        key: "experience",
+        label: "Minimum experience",
+        outcome: "unknown",
+        evidence:
+          `Need ≥${req.yearsRequired} years; sources disagree ` +
+          `(résumé ~${reconciled?.resumeYears} vs work history ~${historyYears?.toFixed(1)}) — confirm with the candidate`,
+      });
     } else if (effective + 1e-9 >= req.yearsRequired) {
       criteria.push({
         key: "experience",
         label: "Minimum experience",
         outcome: "pass",
-        evidence: `~${effective.toFixed(1)} years (≥${req.yearsRequired} required)`,
+        evidence: `~${effective.toFixed(1)} years (≥${req.yearsRequired} required)${
+          reconciled?.agreement === "resume_only" ? " — from résumé text" : ""
+        }`,
       });
     } else {
       criteria.push({
