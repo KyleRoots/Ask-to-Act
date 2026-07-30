@@ -2,13 +2,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the résumé fetch so we can drive matched/missing/error paths deterministically.
 const mockState = vi.hoisted(() => ({
-  byId: {} as Record<number, { matched: string[]; fail?: boolean }>,
+  byId: {} as Record<
+    number,
+    { matched: string[]; fail?: boolean; excerptShape?: "legacy" | "real" }
+  >,
 }));
 
 vi.mock("./bullhorn-client.js", () => ({
   getCandidateResume: vi.fn(async (args: { candidateId: number; highlight?: string[] }) => {
     const cfg = mockState.byId[args.candidateId];
     if (!cfg || cfg.fail) throw new Error("resume unavailable");
+    if (cfg.excerptShape === "real") {
+      return {
+        matchedTerms: cfg.matched,
+        excerpts: [{ terms: cfg.matched, quote: `…${cfg.matched.join(" / ")} in résumé…` }],
+      };
+    }
     return {
       matchedTerms: cfg.matched,
       excerpts: cfg.matched.map((t) => ({ term: t, text: `…${t} in résumé…` })),
@@ -112,8 +121,8 @@ describe("verifyConcepts (synonym-aware résumé confirmation)", () => {
     expect(res.matchedConcepts).toEqual(["AWS"]);
     // An experience phrase must never be citable as proof of a skill.
     expect(res.matchedTerms).toEqual(["AWS"]);
-    expect(res.excerpts.map((e) => e.term)).toEqual(["AWS"]);
-    expect(res.probeExcerpts.map((e) => e.term)).toEqual(["years of experience"]);
+    expect(res.excerpts.every((e) => !e.terms.includes("years of experience"))).toBe(true);
+    expect(res.probeExcerpts.some((e) => e.terms.includes("years of experience"))).toBe(true);
   });
 
   it("cannot satisfy a concept using only a probe term", async () => {
@@ -126,6 +135,22 @@ describe("verifyConcepts (synonym-aware résumé confirmation)", () => {
     mockState.byId = { 1: { matched: ["years of experience"] } };
     const r = await verifyConcepts([1], [], { probeTerms: ["years of experience"] });
     expect(r.get(1)!.probeExcerpts).toHaveLength(1);
+  });
+
+  it("strips probe terms from overlapping skill quotes (real excerpt shape)", async () => {
+    // getCandidateResume merges nearby windows into one quote with a terms[].
+    mockState.byId = {
+      1: {
+        matched: ["Software", "years of experience"],
+        excerptShape: "real",
+      },
+    };
+    const r = await verifyConcepts([1], [{ canonical: "Software", terms: ["Software"] }], {
+      probeTerms: ["years of experience"],
+    });
+    const res = r.get(1)!;
+    expect(res.excerpts[0]?.terms).toEqual(["Software"]);
+    expect(res.probeExcerpts[0]?.terms).toEqual(["years of experience"]);
   });
 });
 

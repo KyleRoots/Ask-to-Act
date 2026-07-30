@@ -26,13 +26,15 @@ export interface ConceptVerifyResult {
   missingConcepts: string[];
   /** The raw synonym terms that actually matched (for transparency). */
   matchedTerms: string[];
-  excerpts: Array<{ term: string; text: string }>;
+  /** Skill evidence only — probe phrases are stripped out of each `terms` list. */
+  excerpts: Array<{ terms: string[]; quote: string }>;
   /**
-   * Excerpts for non-skill probe terms (e.g. "years of experience"), kept apart from
-   * `excerpts` so they can never be quoted as proof of a skill or crowd out real
-   * skill evidence.
+   * Quotes triggered by non-skill probe terms (e.g. "years of experience"), kept
+   * apart so they can never be cited as proof of a skill. Overlapping windows that
+   * also contain a skill stay in `excerpts` with the probe term removed from
+   * `terms`; their quote text is still available for experience parsing.
    */
-  probeExcerpts: Array<{ term: string; text: string }>;
+  probeExcerpts: Array<{ terms: string[]; quote: string }>;
 }
 
 const DEFAULT_CONCURRENCY = 4;
@@ -133,7 +135,7 @@ export async function verifyConcepts(
     try {
       const r = (await getCandidateResume({ candidateId: id, highlight })) as {
         matchedTerms?: string[];
-        excerpts?: Array<{ term: string; text: string }>;
+        excerpts?: Array<{ terms?: string[]; quote?: string; term?: string; text?: string }>;
       };
       const allMatched = r.matchedTerms ?? [];
       // Probe hits are not skills — keep them out of matchedTerms so no concept can be
@@ -146,17 +148,47 @@ export async function verifyConcepts(
         const hit = c.terms.some((t) => matchedSet.has(t.toLowerCase()));
         (hit ? matchedConcepts : missingConcepts).push(c.canonical);
       }
-      const allExcerpts = r.excerpts ?? [];
-      const isProbe = (e: { term?: string }) =>
-        typeof e.term === "string" && probeSet.has(e.term.toLowerCase());
+
+      // getCandidateResume emits { terms, quote }; older mocks used { term, text }.
+      const normalize = (
+        e: { terms?: string[]; quote?: string; term?: string; text?: string },
+      ): { terms: string[]; quote: string } => {
+        const terms =
+          Array.isArray(e.terms) && e.terms.length > 0
+            ? e.terms
+            : typeof e.term === "string" && e.term
+              ? [e.term]
+              : [];
+        const quote =
+          (typeof e.quote === "string" && e.quote) ||
+          (typeof e.text === "string" && e.text) ||
+          "";
+        return { terms, quote };
+      };
+
+      const skillExcerpts: Array<{ terms: string[]; quote: string }> = [];
+      const probeExcerpts: Array<{ terms: string[]; quote: string }> = [];
+      for (const raw of r.excerpts ?? []) {
+        const e = normalize(raw);
+        if (!e.quote) continue;
+        const skillTerms = e.terms.filter((t) => !probeSet.has(t.toLowerCase()));
+        const probeTermsOnly = e.terms.filter((t) => probeSet.has(t.toLowerCase()));
+        if (skillTerms.length > 0) {
+          skillExcerpts.push({ terms: skillTerms, quote: e.quote });
+        }
+        if (probeTermsOnly.length > 0) {
+          probeExcerpts.push({ terms: probeTermsOnly, quote: e.quote });
+        }
+      }
+
       return {
         id,
         res: {
           matchedConcepts,
           missingConcepts,
           matchedTerms,
-          excerpts: allExcerpts.filter((e) => !isProbe(e)).slice(0, MAX_EXCERPTS),
-          probeExcerpts: allExcerpts.filter(isProbe).slice(0, MAX_EXCERPTS),
+          excerpts: skillExcerpts.slice(0, MAX_EXCERPTS),
+          probeExcerpts: probeExcerpts.slice(0, MAX_EXCERPTS),
         },
       };
     } catch {

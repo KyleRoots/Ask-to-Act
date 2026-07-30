@@ -27,6 +27,14 @@ describe("parseResumeYears", () => {
     expect(r?.years).toBe(14);
   });
 
+  it("reads an explicit total even when the résumé wraps mid-phrase", () => {
+    // Real Donald Meyer résumé: "Total years\rexperience: 30 Years, 10 Months"
+    const r = parseResumeYears([
+      { terms: ["Software", "Developer"], quote: "Total years\rexperience: \r 30 Years, 10 Months" },
+    ]);
+    expect(r?.years).toBe(30);
+  });
+
   it("rejects implausible values that are really dates", () => {
     expect(parseResumeYears(excerpt("2015 years"))).toBeNull();
   });

@@ -356,7 +356,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     matchedSkills: string[];
     resumeConfirmed: string[];
     resumeMissing: string[];
-    resumeEvidence: Array<{ term: string; text: string }>;
+    resumeEvidence: Array<{ terms: string[]; quote: string }>;
     experience: {
       yearsExperience: number | null;
       seniority: string;
@@ -387,7 +387,10 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     const exp = experienceById.get(id) ?? null;
     const resumeConfirmed = v?.matchedConcepts ?? [];
     const resumeMissing = v?.missingConcepts ?? requirements.mustHaveSkills;
-    const resumeYears = parseResumeYears(v?.probeExcerpts);
+    const resumeYears = parseResumeYears([
+      ...(v?.probeExcerpts ?? []),
+      ...(v?.excerpts ?? []),
+    ]);
     const reconciledExperience = reconcileExperience(
       resumeYears?.years ?? null,
       exp?.yearsExperience ?? null,

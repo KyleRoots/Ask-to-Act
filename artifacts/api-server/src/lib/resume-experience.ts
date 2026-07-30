@@ -53,9 +53,15 @@ const WORD_PATTERN = new RegExp(
  * career total, so the maximum is the best single estimate of overall experience. It can
  * still understate someone whose résumé never states a total — callers treat this as
  * corroborating evidence, never as an authoritative figure on its own.
+ *
+ * Accepts both getCandidateResume's `{ terms, quote }` shape and older `{ term, text }`
+ * mocks. Whitespace inside quotes is collapsed so a résumé that wraps mid-phrase
+ * ("Total years\nexperience: 30") still parses.
  */
 export function parseResumeYears(
-  excerpts: Array<{ term?: string; text?: string }> | undefined,
+  excerpts:
+    | Array<{ term?: string; text?: string; terms?: string[]; quote?: string }>
+    | undefined,
 ): ResumeYears | null {
   if (!excerpts || excerpts.length === 0) return null;
 
@@ -68,8 +74,12 @@ export function parseResumeYears(
   };
 
   for (const excerpt of excerpts) {
-    const text = typeof excerpt?.text === "string" ? excerpt.text : "";
-    if (!text) continue;
+    const raw =
+      (typeof excerpt?.quote === "string" && excerpt.quote) ||
+      (typeof excerpt?.text === "string" && excerpt.text) ||
+      "";
+    if (!raw) continue;
+    const text = raw.replace(/\s+/g, " ");
     for (const m of text.matchAll(DIGIT_PATTERN)) {
       consider(Number(m[1]), text);
     }
