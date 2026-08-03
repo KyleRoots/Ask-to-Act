@@ -522,79 +522,65 @@ export function sortJobsNewestFirst(
   });
 }
 
-function jobsBundleFromRows(
-  jobRows: Array<Record<string, unknown>>,
-  jobsTotal: number,
-  jobsTruncated: boolean,
-): {
-  jobRows: Array<Record<string, unknown>>;
-  jobsTotal: number;
-  jobsTruncated: boolean;
-  jobIds: number[];
-  jobTitleById: Map<number, string>;
-} {
-  const jobIds = jobRows
-    .map((r) => (typeof r.id === "number" ? r.id : null))
-    .filter((id): id is number => id !== null);
-  const jobTitleById = new Map<number, string>();
-  for (const r of jobRows) {
-    if (typeof r.id === "number" && typeof r.title === "string") {
-      jobTitleById.set(r.id, r.title);
-    }
-  }
-  return { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById };
+/**
+ * Top-N completeness proof used after newest-first scanning.
+ *
+ * When we already hold `limit` matches ranked by note date, and every *remaining*
+ * unscanned job has JobOrder.dateAdded strictly older than the Nth match's note
+ * date, no newer qualifying note can appear on those older jobs under the
+ * newest-first open-job walk — return confirmedComplete without scanning them.
+ *
+ * Requires `rankedMatches` already sorted newest-note-first and length >= limit.
+ */
+export function canConfirmTopNByJobRecency(args: {
+  limit: number;
+  /** Newest-first by latest matching note date. */
+  rankedMatches: Array<{ latestNoteDate?: number }>;
+  /** Jobs not yet included in the note-scan / applicant walk. */
+  remainingJobs: Array<{ dateAdded?: unknown }>;
+}): boolean {
+  const { limit, rankedMatches, remainingJobs } = args;
+  if (!(limit > 0) || rankedMatches.length < limit) return false;
+  if (remainingJobs.length === 0) return true;
+  const nth = rankedMatches[limit - 1];
+  const nthMs =
+    typeof nth?.latestNoteDate === "number" ? nth.latestNoteDate : 0;
+  if (!(nthMs > 0)) return false;
+  return remainingJobs.every((job) => {
+    const added = typeof job.dateAdded === "number" ? job.dateAdded : 0;
+    // Missing dateAdded → cannot prove the job is older than the Nth note.
+    if (!(added > 0)) return false;
+    return added < nthMs;
+  });
 }
 
-async function runScoutScanPass(args: {
-  department: string;
-  noteAction: string;
-  openJobsOnly: boolean;
+function jobDateAddedMs(job: Record<string, unknown>): number {
+  return typeof job.dateAdded === "number" ? job.dateAdded : 0;
+}
+
+async function collectApplicantsForJobs(args: {
+  jobIds: number[];
   applicantPool: ScoutApplicantPool;
-  maxJobs: number;
   maxCandidatesToScan: number;
-  pageAllJobs: boolean;
   dateAddedStartMs?: number;
   dateAddedEndMs?: number;
-  /** Reuse jobs across exhaustive windows (avoids reloading the same JobOrders). */
-  preloadedJobs?: {
-    jobRows: Array<Record<string, unknown>>;
-    jobsTotal: number;
-    jobsTruncated: boolean;
-    jobIds: number[];
-    jobTitleById: Map<number, string>;
-  };
-}): Promise<ScanPassResult> {
-  const { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById } =
-    args.preloadedJobs ??
-    (await loadDepartmentJobs({
-      department: args.department,
-      openJobsOnly: args.openJobsOnly,
-      maxJobs: args.maxJobs,
-      pageAll: args.pageAllJobs,
-    }));
-
-  if (jobIds.length === 0) {
-    return {
-      matches: [],
-      jobRows,
-      jobsTotal,
-      jobsTruncated: false,
-      jobIds,
-      applicantsUnique: 0,
-      submissionRowsSeen: 0,
-      applicantsTruncated: false,
-      submissionDepthTruncated: false,
-      maxJobs: args.maxJobs,
-      maxCandidatesToScan: args.maxCandidatesToScan,
-    };
-  }
-
+  /** Optional wall: stop collecting more job batches when exceeded. */
+  shouldStop?: () => boolean;
+}): Promise<{
+  applicants: Map<number, ApplicantHit>;
+  submissionRowsSeen: number;
+  applicantsTruncated: boolean;
+  submissionDepthTruncated: boolean;
+  jobIdsFullyCollected: number[];
+  stoppedEarly: boolean;
+}> {
   const applicants = new Map<number, ApplicantHit>();
   let applicantsTruncated = false;
   let submissionDepthTruncated = false;
   let submissionRowsSeen = 0;
+  const jobIdsFullyCollected: number[] = [];
+  let stoppedEarly = false;
 
-  const jobIdSet = new Set(jobIds);
   const statusWhere =
     args.applicantPool === "responses"
       ? " AND (status='New Lead' OR status='Online Applicant')"
@@ -607,10 +593,14 @@ async function runScoutScanPass(args: {
     dateWhere += ` AND dateAdded<${args.dateAddedEndMs}`;
   }
 
-  // Newest-first JobSubmission query so the note-scan budget keeps recent applicants.
-  for (const batch of chunk(jobIds, JOB_ID_BATCH)) {
+  for (const batch of chunk(args.jobIds, JOB_ID_BATCH)) {
+    if (args.shouldStop?.()) {
+      stoppedEarly = true;
+      break;
+    }
     const idWhere = batch.map((id) => `jobOrder.id=${id}`).join(" OR ");
     let start = 0;
+    let batchDepthTruncated = false;
     for (;;) {
       const page = (await queryJobSubmissions({
         where: `(${idWhere})${statusWhere}${dateWhere}`,
@@ -658,61 +648,108 @@ async function runScoutScanPass(args: {
       if (start >= SUBMISSION_PAGE_DEPTH) {
         submissionDepthTruncated = true;
         applicantsTruncated = true;
+        batchDepthTruncated = true;
         break;
       }
     }
+    if (!batchDepthTruncated) {
+      jobIdsFullyCollected.push(...batch);
+    }
   }
 
-  // Scan notes for newest applicants first (better "most recent" under budget).
-  const applicantList = [...applicants.values()].sort(
+  return {
+    applicants,
+    submissionRowsSeen,
+    applicantsTruncated,
+    submissionDepthTruncated,
+    jobIdsFullyCollected,
+    stoppedEarly,
+  };
+}
+
+/**
+ * Scout Screen notes live on the Candidate association (jobOrder often null; Job ID
+ * in comments). JobOrder.notes miss them — measured live on STSI job 34829 vs
+ * candidate 4673061 — so this path is always candidate-scoped.
+ */
+async function matchApplicantsByCandidateNotes(args: {
+  applicants: ApplicantHit[];
+  noteAction: string;
+  departmentJobIds: number[];
+  jobTitleById: Map<number, string>;
+  shouldStop?: () => boolean;
+  /**
+   * After each concurrency batch, if this returns true we stop note-scanning
+   * further applicants (top-N early exit).
+   */
+  shouldStopAfterMatches?: (matches: MatchCandidate[]) => boolean;
+}): Promise<{ matches: MatchCandidate[]; scannedCount: number; stoppedEarly: boolean }> {
+  const matches: MatchCandidate[] = [];
+  const jobIdsArr = args.departmentJobIds;
+  let scannedCount = 0;
+  let stoppedEarly = false;
+
+  const sorted = [...args.applicants].sort(
     (a, b) => b.latestSubmissionMs - a.latestSubmissionMs,
   );
-  const jobIdsArr = [...jobIdSet];
-  const matches: MatchCandidate[] = [];
 
-  await mapWithLimit(applicantList, NOTE_SCAN_CONCURRENCY, async (app) => {
-    const notesRes = (await getNotes({
-      candidateId: app.candidateId,
-      returnAllLoaded: true,
-      fields:
-        "id,action,comments,jobOrder,dateAdded,personReference,candidates",
-    })) as { data?: Array<Record<string, unknown>> };
-    const notes = Array.isArray(notesRes.data) ? notesRes.data : [];
-    const matchedNotes: MatchNote[] = [];
-    const matchedJobIds = new Set<number>();
-
-    for (const note of notes) {
-      const action = typeof note.action === "string" ? note.action : "";
-      if (action !== args.noteAction) continue;
-      const hitJobs = jobIdsArr.filter((jid) => noteReferencesJob(note, jid));
-      if (hitJobs.length === 0) continue;
-      for (const jid of hitJobs) matchedJobIds.add(jid);
-      matchedNotes.push({
-        noteId: typeof note.id === "number" ? note.id : 0,
-        action,
-        matchedJobIds: hitJobs,
-        ...(typeof note.dateAdded === "number"
-          ? { dateAdded: note.dateAdded }
-          : {}),
-      });
+  for (const batch of chunk(sorted, NOTE_SCAN_CONCURRENCY)) {
+    if (args.shouldStop?.()) {
+      stoppedEarly = true;
+      break;
     }
+    await mapWithLimit(batch, NOTE_SCAN_CONCURRENCY, async (app) => {
+      const notesRes = (await getNotes({
+        candidateId: app.candidateId,
+        returnAllLoaded: true,
+        fields:
+          "id,action,comments,jobOrder,dateAdded,personReference,candidates",
+      })) as { data?: Array<Record<string, unknown>> };
+      const notes = Array.isArray(notesRes.data) ? notesRes.data : [];
+      const matchedNotes: MatchNote[] = [];
+      const matchedJobIds = new Set<number>();
 
-    if (matchedNotes.length === 0) return;
+      for (const note of notes) {
+        const action = typeof note.action === "string" ? note.action : "";
+        if (action !== args.noteAction) continue;
+        const hitJobs = jobIdsArr.filter((jid) => noteReferencesJob(note, jid));
+        if (hitJobs.length === 0) continue;
+        for (const jid of hitJobs) matchedJobIds.add(jid);
+        matchedNotes.push({
+          noteId: typeof note.id === "number" ? note.id : 0,
+          action,
+          matchedJobIds: hitJobs,
+          ...(typeof note.dateAdded === "number"
+            ? { dateAdded: note.dateAdded }
+            : {}),
+        });
+      }
 
-    const fromNote =
-      personName(notes[0]?.personReference) || personName(notes[0]?.candidates);
-    matches.push({
-      id: app.candidateId,
-      firstName: app.firstName ?? fromNote.firstName,
-      lastName: app.lastName ?? fromNote.lastName,
-      matchedJobIds: [...matchedJobIds],
-      matchedJobs: [...matchedJobIds].map((id) => ({
-        id,
-        ...(jobTitleById.has(id) ? { title: jobTitleById.get(id) } : {}),
-      })),
-      notes: matchedNotes,
+      if (matchedNotes.length === 0) return;
+
+      const fromNote =
+        personName(notes[0]?.personReference) || personName(notes[0]?.candidates);
+      matches.push({
+        id: app.candidateId,
+        firstName: app.firstName ?? fromNote.firstName,
+        lastName: app.lastName ?? fromNote.lastName,
+        matchedJobIds: [...matchedJobIds],
+        matchedJobs: [...matchedJobIds].map((id) => ({
+          id,
+          ...(args.jobTitleById.has(id)
+            ? { title: args.jobTitleById.get(id) }
+            : {}),
+        })),
+        notes: matchedNotes,
+      });
     });
-  });
+    scannedCount += batch.length;
+
+    if (args.shouldStopAfterMatches?.(matches)) {
+      stoppedEarly = true;
+      break;
+    }
+  }
 
   matches.sort((a, b) => a.id - b.id);
 
@@ -743,16 +780,78 @@ async function runScoutScanPass(args: {
     }
   }
 
+  return { matches, scannedCount, stoppedEarly };
+}
+
+async function runScoutScanPass(args: {
+  department: string;
+  noteAction: string;
+  openJobsOnly: boolean;
+  applicantPool: ScoutApplicantPool;
+  maxJobs: number;
+  maxCandidatesToScan: number;
+  pageAllJobs: boolean;
+  dateAddedStartMs?: number;
+  dateAddedEndMs?: number;
+  /** Reuse jobs across exhaustive windows (avoids reloading the same JobOrders). */
+  preloadedJobs?: {
+    jobRows: Array<Record<string, unknown>>;
+    jobsTotal: number;
+    jobsTruncated: boolean;
+    jobIds: number[];
+    jobTitleById: Map<number, string>;
+  };
+}): Promise<ScanPassResult> {
+  const { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById } =
+    args.preloadedJobs ??
+    (await loadDepartmentJobs({
+      department: args.department,
+      openJobsOnly: args.openJobsOnly,
+      maxJobs: args.maxJobs,
+      pageAll: args.pageAllJobs,
+    }));
+
+  if (jobIds.length === 0) {
+    return {
+      matches: [],
+      jobRows,
+      jobsTotal,
+      jobsTruncated: false,
+      jobIds,
+      applicantsUnique: 0,
+      submissionRowsSeen: 0,
+      applicantsTruncated: false,
+      submissionDepthTruncated: false,
+      maxJobs: args.maxJobs,
+      maxCandidatesToScan: args.maxCandidatesToScan,
+    };
+  }
+
+  const collected = await collectApplicantsForJobs({
+    jobIds,
+    applicantPool: args.applicantPool,
+    maxCandidatesToScan: args.maxCandidatesToScan,
+    dateAddedStartMs: args.dateAddedStartMs,
+    dateAddedEndMs: args.dateAddedEndMs,
+  });
+
+  const { matches } = await matchApplicantsByCandidateNotes({
+    applicants: [...collected.applicants.values()],
+    noteAction: args.noteAction,
+    departmentJobIds: jobIds,
+    jobTitleById,
+  });
+
   return {
     matches,
     jobRows,
     jobsTotal,
     jobsTruncated,
     jobIds,
-    applicantsUnique: applicantList.length,
-    submissionRowsSeen,
-    applicantsTruncated,
-    submissionDepthTruncated,
+    applicantsUnique: collected.applicants.size,
+    submissionRowsSeen: collected.submissionRowsSeen,
+    applicantsTruncated: collected.applicantsTruncated,
+    submissionDepthTruncated: collected.submissionDepthTruncated,
     maxJobs: args.maxJobs,
     maxCandidatesToScan: args.maxCandidatesToScan,
   };
@@ -867,6 +966,18 @@ export async function scoutQualifiedByDepartment(args: {
   // Prefer this over exhaustive date windows for "most recent" / "list N" asks.
   // Keep paging until jobs exhausted or gateway wall — do not stop early for search caps.
   if (mode === "bounded" || limit !== undefined) {
+    const luceneFirst = await tryScoutViaNoteLucene({
+      department,
+      resolvedFrom: resolved.resolvedFrom,
+      noteAction,
+      openJobsOnly,
+      applicantPool,
+      limit,
+      dateAddedStartMs: dateStartMs,
+      dateAddedEndMs: dateEndMs,
+    });
+    if (luceneFirst) return luceneFirst;
+
     return runAutoWidenScout({
       department,
       resolvedFrom: resolved.resolvedFrom,
@@ -1067,6 +1178,219 @@ export async function scoutQualifiedByDepartment(args: {
   };
 }
 
+/**
+ * Feature-detect Bullhorn Note Lucene. Returns null when the index is empty
+ * (current Myticas state) so callers fall back to the association walk.
+ */
+export async function probeNoteLuceneAvailable(): Promise<boolean> {
+  try {
+    const res = (await searchAnyEntity({
+      entityType: "Note",
+      query: "id:[1 TO *]",
+      fields: "id",
+      count: 1,
+      start: 0,
+    })) as { total?: number };
+    return typeof res.total === "number" && res.total > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * When Note Lucene works: search notes by action (+ optional date), join to
+ * department jobs, rank by note date. Returns null to trigger association fallback.
+ */
+async function tryScoutViaNoteLucene(args: {
+  department: string;
+  resolvedFrom?: string;
+  noteAction: string;
+  openJobsOnly: boolean;
+  applicantPool: ScoutApplicantPool;
+  limit?: number;
+  dateAddedStartMs?: number;
+  dateAddedEndMs?: number;
+}): Promise<unknown | null> {
+  const available = await probeNoteLuceneAvailable();
+  if (!available) return null;
+
+  const preloaded = await loadDepartmentJobs({
+    department: args.department,
+    openJobsOnly: args.openJobsOnly,
+    maxJobs: AUTO_WIDEN_MAX_JOBS,
+    pageAll: true,
+  });
+  if (preloaded.jobIds.length === 0) {
+    return emptyNoJobsResult({
+      department: args.department,
+      noteAction: args.noteAction,
+      openJobsOnly: args.openJobsOnly,
+      applicantPool: args.applicantPool,
+      mode: "bounded",
+      maxJobs: AUTO_WIDEN_MAX_JOBS,
+      maxCandidatesToScan: HARD_MAX_CANDIDATES,
+      jobsTotal: preloaded.jobsTotal,
+      resolvedFrom: args.resolvedFrom,
+    });
+  }
+
+  const actionClause = `action:"${escapeLucenePhrase(args.noteAction)}"`;
+  let dateClause = "";
+  if (args.dateAddedStartMs !== undefined) {
+    dateClause += ` AND dateAdded:[${args.dateAddedStartMs} TO *]`;
+  }
+  if (args.dateAddedEndMs !== undefined) {
+    dateClause += ` AND dateAdded:[* TO ${Math.max(0, args.dateAddedEndMs - 1)}]`;
+  }
+
+  const matchesByCandidate = new Map<number, MatchCandidate>();
+  const pageSize = 50;
+  let start = 0;
+  for (;;) {
+    const page = (await searchAnyEntity({
+      entityType: "Note",
+      query: `${actionClause}${dateClause}`,
+      fields: "id,action,comments,jobOrder,dateAdded,personReference,candidates",
+      count: pageSize,
+      start,
+    })) as {
+      total?: number;
+      data?: Array<Record<string, unknown>>;
+    };
+    const rows = Array.isArray(page.data) ? page.data : [];
+    if (rows.length === 0) break;
+
+    for (const note of rows) {
+      const hitJobs = preloaded.jobIds.filter((jid) =>
+        noteReferencesJob(note, jid),
+      );
+      if (hitJobs.length === 0) continue;
+      let candidateId: number | null = null;
+      for (const ref of [note.personReference, note.candidates]) {
+        if (ref && typeof ref === "object" && !Array.isArray(ref)) {
+          const id = (ref as { id?: unknown }).id;
+          if (typeof id === "number" && id > 0) {
+            candidateId = id;
+            break;
+          }
+        }
+      }
+      if (candidateId === null) continue;
+
+      const names =
+        personName(note.personReference) || personName(note.candidates);
+      const existing = matchesByCandidate.get(candidateId);
+      const noteEntry: MatchNote = {
+        noteId: typeof note.id === "number" ? note.id : 0,
+        action: args.noteAction,
+        matchedJobIds: hitJobs,
+        ...(typeof note.dateAdded === "number"
+          ? { dateAdded: note.dateAdded }
+          : {}),
+      };
+      if (!existing) {
+        matchesByCandidate.set(candidateId, {
+          id: candidateId,
+          ...names,
+          matchedJobIds: [...hitJobs],
+          matchedJobs: hitJobs.map((id) => ({
+            id,
+            ...(preloaded.jobTitleById.has(id)
+              ? { title: preloaded.jobTitleById.get(id) }
+              : {}),
+          })),
+          notes: [noteEntry],
+        });
+      } else {
+        for (const jid of hitJobs) {
+          if (!existing.matchedJobIds.includes(jid)) {
+            existing.matchedJobIds.push(jid);
+            existing.matchedJobs.push({
+              id: jid,
+              ...(preloaded.jobTitleById.has(jid)
+                ? { title: preloaded.jobTitleById.get(jid) }
+                : {}),
+            });
+          }
+        }
+        if (!existing.notes.some((n) => n.noteId === noteEntry.noteId)) {
+          existing.notes.push(noteEntry);
+        }
+      }
+    }
+
+    start += rows.length;
+    if (rows.length < pageSize) break;
+    if (typeof page.total === "number" && start >= page.total) break;
+    // Safety: don't pull unbounded note history in one ChatGPT turn.
+    if (start >= 2000) break;
+  }
+
+  const ranked = rankAndLimitMatches(
+    [...matchesByCandidate.values()],
+    args.limit,
+  );
+
+  // Enrich bullhornUrl for the page we return.
+  if (ranked.length > 0) {
+    const idOr = ranked.map((m) => m.id).slice(0, 50).join(" OR ");
+    const enriched = (await searchAnyEntity({
+      entityType: "Candidate",
+      query: `id:(${idOr})`,
+      fields: "id,firstName,lastName",
+      count: Math.min(ranked.length, 50),
+      start: 0,
+    })) as { data?: Array<Record<string, unknown>> };
+    const byId = new Map<number, Record<string, unknown>>();
+    for (const row of Array.isArray(enriched.data) ? enriched.data : []) {
+      if (typeof row.id === "number") byId.set(row.id, row);
+    }
+    for (const m of ranked) {
+      const row = byId.get(m.id);
+      if (row && typeof row.bullhornUrl === "string") m.bullhornUrl = row.bullhornUrl;
+      if (!m.firstName && typeof row?.firstName === "string") m.firstName = row.firstName;
+      if (!m.lastName && typeof row?.lastName === "string") m.lastName = row.lastName;
+    }
+  }
+
+  return {
+    department: args.department,
+    ...(args.resolvedFrom
+      ? { departmentResolvedFrom: args.resolvedFrom }
+      : {}),
+    noteAction: args.noteAction,
+    openJobsOnly: args.openJobsOnly,
+    applicantPool: args.applicantPool,
+    mode: "bounded",
+    ...(args.limit !== undefined ? { limit: args.limit } : {}),
+    uniqueCandidateCount: ranked.length,
+    candidates: ranked,
+    jobsScanned: {
+      count: preloaded.jobIds.length,
+      totalMatching: preloaded.jobsTotal,
+      truncated: preloaded.jobsTruncated,
+      order: "dateAddedDesc",
+      path: "note_lucene",
+    },
+    applicantsScanned: {
+      uniqueCandidates: matchesByCandidate.size,
+      truncated: false,
+    },
+    autoWiden: {
+      noteScanPath: "lucene",
+      rankedBy: "latestMatchingNoteDate",
+      luceneAvailable: true,
+    },
+    limits: { maxJobs: AUTO_WIDEN_MAX_JOBS, wallMs: TOPN_WALL_MS },
+    stopReason: "complete" as ScoutStopReason,
+    confirmedComplete: true,
+    definition:
+      "Note Lucene path: search Note.action then join to department JobOrders. " +
+      "Used only when /search/Note returns non-zero totals.",
+    note: `Lucene Note search path. Top ${ranked.length} match(es) for department "${args.department}". confirmedComplete=true.`,
+  };
+}
+
 async function runAutoWidenScout(args: {
   department: string;
   resolvedFrom?: string;
@@ -1082,18 +1406,12 @@ async function runAutoWidenScout(args: {
   const startedAt = Date.now();
   const wallMs =
     args.limit !== undefined ? TOPN_WALL_MS : EXHAUSTIVE_WALL_MS;
-  const merged = new Map<number, MatchCandidate>();
-  const allJobRows: Array<Record<string, unknown>> = [];
-  const allJobIds: number[] = [];
-  let submissionRowsSeen = 0;
-  let applicantsUnique = 0;
-  let applicantsTruncated = false;
-  let submissionDepthTruncated = false;
-  let stoppedForWallTime = false;
-  let pages = 0;
+  const wallHit = () => Date.now() - startedAt >= wallMs;
 
-  // Preload jobs, then scan newest-first. Lucene page order is not recency —
-  // without this, the gateway wall can stop before July-level matches on newer jobs.
+  // Preload jobs newest-first. Collect ALL applicants across the pool first
+  // (submissions are cheaper than get_notes), then note-scan newest applicants.
+  // That way top-N / large depts spend the gateway budget on notes, not on
+  // re-walking the same submission pages interleaved with notes.
   const preloaded = await loadDepartmentJobs({
     department: args.department,
     openJobsOnly: args.openJobsOnly,
@@ -1107,40 +1425,10 @@ async function runAutoWidenScout(args: {
   );
   const jobsTruncatedAtLoad =
     preloaded.jobsTruncated || sortedRows.length < jobsTotal;
-
-  for (let offset = 0; offset < sortedRows.length; offset += AUTO_WIDEN_JOB_PAGE) {
-    if (Date.now() - startedAt >= wallMs) {
-      stoppedForWallTime = true;
-      break;
-    }
-
-    const slice = sortedRows.slice(offset, offset + AUTO_WIDEN_JOB_PAGE);
-    if (slice.length === 0) break;
-    pages += 1;
-
-    const batch = jobsBundleFromRows(slice, jobsTotal, false);
-    const pass = await runScoutScanPass({
-      department: args.department,
-      noteAction: args.noteAction,
-      openJobsOnly: args.openJobsOnly,
-      applicantPool: args.applicantPool,
-      maxJobs: batch.jobIds.length,
-      maxCandidatesToScan: args.maxCandidatesPerPage,
-      pageAllJobs: false,
-      dateAddedStartMs: args.dateAddedStartMs,
-      dateAddedEndMs: args.dateAddedEndMs,
-      preloadedJobs: batch,
-    });
-    mergeMatches(merged, pass.matches);
-    submissionRowsSeen += pass.submissionRowsSeen;
-    applicantsUnique += pass.applicantsUnique;
-    if (pass.applicantsTruncated) applicantsTruncated = true;
-    if (pass.submissionDepthTruncated) submissionDepthTruncated = true;
-    for (const row of batch.jobRows) {
-      allJobRows.push(row);
-      if (typeof row.id === "number") allJobIds.push(row.id);
-    }
-  }
+  const allJobIds = sortedRows
+    .map((r) => (typeof r.id === "number" ? r.id : null))
+    .filter((id): id is number => id !== null);
+  const jobTitleById = preloaded.jobTitleById;
 
   if (allJobIds.length === 0) {
     return emptyNoJobsResult({
@@ -1156,23 +1444,99 @@ async function runAutoWidenScout(args: {
     });
   }
 
+  // Top-N asks get a larger unique-applicant budget so newest-first note ranking
+  // is not starved by a per-page cap from the old interleaved walk.
+  const applicantCap =
+    args.limit !== undefined
+      ? Math.min(
+          Math.max(args.maxCandidatesPerPage * 4, args.limit * 40, 200),
+          HARD_MAX_CANDIDATES,
+        )
+      : args.maxCandidatesPerPage;
+
+  const collected = await collectApplicantsForJobs({
+    jobIds: allJobIds,
+    applicantPool: args.applicantPool,
+    maxCandidatesToScan: applicantCap,
+    dateAddedStartMs: args.dateAddedStartMs,
+    dateAddedEndMs: args.dateAddedEndMs,
+    shouldStop: wallHit,
+  });
+
+  let stoppedForWallTime = collected.stoppedEarly && wallHit();
+  let stoppedForTopNProof = false;
+  const fullyCollectedJobIds = new Set(collected.jobIdsFullyCollected);
+
+  const noteScan = await matchApplicantsByCandidateNotes({
+    applicants: [...collected.applicants.values()],
+    noteAction: args.noteAction,
+    departmentJobIds: allJobIds,
+    jobTitleById,
+    shouldStop: () => {
+      if (wallHit()) {
+        stoppedForWallTime = true;
+        return true;
+      }
+      return false;
+    },
+    shouldStopAfterMatches: (partialMatches) => {
+      if (args.limit === undefined) return false;
+      const ranked = rankAndLimitMatches(partialMatches, args.limit);
+      if (ranked.length < args.limit) return false;
+      const nthMs = ranked[args.limit - 1]?.latestNoteDate ?? 0;
+      // Remaining = jobs that could still beat the Nth note (not strictly older),
+      // or whose submissions we never finished collecting.
+      const remainingForProof = sortedRows.filter((row) => {
+        const id = typeof row.id === "number" ? row.id : null;
+        if (id === null) return true;
+        if (!fullyCollectedJobIds.has(id)) return true;
+        const added = jobDateAddedMs(row);
+        return !(added > 0 && nthMs > 0 && added < nthMs);
+      });
+      if (
+        canConfirmTopNByJobRecency({
+          limit: args.limit,
+          rankedMatches: ranked,
+          remainingJobs: remainingForProof,
+        })
+      ) {
+        stoppedForTopNProof = true;
+        return true;
+      }
+      return false;
+    },
+  });
+
+  if (noteScan.stoppedEarly && wallHit()) stoppedForWallTime = true;
+
+  const merged = new Map<number, MatchCandidate>();
+  mergeMatches(merged, noteScan.matches);
   const ranked = rankAndLimitMatches([...merged.values()], args.limit);
+
+  const jobsScannedCount = collected.stoppedEarly
+    ? collected.jobIdsFullyCollected.length
+    : allJobIds.length;
   const jobsTruncated =
     jobsTruncatedAtLoad ||
-    allJobIds.length < sortedRows.length ||
-    allJobIds.length < jobsTotal;
+    collected.stoppedEarly ||
+    (stoppedForWallTime && !stoppedForTopNProof) ||
+    jobsScannedCount < allJobIds.length;
+  // Top-N job-recency proof means remaining older jobs were intentionally skipped.
   const incomplete =
-    jobsTruncated ||
-    applicantsTruncated ||
-    stoppedForWallTime ||
-    submissionDepthTruncated;
-  const stopReason = resolveScoutStopReason({
-    stoppedForWallTime,
-    jobsTruncated,
-    applicantsTruncated,
-    submissionDepthTruncated,
-  });
-  const confirmedComplete = stopReason === "complete" && !incomplete;
+    (!stoppedForTopNProof && jobsTruncated) ||
+    collected.applicantsTruncated ||
+    (stoppedForWallTime && !stoppedForTopNProof) ||
+    collected.submissionDepthTruncated;
+  const stopReason = stoppedForTopNProof
+    ? "complete"
+    : resolveScoutStopReason({
+        stoppedForWallTime,
+        jobsTruncated: jobsTruncated && !stoppedForTopNProof,
+        applicantsTruncated: collected.applicantsTruncated,
+        submissionDepthTruncated: collected.submissionDepthTruncated,
+      });
+  const confirmedComplete =
+    (stopReason === "complete" && !incomplete) || stoppedForTopNProof;
 
   let userNote: string;
   if (incomplete && ranked.length === 0) {
@@ -1180,6 +1544,12 @@ async function runAutoWidenScout(args: {
       stoppedForWallTime,
       matchCount: 0,
     });
+  } else if (stoppedForTopNProof && args.limit !== undefined) {
+    userNote =
+      `Top ${ranked.length} most recent matching candidates by Scout/note date. ` +
+      `confirmedComplete=true (stopReason=complete): held ${args.limit} matches and every ` +
+      `remaining unscanned open job is older than the ${args.limit}th match's note date ` +
+      `(newest-first job walk). noteScan=candidate association — JobOrder.notes omit Scout Screen.`;
   } else if (incomplete && args.limit !== undefined && ranked.length > 0) {
     userNote =
       `Showing the ${ranked.length} most recent matching candidate(s) found while scanning open jobs ` +
@@ -1202,6 +1572,8 @@ async function runAutoWidenScout(args: {
       "Unique matching candidates among the open-department applicant pool for scanned jobs. confirmedComplete=true.";
   }
 
+  const pages = Math.max(1, Math.ceil(jobsScannedCount / AUTO_WIDEN_JOB_PAGE));
+
   return {
     department: args.department,
     ...(args.resolvedFrom
@@ -1215,12 +1587,12 @@ async function runAutoWidenScout(args: {
     uniqueCandidateCount: ranked.length,
     candidates: ranked,
     jobsScanned: {
-      count: allJobIds.length,
+      count: stoppedForTopNProof ? allJobIds.length : jobsScannedCount,
       totalMatching: jobsTotal,
-      truncated: jobsTruncated,
+      truncated: incomplete && !stoppedForTopNProof ? jobsTruncated : false,
       pages,
       order: "dateAddedDesc",
-      jobs: allJobRows.slice(0, 50).map((r) => ({
+      jobs: sortedRows.slice(0, 50).map((r) => ({
         id: r.id,
         title: r.title,
         status: r.status,
@@ -1228,31 +1600,39 @@ async function runAutoWidenScout(args: {
       })),
     },
     applicantsScanned: {
-      uniqueCandidates: applicantsUnique,
-      submissionRowsSeen,
-      truncated: applicantsTruncated,
+      uniqueCandidates: collected.applicants.size,
+      submissionRowsSeen: collected.submissionRowsSeen,
+      noteScanned: noteScan.scannedCount,
+      truncated: collected.applicantsTruncated,
     },
     autoWiden: {
       elapsedMs: Date.now() - startedAt,
       wallMs,
       stoppedForWallTime,
+      stoppedForTopNProof,
+      noteScanPath: "candidate",
       rankedBy: "latestMatchingNoteDate",
       jobsOrderedBy: "dateAddedDesc",
+      scanStrategy: "collect_applicants_then_notes",
     },
     limits: {
       maxJobs: args.maxJobsCap,
-      maxCandidatesToScan: args.maxCandidatesPerPage,
+      maxCandidatesToScan: applicantCap,
       wallMs,
     },
     stopReason,
     confirmedComplete,
     definition:
       "Natural-language Scout/screening report: resolve Internal Department nicknames, " +
-      "preload OPEN jobs newest-first, match Response applicants with the given note action " +
+      "preload OPEN jobs newest-first, collect Response applicants then match candidate notes " +
+      "(Scout Screen lives on Candidate — not JobOrder.notes) with the given note action " +
       "(jobOrder or comment Job ID), rank by latest matching note date. " +
-      "Pass limit=N for 'N most recent'. Stop working only when confirmedComplete=true " +
+      "Pass limit=N for 'N most recent'. Top-N may confirm complete early when remaining " +
+      "jobs are older than the Nth note. Stop working only when confirmedComplete=true " +
       "or stopReason is a real connector/gateway limit — never because of an arbitrary early search cap.",
-    ...(incomplete ? { incomplete: true, note: userNote } : { note: userNote }),
+    ...(incomplete && !confirmedComplete
+      ? { incomplete: true, note: userNote }
+      : { note: userNote }),
   };
 }
 

@@ -50,7 +50,13 @@ Server behavior:
 
 - Resolves nicknames via live Internal Department values (`STSI` → `STS-STSI`).
 - Defaults to **open** jobs.
-- Auto-pages jobs until exhausted or ~75s gateway wall (safety valve, not a “give up” signal for the model when results are incomplete).
+- Auto-pages jobs until exhausted, top-N job-recency early-exit proves
+  `confirmedComplete`, or ~75s/95s gateway wall (safety valve).
+- Scan strategy: collect applicants across the department first, then
+  candidate-association `get_notes` (JobOrder.notes miss Scout Screen).
+- Lucene-first path feature-detects `/search/Note`; falls back when total=0.
+- Snapshot design (only if Lucene stays broken):
+  [scout-note-snapshot-design.md](./scout-note-snapshot-design.md).
 - For top-N / list asks: preload open jobs **newest-first** (`dateAdded` desc) and allow ~95s wall so July-level matches are not stranded behind older Lucene page order.
 - Matches notes across the full association-loaded note set (not just a 50-row display page).
 - Returns top-level `stopReason` + `confirmedComplete`.

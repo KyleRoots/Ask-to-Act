@@ -7,6 +7,7 @@ import {
   resolveScoutStopReason,
   upsertApplicantPreferRecent,
   sortJobsNewestFirst,
+  canConfirmTopNByJobRecency,
   EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
   EXHAUSTIVE_MAX_WINDOWS,
   EXHAUSTIVE_WALL_MS,
@@ -206,5 +207,73 @@ describe("sortJobsNewestFirst", () => {
   it("keeps top-N wall above bounded default", () => {
     expect(TOPN_WALL_MS).toBeGreaterThan(EXHAUSTIVE_WALL_MS);
     expect(TOPN_WALL_MS).toBeLessThanOrEqual(120_000);
+  });
+});
+
+describe("canConfirmTopNByJobRecency", () => {
+  it("confirms when every remaining job is older than the Nth note", () => {
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [
+          { latestNoteDate: 300 },
+          { latestNoteDate: 200 },
+          { latestNoteDate: 150 },
+        ],
+        remainingJobs: [{ dateAdded: 100 }, { dateAdded: 50 }],
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses when a remaining job is newer than or equal to the Nth note", () => {
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [
+          { latestNoteDate: 300 },
+          { latestNoteDate: 200 },
+          { latestNoteDate: 150 },
+        ],
+        remainingJobs: [{ dateAdded: 150 }, { dateAdded: 50 }],
+      }),
+    ).toBe(false);
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [
+          { latestNoteDate: 300 },
+          { latestNoteDate: 200 },
+          { latestNoteDate: 150 },
+        ],
+        remainingJobs: [{ dateAdded: 400 }],
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses when fewer than limit matches or missing note/job dates", () => {
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [{ latestNoteDate: 300 }, { latestNoteDate: 200 }],
+        remainingJobs: [{ dateAdded: 10 }],
+      }),
+    ).toBe(false);
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 1,
+        rankedMatches: [{ latestNoteDate: 300 }],
+        remainingJobs: [{ dateAdded: undefined }],
+      }),
+    ).toBe(false);
+  });
+
+  it("confirms when there are no remaining jobs", () => {
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 2,
+        rankedMatches: [{ latestNoteDate: 300 }, { latestNoteDate: 200 }],
+        remainingJobs: [],
+      }),
+    ).toBe(true);
   });
 });
