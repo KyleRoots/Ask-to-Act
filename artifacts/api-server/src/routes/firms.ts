@@ -704,10 +704,15 @@ router.post(
 
 /**
  * POST /api/firms/:id/note-snapshot/sync
- * Service-only. Background walk of open jobs → Response applicants → allowlisted
- * Note.action values into note_action_snapshot. Intended for Railway Cron
- * (outside ChatGPT turns). Optional ?department= or body.department for one dept.
+ * Service-only. Walks open jobs → Response applicants → allowlisted Note.action
+ * into note_action_snapshot. Intended for Railway Cron.
+ *
+ * Default: **async** (HTTP 202) so large departments are not killed by ~300s
+ * reverse-proxy timeouts. Pass `?wait=1` to run synchronously (small/debug only).
+ * Optional `?department=` / body.department for one dept.
  */
+const noteSnapshotSyncInFlight = new Set<string>();
+
 router.post(
   "/firms/:id/note-snapshot/sync",
   bearerAuth, requireService,
@@ -737,31 +742,73 @@ router.post(
       (typeof (req.body as { department?: unknown })?.department === "string"
         ? (req.body as { department: string }).department
         : undefined);
+    const department = departmentRaw?.trim() || undefined;
+    const wait =
+      req.query.wait === "1" ||
+      req.query.wait === "true" ||
+      (req.body as { wait?: unknown })?.wait === true;
 
-    try {
-      const summary = await firmContext.run({ firmId: id }, () =>
-        syncNoteSnapshotForFirm({
-          firmId: id,
-          ...(departmentRaw?.trim()
-            ? { department: departmentRaw.trim() }
-            : {}),
-        }),
-      );
-      logger.info(
-        {
-          firmId: id,
-          elapsedMs: summary.elapsedMs,
-          notesUpsertedTotal: summary.notesUpsertedTotal,
-          departments: summary.departments.length,
-        },
-        "Note snapshot sync finished",
-      );
-      res.json(summary);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ firmId: id, err }, "Note snapshot sync failed");
-      res.status(502).json({ error: `Note snapshot sync failed: ${msg}` });
+    const lockKey = `${id}:${department ?? "*"}`;
+    if (noteSnapshotSyncInFlight.has(lockKey)) {
+      res.status(409).json({
+        error: "A note snapshot sync is already running for this firm/department.",
+        firmId: id,
+        department: department ?? null,
+      });
+      return;
     }
+
+    const runSync = async () => {
+      noteSnapshotSyncInFlight.add(lockKey);
+      try {
+        const summary = await firmContext.run({ firmId: id }, () =>
+          syncNoteSnapshotForFirm({
+            firmId: id,
+            ...(department ? { department } : {}),
+          }),
+        );
+        logger.info(
+          {
+            firmId: id,
+            elapsedMs: summary.elapsedMs,
+            notesUpsertedTotal: summary.notesUpsertedTotal,
+            departments: summary.departments.length,
+          },
+          "Note snapshot sync finished",
+        );
+        return summary;
+      } finally {
+        noteSnapshotSyncInFlight.delete(lockKey);
+      }
+    };
+
+    if (wait) {
+      try {
+        const summary = await runSync();
+        res.json(summary);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error({ firmId: id, err }, "Note snapshot sync failed");
+        res.status(502).json({ error: `Note snapshot sync failed: ${msg}` });
+      }
+      return;
+    }
+
+    // Async: acknowledge immediately; sync continues on this Node process.
+    res.status(202).json({
+      accepted: true,
+      async: true,
+      firmId: id,
+      department: department ?? null,
+      message:
+        "Note snapshot sync started. Poll coverage via scout_dept_report " +
+        "(noteScanPath=snapshot+live_tail when fresh) or re-check after several minutes. " +
+        "Use ?wait=1 only for small single-department debug syncs.",
+    });
+
+    void runSync().catch((err) => {
+      logger.error({ firmId: id, department, err }, "Note snapshot async sync failed");
+    });
   },
 );
 

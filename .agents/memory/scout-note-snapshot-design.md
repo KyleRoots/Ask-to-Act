@@ -44,6 +44,10 @@ the ChatGPT ~95s soft wall without depending on `/search/Note`.
 Auth: `Authorization: Bearer $MCP_BEARER_TOKEN` (service only).  
 Optional: `?department=STSI` or body `{ "department": "STSI" }`.
 
+**Default response is HTTP 202 (async)** — the walk continues on the api-server
+after the response so large departments are not killed by ~300s proxy timeouts.
+Use `?wait=1` only for small single-dept debug syncs (returns the full summary).
+
 Must run inside firm Bullhorn context (route sets `firmContext`).
 
 ### Railway Cron (hourly)
@@ -55,8 +59,9 @@ curl -sS -X POST \
   "https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync"
 ```
 
-Point Railway Cron at that URL hourly (or nightly first). No second service
-required — same api-server process.
+Expect **202 Accepted**. Point Railway Cron at that URL hourly. No second service
+required — same api-server process. Concurrent duplicate syncs for the same
+firm/department return **409**.
 
 ## Read path
 
