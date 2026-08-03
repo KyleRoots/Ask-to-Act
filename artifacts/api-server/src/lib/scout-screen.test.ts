@@ -276,4 +276,59 @@ describe("canConfirmTopNByJobRecency", () => {
       }),
     ).toBe(true);
   });
+
+  it("refuses job-recency early-exit when applicantPool=all has remaining jobs", () => {
+    // Regression: Scout notes on older jobs can still be newer than the Nth
+    // match (e.g. Dianna Muhammad Aug 3 note on a pre-limit job). Claiming
+    // confirmedComplete via stoppedForTopNProof for pool=all is unsafe.
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [
+          { latestNoteDate: 300 },
+          { latestNoteDate: 200 },
+          { latestNoteDate: 150 },
+        ],
+        remainingJobs: [{ dateAdded: 100 }, { dateAdded: 50 }],
+        applicantPool: "all",
+      }),
+    ).toBe(false);
+  });
+
+  it("still allows job-recency proof for responses (and default) pool", () => {
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [
+          { latestNoteDate: 300 },
+          { latestNoteDate: 200 },
+          { latestNoteDate: 150 },
+        ],
+        remainingJobs: [{ dateAdded: 100 }, { dateAdded: 50 }],
+        applicantPool: "responses",
+      }),
+    ).toBe(true);
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 3,
+        rankedMatches: [
+          { latestNoteDate: 300 },
+          { latestNoteDate: 200 },
+          { latestNoteDate: 150 },
+        ],
+        remainingJobs: [{ dateAdded: 100 }],
+      }),
+    ).toBe(true);
+  });
+
+  it("treats exhausted jobs as complete even for applicantPool=all", () => {
+    expect(
+      canConfirmTopNByJobRecency({
+        limit: 2,
+        rankedMatches: [{ latestNoteDate: 300 }, { latestNoteDate: 200 }],
+        remainingJobs: [],
+        applicantPool: "all",
+      }),
+    ).toBe(true);
+  });
 });

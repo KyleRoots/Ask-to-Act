@@ -530,6 +530,10 @@ export function sortJobsNewestFirst(
  * date, no newer qualifying note can appear on those older jobs under the
  * newest-first open-job walk — return confirmedComplete without scanning them.
  *
+ * Unsafe for `applicantPool === "all"`: Scout notes on older jobs can still be
+ * newer than the Nth match (e.g. a fresh Scout Screen on a months-old job).
+ * Never claim confirmedComplete via this heuristic for the full submission pool.
+ *
  * Requires `rankedMatches` already sorted newest-note-first and length >= limit.
  */
 export function canConfirmTopNByJobRecency(args: {
@@ -538,8 +542,17 @@ export function canConfirmTopNByJobRecency(args: {
   rankedMatches: Array<{ latestNoteDate?: number }>;
   /** Jobs not yet included in the note-scan / applicant walk. */
   remainingJobs: Array<{ dateAdded?: unknown }>;
+  /**
+   * When "all", always refuse — job.dateAdded cannot bound note dates across
+   * the full JobSubmission pool.
+   */
+  applicantPool?: ScoutApplicantPool;
 }): boolean {
-  const { limit, rankedMatches, remainingJobs } = args;
+  const { limit, rankedMatches, remainingJobs, applicantPool } = args;
+  // Notes on older jobs can still beat the Nth match when walking every
+  // submission — never skip remaining jobs via job-recency for pool=all.
+  // Empty remaining is still complete (jobs exhausted).
+  if (applicantPool === "all" && remainingJobs.length > 0) return false;
   if (!(limit > 0) || rankedMatches.length < limit) return false;
   if (remainingJobs.length === 0) return true;
   const nth = rankedMatches[limit - 1];
@@ -1558,6 +1571,7 @@ async function runAutoWidenScout(args: {
           limit: args.limit,
           rankedMatches: rankedSoFar,
           remainingJobs,
+          applicantPool: args.applicantPool,
         })
       ) {
         stoppedForTopNProof = true;
@@ -1677,9 +1691,11 @@ async function runAutoWidenScout(args: {
       "preload OPEN jobs newest-first, page applicants + candidate notes " +
       "(Scout Screen lives on Candidate — not JobOrder.notes) with the given note action " +
       "(jobOrder or comment Job ID), rank by latest matching note date. " +
-      "Pass limit=N for 'N most recent'. Top-N may confirm complete early when remaining " +
-      "unscanned jobs are older than the Nth note. Stop working only when confirmedComplete=true " +
-      "or stopReason is a real connector/gateway limit — never because of an arbitrary early search cap.",
+      "Pass limit=N for 'N most recent'. For applicantPool=responses, Top-N may confirm " +
+      "complete early when remaining unscanned jobs are older than the Nth note; that " +
+      "job-recency proof is disabled for applicantPool=all. Stop working only when " +
+      "confirmedComplete=true or stopReason is a real connector/gateway limit — never " +
+      "because of an arbitrary early search cap.",
     ...(incomplete && !confirmedComplete
       ? { incomplete: true, note: userNote }
       : { note: userNote }),
