@@ -554,8 +554,27 @@ export function canConfirmTopNByJobRecency(args: {
   });
 }
 
-function jobDateAddedMs(job: Record<string, unknown>): number {
-  return typeof job.dateAdded === "number" ? job.dateAdded : 0;
+function jobsBundleFromRows(
+  jobRows: Array<Record<string, unknown>>,
+  jobsTotal: number,
+  jobsTruncated: boolean,
+): {
+  jobRows: Array<Record<string, unknown>>;
+  jobsTotal: number;
+  jobsTruncated: boolean;
+  jobIds: number[];
+  jobTitleById: Map<number, string>;
+} {
+  const jobIds = jobRows
+    .map((r) => (typeof r.id === "number" ? r.id : null))
+    .filter((id): id is number => id !== null);
+  const jobTitleById = new Map<number, string>();
+  for (const r of jobRows) {
+    if (typeof r.id === "number" && typeof r.title === "string") {
+      jobTitleById.set(r.id, r.title);
+    }
+  }
+  return { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById };
 }
 
 async function collectApplicantsForJobs(args: {
@@ -1408,10 +1427,23 @@ async function runAutoWidenScout(args: {
     args.limit !== undefined ? TOPN_WALL_MS : EXHAUSTIVE_WALL_MS;
   const wallHit = () => Date.now() - startedAt >= wallMs;
 
-  // Preload jobs newest-first. Collect ALL applicants across the pool first
-  // (submissions are cheaper than get_notes), then note-scan newest applicants.
-  // That way top-N / large depts spend the gateway budget on notes, not on
-  // re-walking the same submission pages interleaved with notes.
+  const merged = new Map<number, MatchCandidate>();
+  const allJobRows: Array<Record<string, unknown>> = [];
+  const allJobIds: number[] = [];
+  const noteScannedCandidateIds = new Set<number>();
+  let submissionRowsSeen = 0;
+  let applicantsUnique = 0;
+  let noteScanned = 0;
+  let applicantsTruncated = false;
+  let submissionDepthTruncated = false;
+  let stoppedForWallTime = false;
+  let stoppedForTopNProof = false;
+  let pages = 0;
+
+  // Preload jobs, then scan newest-first *page by page*: applicants + notes for
+  // each page before the next. That lets top-N early-exit as soon as remaining
+  // unscanned jobs are older than the Nth note — without burning the wall on a
+  // full-dept submission crawl first (MYT-scale pools).
   const preloaded = await loadDepartmentJobs({
     department: args.department,
     openJobsOnly: args.openJobsOnly,
@@ -1425,12 +1457,8 @@ async function runAutoWidenScout(args: {
   );
   const jobsTruncatedAtLoad =
     preloaded.jobsTruncated || sortedRows.length < jobsTotal;
-  const allJobIds = sortedRows
-    .map((r) => (typeof r.id === "number" ? r.id : null))
-    .filter((id): id is number => id !== null);
-  const jobTitleById = preloaded.jobTitleById;
 
-  if (allJobIds.length === 0) {
+  if (sortedRows.length === 0) {
     return emptyNoJobsResult({
       department: args.department,
       noteAction: args.noteAction,
@@ -1444,96 +1472,104 @@ async function runAutoWidenScout(args: {
     });
   }
 
-  // Top-N asks get a larger unique-applicant budget so newest-first note ranking
-  // is not starved by a per-page cap from the old interleaved walk.
-  const applicantCap =
-    args.limit !== undefined
-      ? Math.min(
-          Math.max(args.maxCandidatesPerPage * 4, args.limit * 40, 200),
-          HARD_MAX_CANDIDATES,
-        )
-      : args.maxCandidatesPerPage;
+  for (let offset = 0; offset < sortedRows.length; offset += AUTO_WIDEN_JOB_PAGE) {
+    if (wallHit()) {
+      stoppedForWallTime = true;
+      break;
+    }
 
-  const collected = await collectApplicantsForJobs({
-    jobIds: allJobIds,
-    applicantPool: args.applicantPool,
-    maxCandidatesToScan: applicantCap,
-    dateAddedStartMs: args.dateAddedStartMs,
-    dateAddedEndMs: args.dateAddedEndMs,
-    shouldStop: wallHit,
-  });
+    const slice = sortedRows.slice(offset, offset + AUTO_WIDEN_JOB_PAGE);
+    if (slice.length === 0) break;
+    pages += 1;
 
-  let stoppedForWallTime = collected.stoppedEarly && wallHit();
-  let stoppedForTopNProof = false;
-  const fullyCollectedJobIds = new Set(collected.jobIdsFullyCollected);
+    const batch = jobsBundleFromRows(slice, jobsTotal, false);
+    const collected = await collectApplicantsForJobs({
+      jobIds: batch.jobIds,
+      applicantPool: args.applicantPool,
+      maxCandidatesToScan: args.maxCandidatesPerPage,
+      dateAddedStartMs: args.dateAddedStartMs,
+      dateAddedEndMs: args.dateAddedEndMs,
+      shouldStop: wallHit,
+    });
+    if (collected.stoppedEarly && wallHit()) stoppedForWallTime = true;
+    if (collected.applicantsTruncated) applicantsTruncated = true;
+    if (collected.submissionDepthTruncated) submissionDepthTruncated = true;
+    submissionRowsSeen += collected.submissionRowsSeen;
+    applicantsUnique += collected.applicants.size;
 
-  const noteScan = await matchApplicantsByCandidateNotes({
-    applicants: [...collected.applicants.values()],
-    noteAction: args.noteAction,
-    departmentJobIds: allJobIds,
-    jobTitleById,
-    shouldStop: () => {
-      if (wallHit()) {
-        stoppedForWallTime = true;
-        return true;
-      }
-      return false;
-    },
-    shouldStopAfterMatches: (partialMatches) => {
-      if (args.limit === undefined) return false;
-      const ranked = rankAndLimitMatches(partialMatches, args.limit);
-      if (ranked.length < args.limit) return false;
-      const nthMs = ranked[args.limit - 1]?.latestNoteDate ?? 0;
-      // Remaining = jobs that could still beat the Nth note (not strictly older),
-      // or whose submissions we never finished collecting.
-      const remainingForProof = sortedRows.filter((row) => {
-        const id = typeof row.id === "number" ? row.id : null;
-        if (id === null) return true;
-        if (!fullyCollectedJobIds.has(id)) return true;
-        const added = jobDateAddedMs(row);
-        return !(added > 0 && nthMs > 0 && added < nthMs);
-      });
+    const applicantsToScan = [...collected.applicants.values()].filter(
+      (a) => !noteScannedCandidateIds.has(a.candidateId),
+    );
+    const noteScan = await matchApplicantsByCandidateNotes({
+      applicants: applicantsToScan,
+      noteAction: args.noteAction,
+      // Match notes against any department job (comment Job IDs may predate this page).
+      departmentJobIds: sortedRows
+        .map((r) => (typeof r.id === "number" ? r.id : null))
+        .filter((id): id is number => id !== null),
+      jobTitleById: preloaded.jobTitleById,
+      shouldStop: () => {
+        if (wallHit()) {
+          stoppedForWallTime = true;
+          return true;
+        }
+        return false;
+      },
+    });
+    noteScanned += noteScan.scannedCount;
+    for (const a of applicantsToScan) {
+      noteScannedCandidateIds.add(a.candidateId);
+    }
+    mergeMatches(merged, noteScan.matches);
+
+    for (const row of batch.jobRows) {
+      allJobRows.push(row);
+      if (typeof row.id === "number") allJobIds.push(row.id);
+    }
+
+    // Top-N early-exit: remaining = jobs not yet walked. Do not claim completeness
+    // if this page truncated applicants (unscanned applicants on scanned jobs).
+    if (
+      args.limit !== undefined &&
+      !collected.applicantsTruncated &&
+      !collected.submissionDepthTruncated &&
+      !collected.stoppedEarly
+    ) {
+      const rankedSoFar = rankAndLimitMatches([...merged.values()], args.limit);
+      const remainingJobs = sortedRows.slice(offset + AUTO_WIDEN_JOB_PAGE);
       if (
         canConfirmTopNByJobRecency({
           limit: args.limit,
-          rankedMatches: ranked,
-          remainingJobs: remainingForProof,
+          rankedMatches: rankedSoFar,
+          remainingJobs,
         })
       ) {
         stoppedForTopNProof = true;
-        return true;
+        break;
       }
-      return false;
-    },
-  });
+    }
 
-  if (noteScan.stoppedEarly && wallHit()) stoppedForWallTime = true;
+    if (stoppedForWallTime) break;
+  }
 
-  const merged = new Map<number, MatchCandidate>();
-  mergeMatches(merged, noteScan.matches);
   const ranked = rankAndLimitMatches([...merged.values()], args.limit);
-
-  const jobsScannedCount = collected.stoppedEarly
-    ? collected.jobIdsFullyCollected.length
-    : allJobIds.length;
   const jobsTruncated =
     jobsTruncatedAtLoad ||
-    collected.stoppedEarly ||
-    (stoppedForWallTime && !stoppedForTopNProof) ||
-    jobsScannedCount < allJobIds.length;
-  // Top-N job-recency proof means remaining older jobs were intentionally skipped.
+    (!stoppedForTopNProof && allJobIds.length < sortedRows.length) ||
+    (!stoppedForTopNProof && allJobIds.length < jobsTotal);
   const incomplete =
     (!stoppedForTopNProof && jobsTruncated) ||
-    collected.applicantsTruncated ||
+    (!stoppedForTopNProof && applicantsTruncated) ||
     (stoppedForWallTime && !stoppedForTopNProof) ||
-    collected.submissionDepthTruncated;
+    (!stoppedForTopNProof && submissionDepthTruncated);
   const stopReason = stoppedForTopNProof
     ? "complete"
     : resolveScoutStopReason({
         stoppedForWallTime,
         jobsTruncated: jobsTruncated && !stoppedForTopNProof,
-        applicantsTruncated: collected.applicantsTruncated,
-        submissionDepthTruncated: collected.submissionDepthTruncated,
+        applicantsTruncated: applicantsTruncated && !stoppedForTopNProof,
+        submissionDepthTruncated:
+          submissionDepthTruncated && !stoppedForTopNProof,
       });
   const confirmedComplete =
     (stopReason === "complete" && !incomplete) || stoppedForTopNProof;
@@ -1572,8 +1608,6 @@ async function runAutoWidenScout(args: {
       "Unique matching candidates among the open-department applicant pool for scanned jobs. confirmedComplete=true.";
   }
 
-  const pages = Math.max(1, Math.ceil(jobsScannedCount / AUTO_WIDEN_JOB_PAGE));
-
   return {
     department: args.department,
     ...(args.resolvedFrom
@@ -1587,12 +1621,12 @@ async function runAutoWidenScout(args: {
     uniqueCandidateCount: ranked.length,
     candidates: ranked,
     jobsScanned: {
-      count: stoppedForTopNProof ? allJobIds.length : jobsScannedCount,
+      count: stoppedForTopNProof ? sortedRows.length : allJobIds.length,
       totalMatching: jobsTotal,
       truncated: incomplete && !stoppedForTopNProof ? jobsTruncated : false,
       pages,
       order: "dateAddedDesc",
-      jobs: sortedRows.slice(0, 50).map((r) => ({
+      jobs: allJobRows.slice(0, 50).map((r) => ({
         id: r.id,
         title: r.title,
         status: r.status,
@@ -1600,10 +1634,10 @@ async function runAutoWidenScout(args: {
       })),
     },
     applicantsScanned: {
-      uniqueCandidates: collected.applicants.size,
-      submissionRowsSeen: collected.submissionRowsSeen,
-      noteScanned: noteScan.scannedCount,
-      truncated: collected.applicantsTruncated,
+      uniqueCandidates: applicantsUnique,
+      submissionRowsSeen,
+      noteScanned,
+      truncated: applicantsTruncated && !stoppedForTopNProof,
     },
     autoWiden: {
       elapsedMs: Date.now() - startedAt,
@@ -1613,22 +1647,22 @@ async function runAutoWidenScout(args: {
       noteScanPath: "candidate",
       rankedBy: "latestMatchingNoteDate",
       jobsOrderedBy: "dateAddedDesc",
-      scanStrategy: "collect_applicants_then_notes",
+      scanStrategy: "newest_job_pages_then_notes",
     },
     limits: {
       maxJobs: args.maxJobsCap,
-      maxCandidatesToScan: applicantCap,
+      maxCandidatesToScan: args.maxCandidatesPerPage,
       wallMs,
     },
     stopReason,
     confirmedComplete,
     definition:
       "Natural-language Scout/screening report: resolve Internal Department nicknames, " +
-      "preload OPEN jobs newest-first, collect Response applicants then match candidate notes " +
+      "preload OPEN jobs newest-first, page applicants + candidate notes " +
       "(Scout Screen lives on Candidate — not JobOrder.notes) with the given note action " +
       "(jobOrder or comment Job ID), rank by latest matching note date. " +
       "Pass limit=N for 'N most recent'. Top-N may confirm complete early when remaining " +
-      "jobs are older than the Nth note. Stop working only when confirmedComplete=true " +
+      "unscanned jobs are older than the Nth note. Stop working only when confirmedComplete=true " +
       "or stopReason is a real connector/gateway limit — never because of an arbitrary early search cap.",
     ...(incomplete && !confirmedComplete
       ? { incomplete: true, note: userNote }
