@@ -155,9 +155,17 @@ firm picklist.
 
 ## Async report jobs (implemented)
 
-When sync `scout_dept_report` hits `stopReason=wall_time` (ChatGPT soft wall),
-continue with an in-process async job (same 202 pattern as note-snapshot sync —
-no Redis/BullMQ):
+### Universal soft-wall → async pattern
+
+Soft walls are **channel realism** for ChatGPT (~95s sync). They are **never**
+raised on the sync MCP path and **never** a dead end — for any department and
+any scout path (live auto-widen, exhaustive, snapshot+live_tail):
+
+1. Sync returns honest incomplete + `stopReason=wall_time` + machine-readable
+   `asyncContinuation` (`start_scout_dept_report_job` / `get_report_job` /
+   optional `resumeArgs`).
+2. Model starts one async job with the same args; polls until complete/failed.
+3. **Never** date-window fan-out. **Never** “give up because wall.”
 
 | Surface | Name |
 |---------|------|
@@ -165,9 +173,10 @@ no Redis/BullMQ):
 | **REST** | `POST /api/v1/reports/scout-qualified-by-department/jobs` → `GET /api/v1/reports/jobs/:jobId` |
 
 Schema: `report_jobs` (firm-scoped; status `queued|running|complete|failed`).
-Runner uses `ASYNC_REPORT_WALL_MS` (~20 min) + existing job/page caps; sync
-`TOPN_WALL_MS` / `EXHAUSTIVE_WALL_MS` are unchanged.
+Runner reuses the same scout engine with `ASYNC_REPORT_WALL_MS` (~20 min safety
+max only) + existing job/page caps; sync `TOPN_WALL_MS` / `EXHAUSTIVE_WALL_MS`
+are unchanged.
 
-**Ottawa yellow (v1.1 follow-up):** when snapshot coverage is complete+fresh and
-the snapshot alone already holds a full top-N ranking, live-tail `wall_time`
-alone does not force `confirmedComplete=false`.
+**Top-N + fresh snapshot:** when coverage is complete+fresh and the snapshot
+alone already holds a full top-N ranking, live-tail soft wall alone does not
+force `confirmedComplete=false` (universal correctness, not a department hack).

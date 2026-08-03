@@ -167,7 +167,7 @@ export async function tryServeScoutFromSnapshot(args: {
 
   // Snapshot coverage is complete+fresh when we get here. If the snapshot alone
   // already supplies a full top-N ranking, do not let a live-tail soft wall
-  // alone mark confirmedComplete=false (Ottawa yellow / large-dept case).
+  // alone mark confirmedComplete=false (universal correctness for any dept).
   const snapshotSatisfiesTopN =
     typeof args.limit === "number" &&
     args.limit > 0 &&
@@ -193,8 +193,8 @@ export async function tryServeScoutFromSnapshot(args: {
   } else {
     userNote =
       `Showing ${ranked.length} matching candidate(s) from the note snapshot plus a live tail that hit the ` +
-      `gateway time budget before finishing. Treat as a strong partial; stopReason=wall_time. ` +
-      `Do NOT fan out date windows.`;
+      `gateway soft wall before finishing. Treat as a strong partial; stopReason=wall_time. ` +
+      `Do NOT fan out date windows. Soft wall is never a dead end — continue via async job.`;
   }
 
   return {

@@ -108,26 +108,51 @@ const INCOMPLETE_NO_FANOUT =
   "For a fuller single-call lookback count, ONE follow-up with mode=exhaustive is allowed. " +
   "Or narrow the ask (recent window / one department) and keep mode=bounded.";
 
-/** Continuation when sync hits the ChatGPT soft wall — never date-window fan-out. */
+/**
+ * Universal AI blocker contract (all departments / all scout paths):
+ * Soft walls are ChatGPT/channel realism — never raise sync TOPN/EXHAUSTIVE walls.
+ * wall_time is never a dead end: continue via start_scout_dept_report_job + get_report_job.
+ * Never date-window fan-out. Never give up solely because of the soft wall.
+ */
 export const ASYNC_CONTINUATION_HINT =
-  "To finish without the ChatGPT soft wall, call start_scout_dept_report_job with the same " +
+  "Soft wall is channel realism, not a final answer. Call start_scout_dept_report_job with the same " +
   "arguments, then poll get_report_job until status is complete or failed. " +
-  "Do NOT fan out date windows.";
+  "Do NOT fan out date windows. Do NOT give up because of wall_time.";
+
+/** Machine-readable continuation payload — same shape on every wall_time path. */
+export function buildAsyncContinuation(args?: {
+  /** Echo of the scout args so the model can re-issue without improvising. */
+  resumeArgs?: Record<string, unknown>;
+}): {
+  tool: "start_scout_dept_report_job";
+  pollTool: "get_report_job";
+  hint: string;
+  resumeArgs?: Record<string, unknown>;
+} {
+  return {
+    tool: "start_scout_dept_report_job",
+    pollTool: "get_report_job",
+    hint: ASYNC_CONTINUATION_HINT,
+    ...(args?.resumeArgs ? { resumeArgs: args.resumeArgs } : {}),
+  };
+}
 
 const INCOMPLETE_PARTIAL_RESULTS =
   "uniqueCandidateCount is a LOWER BOUND / partial ranked list for this single call. " +
   "Present these results to the user. Do NOT invent more names. " +
-  "Check stopReason / confirmedComplete: only stop treating the task as unfinished when " +
-  "confirmedComplete is true, or stopReason reflects a true connector/gateway limit you cannot work around. " +
+  "Check stopReason / confirmedComplete: treat the task as unfinished until " +
+  "confirmedComplete is true, OR you have continued via start_scout_dept_report_job " +
+  "and get_report_job finished, OR stopReason is a true unworkable connector limit " +
+  "(e.g. no_matching_jobs) — wall_time alone is NOT a dead end. " +
   INCOMPLETE_NO_FANOUT +
-  " If filters are ambiguous, ask one clarifying question; otherwise continue with one broader/exhaustive call.";
+  " If filters are ambiguous, ask one clarifying question; otherwise continue with async or one broader/exhaustive call.";
 
 const INCOMPLETE_ZERO_NOT_CONFIRMED =
   "uniqueCandidateCount is 0 but confirmedComplete is false — " +
   "this is NOT a confirmed zero. Do NOT tell the user there are no matching candidates. " +
   "Say the first pass found none in the scanned portion, then either ask one clarifying question " +
   "(confirm department, include closed jobs, all applicants vs responses) " +
-  "and/or call scout_dept_report once more with broader filters or mode=exhaustive. " +
+  "and/or call start_scout_dept_report_job (same args) / one broader scout_dept_report or mode=exhaustive. " +
   INCOMPLETE_NO_FANOUT;
 
 function escapeLucenePhrase(term: string): string {
@@ -282,7 +307,7 @@ export function incompleteGuidanceNote(
   opts?: { stoppedForWallTime?: boolean; matchCount?: number },
 ): string {
   const wall = opts?.stoppedForWallTime
-    ? "Scan stopped early under the ChatGPT/gateway timeout budget (stopReason=wall_time) — a real platform limit, not a search-cap give-up. "
+    ? "Scan stopped early under the ChatGPT/gateway soft wall (stopReason=wall_time) — channel realism, not a final answer. "
     : "";
   const asyncHint = opts?.stoppedForWallTime
     ? ` ${ASYNC_CONTINUATION_HINT}`
@@ -312,21 +337,29 @@ export function incompleteGuidanceNote(
   );
 }
 
-/** Append async continuation when a sync result stopped on wall_time. */
+/** Append async continuation when a sync result stopped on wall_time (universal). */
 export function withAsyncContinuationHint<T extends Record<string, unknown>>(
   result: T,
+  opts?: { resumeArgs?: Record<string, unknown> },
 ): T {
   if (result.stopReason !== "wall_time") return result;
   const note =
     typeof result.note === "string" ? result.note : undefined;
-  if (note && note.includes("start_scout_dept_report_job")) return result;
+  if (note && note.includes("start_scout_dept_report_job")) {
+    // Ensure machine-readable field even if note already mentions the tool.
+    if (result.asyncContinuation) return result;
+    return {
+      ...result,
+      asyncContinuation: buildAsyncContinuation({
+        resumeArgs: opts?.resumeArgs,
+      }),
+    };
+  }
   return {
     ...result,
-    asyncContinuation: {
-      tool: "start_scout_dept_report_job",
-      pollTool: "get_report_job",
-      hint: ASYNC_CONTINUATION_HINT,
-    },
+    asyncContinuation: buildAsyncContinuation({
+      resumeArgs: opts?.resumeArgs,
+    }),
     ...(note
       ? { note: `${note} ${ASYNC_CONTINUATION_HINT}` }
       : { note: ASYNC_CONTINUATION_HINT }),
@@ -1045,6 +1078,23 @@ export async function scoutQualifiedByDepartment(args: {
   const asyncBudget =
     wallMsOverride !== undefined && wallMsOverride > TOPN_WALL_MS;
 
+  const resumeArgs: Record<string, unknown> = {
+    department: args.department,
+    noteAction,
+    openJobsOnly,
+    applicantPool,
+    mode,
+    ...(limit !== undefined ? { limit } : {}),
+    ...(args.maxJobs !== undefined ? { maxJobs: args.maxJobs } : {}),
+    ...(args.maxCandidatesToScan !== undefined
+      ? { maxCandidatesToScan: args.maxCandidatesToScan }
+      : {}),
+    ...(args.dateAddedStart ? { dateAddedStart: args.dateAddedStart } : {}),
+    ...(args.dateAddedEnd ? { dateAddedEnd: args.dateAddedEnd } : {}),
+  };
+  const attachContinuation = (result: Record<string, unknown>) =>
+    withAsyncContinuationHint(result, { resumeArgs });
+
   let dateStartMs: number | undefined;
   let dateEndMs: number | undefined;
   if (args.dateAddedStart) {
@@ -1084,9 +1134,7 @@ export async function scoutQualifiedByDepartment(args: {
         snap.confirmedComplete === true ||
         snap.stopReason !== "wall_time"
       ) {
-        return withAsyncContinuationHint(
-          fromSnapshot as Record<string, unknown>,
-        );
+        return attachContinuation(fromSnapshot as Record<string, unknown>);
       }
     }
 
@@ -1101,12 +1149,10 @@ export async function scoutQualifiedByDepartment(args: {
       dateAddedEndMs: dateEndMs,
     });
     if (luceneFirst) {
-      return withAsyncContinuationHint(
-        luceneFirst as Record<string, unknown>,
-      );
+      return attachContinuation(luceneFirst as Record<string, unknown>);
     }
 
-    return withAsyncContinuationHint(
+    return attachContinuation(
       (await runAutoWidenScout({
         department,
         resolvedFrom: resolved.resolvedFrom,
@@ -1244,7 +1290,7 @@ export async function scoutQualifiedByDepartment(args: {
   });
   const confirmedComplete = stopReason === "complete" && !incomplete;
 
-  return withAsyncContinuationHint({
+  return attachContinuation({
     department,
     ...(resolved.resolvedFrom ? { departmentResolvedFrom: resolved.resolvedFrom } : {}),
     noteAction,

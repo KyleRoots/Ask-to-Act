@@ -1246,7 +1246,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Screening/Scout notes by Internal Department — NL-ready. Resolves nicknames (STSI→STS-STSI). Defaults OPEN jobs. For 'N most recent' pass limit=N (pages until jobs exhausted or gateway wall). Read stopReason + confirmedComplete: only treat the task as finished when confirmedComplete=true OR stopReason is a real connector/gateway limit (e.g. wall_time, no_matching_jobs) — never give up solely because of an arbitrary search cap. On wall_time, call start_scout_dept_report_job (same args) then poll get_report_job — never date-window fan-out. 0+incomplete → clarify or one broader/exhaustive retry. Link NAME to bullhornUrl.",
+    "Screening/Scout notes by Internal Department — NL-ready. Resolves nicknames (STSI→STS-STSI). Defaults OPEN jobs. For 'N most recent' pass limit=N (pages until jobs exhausted or gateway soft wall). Soft walls are channel realism (~95s) — never a dead end. Read stopReason + confirmedComplete + asyncContinuation: on wall_time call start_scout_dept_report_job (same args) then poll get_report_job. Never date-window fan-out. Never give up solely because of wall_time or an arbitrary search cap. 0+incomplete → clarify or async/broader retry. Link NAME to bullhornUrl.",
     {
       department: z
         .string()

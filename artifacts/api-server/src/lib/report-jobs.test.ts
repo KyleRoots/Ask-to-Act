@@ -40,16 +40,22 @@ describe("async report job contracts", () => {
     expect(note).toMatch(/start_scout_dept_report_job/);
     expect(note).toMatch(/get_report_job/);
     expect(note).toMatch(/Do NOT issue multiple scout_dept_report/i);
+    expect(note).toMatch(/channel realism|never a dead end|Soft wall/i);
     expect(ASYNC_CONTINUATION_HINT).toMatch(/start_scout_dept_report_job/);
+    expect(ASYNC_CONTINUATION_HINT).toMatch(/Do NOT give up/i);
 
-    const wrapped = withAsyncContinuationHint({
-      stopReason: "wall_time",
-      confirmedComplete: false,
-      note: "partial",
-    }) as Record<string, unknown>;
+    const wrapped = withAsyncContinuationHint(
+      {
+        stopReason: "wall_time",
+        confirmedComplete: false,
+        note: "partial",
+      },
+      { resumeArgs: { department: "STSI", limit: 5 } },
+    ) as Record<string, unknown>;
     expect(wrapped.asyncContinuation).toMatchObject({
       tool: "start_scout_dept_report_job",
       pollTool: "get_report_job",
+      resumeArgs: { department: "STSI", limit: 5 },
     });
     expect(String(wrapped.note)).toMatch(/start_scout_dept_report_job/);
 
@@ -79,7 +85,7 @@ describe("async report job contracts", () => {
   });
 });
 
-describe("snapshot top-N vs live-tail wall (Ottawa yellow)", () => {
+describe("snapshot top-N vs live-tail wall (universal)", () => {
   it("treats full snapshot top-N as complete even if live tail hit wall", () => {
     function confirmed(fromSnapLength: number, limit: number, wall: boolean) {
       const snapshotSatisfiesTopN =
