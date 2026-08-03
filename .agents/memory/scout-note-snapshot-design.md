@@ -59,9 +59,12 @@ curl -sS -X POST \
   "https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync"
 ```
 
-Expect **202 Accepted**. Point Railway Cron at that URL hourly. No second service
-required — same api-server process. Concurrent duplicate syncs for the same
-firm/department return **409**.
+Expect **202 Accepted**. Point Railway Cron at that URL every **30 minutes**
+(`*/30 * * * *`). Service: `note-snapshot-cron` (curl image; does not restart
+the API). Concurrent duplicate syncs for the same firm/department return **409**.
+
+Default snapshot TTL is **2 hours** (`NOTE_SNAPSHOT_TTL_MS`) — a 30‑minute cron
+keeps coverage well inside that window.
 
 ## Read path
 
