@@ -1,75 +1,80 @@
 ---
 name: Scout note snapshot design
-description: Phase-3 design for a department-agnostic note snapshot if Bullhorn Note Lucene stays empty.
+description: Firm-scoped note snapshot when Bullhorn Note Lucene stays empty.
 ---
 
-# Scout note snapshot (Phase 3 — only if Lucene stays broken)
+# Note action snapshot (implemented)
 
 ## Status
 
-As of 2026-08-03, Lucene `/search/Note` still returns `total: 0` on Myticas
-(rest45). Phase 1 (top-N early-exit + collect-then-notes) and Phase 2
-(Lucene-first with association fallback) shipped in the connector. **Do not
-build this snapshot until Bullhorn Support confirms Lucene will not be
-restored on a usable timeline.**
+**Implemented (2026-08-03)** as a sustainable workaround while `/search/Note`
+returns total 0. Phase 1 live early-exit remains the fallback when coverage is
+missing or stale.
 
 ## Goal
 
 Make large-department and multi-department note-action reports finish under
 the ChatGPT ~95s soft wall without depending on `/search/Note`.
 
-## Scope
+## Scope (v1)
 
-- All Internal Departments (`JobOrder.correlatedCustomText1`) — no STSI hardcoding.
-- Configured note actions first (default: Scout Screen action family).
+- All Internal Departments — no STSI hardcoding.
+- Allowlisted `Note.action` values (default: prefix `Scout Screen -`).
+- Sync: **open jobs** + **Response** applicants only.
 - Same MCP/REST contract: `scout_dept_report` /
   `GET /v1/reports/scout-qualified-by-department`.
 
-## Proposed schema (Postgres)
+## Schema
 
-```sql
-CREATE TABLE scout_note_snapshot (
-  note_id           bigint PRIMARY KEY,
-  action            text NOT NULL,
-  candidate_id      bigint NOT NULL,
-  job_id            bigint,              -- null when only in comments; prefer parsed
-  department        text,                -- denormalized correlatedCustomText1
-  note_date_added   bigint NOT NULL,     -- Bullhorn epoch ms
-  candidate_first   text,
-  candidate_last    text,
-  synced_at         timestamptz NOT NULL DEFAULT now()
-);
+- `note_action_snapshot` — PK `(firm_id, note_id)`
+- `note_snapshot_coverage` — PK `(firm_id, department)` with
+  `status` (`complete` | `partial` | `failed`) and `last_full_sync_at`
 
-CREATE INDEX scout_note_snapshot_dept_action_date
-  ON scout_note_snapshot (department, action, note_date_added DESC);
+## Allowlist / env
 
-CREATE INDEX scout_note_snapshot_synced
-  ON scout_note_snapshot (synced_at);
+| Env | Meaning |
+|-----|---------|
+| `NOTE_SNAPSHOT_ACTION_PREFIXES` | Comma-separated prefixes. **Unset** → `Scout Screen -`. Empty string → no prefixes. |
+| `NOTE_SNAPSHOT_ACTIONS` | Comma-separated exact actions (add recruiter actions later). |
+| `NOTE_SNAPSHOT_TTL_MS` | Coverage freshness window (default **2 hours**). |
+
+## Sync
+
+`POST /api/firms/:id/note-snapshot/sync`  
+Auth: `Authorization: Bearer $MCP_BEARER_TOKEN` (service only).  
+Optional: `?department=STSI` or body `{ "department": "STSI" }`.
+
+Must run inside firm Bullhorn context (route sets `firmContext`).
+
+### Railway Cron (hourly)
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $MCP_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync"
 ```
 
-## Sync strategy
-
-1. **Nightly / hourly Railway cron** (outside ChatGPT turn): for each known
-   department value, walk open jobs → Response applicants → `get_notes`
-   (candidate association), upsert rows matching configured actions.
-2. **Freshness**: `scout_dept_report` serves from snapshot when
-   `synced_at` is within a configured TTL (e.g. 2h). Optionally live-refresh
-   the newest N jobs' applicants for the department to catch notes since sync.
-3. **Idempotent**: upsert on `note_id`; delete snapshot rows whose jobs left
-   the open set only if the report defaults to openJobsOnly (keep historical
-   rows when `openJobsOnly=false`).
+Point Railway Cron at that URL hourly (or nightly first). No second service
+required — same api-server process.
 
 ## Read path
 
-- Rank/limit/count from snapshot filtered by `department` + `action` (+
-  optional date bounds).
-- Set `confirmedComplete` from snapshot coverage metadata (last full dept
-  walk finished, no wall abort).
-- If snapshot missing/stale for a department, fall back to today's live
-  association walk (Phase 1).
+`scoutQualifiedByDepartment`:
 
-## Non-goals
+1. If firm context + allowlisted action + open/responses + coverage
+   `complete` within TTL → serve from snapshot + **live tail** (newest ~20 jobs).
+2. Else Lucene probe → association walk (existing Phase 1 path).
 
-- Not a second MCP product or UI dashboard.
+`autoWiden.noteScanPath` will be `snapshot+live_tail` when served from index.
+
+## Expanding beyond Scout
+
+Add exact actions to `NOTE_SNAPSHOT_ACTIONS` (e.g. `Left Message,Submitted`)
+and re-run sync — no schema change.
+
+## Non-goals (still)
+
+- Not a second MCP product.
 - Do not infer actions from résumé text.
 - Do not raise ChatGPT gateway soft walls.

@@ -9,7 +9,8 @@ import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 import { getUserMailboxStatus } from "../lib/m365-auth.js";
 import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
-import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses } from "../lib/bullhorn-auth.js";
+import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses, firmContext } from "../lib/bullhorn-auth.js";
+import { syncNoteSnapshotForFirm } from "../lib/note-snapshot-sync.js";
 
 const router: IRouter = Router();
 
@@ -697,6 +698,69 @@ router.post(
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ firmId: id, err }, "Firm config discovery failed");
       res.status(502).json({ error: `Config discovery failed: ${msg}` });
+    }
+  },
+);
+
+/**
+ * POST /api/firms/:id/note-snapshot/sync
+ * Service-only. Background walk of open jobs → Response applicants → allowlisted
+ * Note.action values into note_action_snapshot. Intended for Railway Cron
+ * (outside ChatGPT turns). Optional ?department= or body.department for one dept.
+ */
+router.post(
+  "/firms/:id/note-snapshot/sync",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    if (!(await isFirmConnected(id))) {
+      res.status(409).json({
+        error:
+          "Firm's Bullhorn connection is not active. Connect Bullhorn before syncing the note snapshot.",
+      });
+      return;
+    }
+
+    const departmentRaw =
+      (typeof req.query.department === "string" && req.query.department) ||
+      (typeof (req.body as { department?: unknown })?.department === "string"
+        ? (req.body as { department: string }).department
+        : undefined);
+
+    try {
+      const summary = await firmContext.run({ firmId: id }, () =>
+        syncNoteSnapshotForFirm({
+          firmId: id,
+          ...(departmentRaw?.trim()
+            ? { department: departmentRaw.trim() }
+            : {}),
+        }),
+      );
+      logger.info(
+        {
+          firmId: id,
+          elapsedMs: summary.elapsedMs,
+          notesUpsertedTotal: summary.notesUpsertedTotal,
+          departments: summary.departments.length,
+        },
+        "Note snapshot sync finished",
+      );
+      res.json(summary);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ firmId: id, err }, "Note snapshot sync failed");
+      res.status(502).json({ error: `Note snapshot sync failed: ${msg}` });
     }
   },
 );

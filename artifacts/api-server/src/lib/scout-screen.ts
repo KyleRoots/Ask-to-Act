@@ -192,7 +192,7 @@ export function pickDepartmentMatch(
   return null;
 }
 
-async function listInternalDepartments(): Promise<string[]> {
+export async function listInternalDepartments(): Promise<string[]> {
   try {
     const r = (await countEntity({
       entityType: "JobOrder",
@@ -450,7 +450,7 @@ type ScanPassResult = {
   maxCandidatesToScan: number;
 };
 
-async function loadDepartmentJobs(args: {
+export async function loadDepartmentJobs(args: {
   department: string;
   openJobsOnly: boolean;
   maxJobs: number;
@@ -577,7 +577,7 @@ function jobsBundleFromRows(
   return { jobRows, jobsTotal, jobsTruncated, jobIds, jobTitleById };
 }
 
-async function collectApplicantsForJobs(args: {
+export async function collectApplicantsForJobs(args: {
   jobIds: number[];
   applicantPool: ScoutApplicantPool;
   maxCandidatesToScan: number;
@@ -985,6 +985,22 @@ export async function scoutQualifiedByDepartment(args: {
   // Prefer this over exhaustive date windows for "most recent" / "list N" asks.
   // Keep paging until jobs exhausted or gateway wall — do not stop early for search caps.
   if (mode === "bounded" || limit !== undefined) {
+    const { tryServeScoutFromSnapshot } = await import(
+      "./note-snapshot-read.js"
+    );
+    const fromSnapshot = await tryServeScoutFromSnapshot({
+      department,
+      resolvedFrom: resolved.resolvedFrom,
+      noteAction,
+      openJobsOnly,
+      applicantPool,
+      mode: "bounded",
+      limit,
+      dateAddedStartMs: dateStartMs,
+      dateAddedEndMs: dateEndMs,
+    });
+    if (fromSnapshot) return fromSnapshot;
+
     const luceneFirst = await tryScoutViaNoteLucene({
       department,
       resolvedFrom: resolved.resolvedFrom,
@@ -1668,6 +1684,203 @@ async function runAutoWidenScout(args: {
       ? { incomplete: true, note: userNote }
       : { note: userNote }),
   };
+}
+
+/** High applicant budget for background snapshot sync (outside ChatGPT wall). */
+export const SNAPSHOT_SYNC_MAX_CANDIDATES = 50_000;
+export const SNAPSHOT_SYNC_MAX_JOBS = AUTO_WIDEN_MAX_JOBS;
+/** Newest open jobs to re-scan live when serving from snapshot. */
+export const SNAPSHOT_LIVE_TAIL_JOBS = AUTO_WIDEN_JOB_PAGE;
+
+export type SnapshotNoteHit = {
+  noteId: number;
+  action: string;
+  candidateId: number;
+  jobId: number | null;
+  department: string;
+  noteDateAdded: number;
+  candidateFirst?: string;
+  candidateLast?: string;
+};
+
+/**
+ * Walk open jobs → Response applicants → candidate notes for one department.
+ * Used by the background snapshot sync (no ChatGPT wall).
+ */
+export async function harvestDepartmentSnapshotNotes(args: {
+  department: string;
+  isAllowlisted: (action: string) => boolean;
+  maxJobs?: number;
+  maxCandidates?: number;
+}): Promise<{
+  rows: SnapshotNoteHit[];
+  complete: boolean;
+  jobsTotal: number;
+  jobsLoaded: number;
+  applicantsUnique: number;
+  submissionRowsSeen: number;
+  errorSummary?: string;
+}> {
+  const maxJobs = args.maxJobs ?? SNAPSHOT_SYNC_MAX_JOBS;
+  const maxCandidates = args.maxCandidates ?? SNAPSHOT_SYNC_MAX_CANDIDATES;
+  try {
+    const jobs = await loadDepartmentJobs({
+      department: args.department,
+      openJobsOnly: true,
+      maxJobs,
+      pageAll: true,
+    });
+    if (jobs.jobIds.length === 0) {
+      return {
+        rows: [],
+        complete: !jobs.jobsTruncated,
+        jobsTotal: jobs.jobsTotal,
+        jobsLoaded: 0,
+        applicantsUnique: 0,
+        submissionRowsSeen: 0,
+      };
+    }
+    const collected = await collectApplicantsForJobs({
+      jobIds: jobs.jobIds,
+      applicantPool: "responses",
+      maxCandidatesToScan: maxCandidates,
+    });
+    const jobIdSet = new Set(jobs.jobIds);
+    const byNoteId = new Map<number, SnapshotNoteHit>();
+
+    const applicants = [...collected.applicants.values()];
+    for (const batch of chunk(applicants, NOTE_SCAN_CONCURRENCY)) {
+      await mapWithLimit(batch, NOTE_SCAN_CONCURRENCY, async (app) => {
+        const notesRes = (await getNotes({
+          candidateId: app.candidateId,
+          returnAllLoaded: true,
+          fields:
+            "id,action,comments,jobOrder,dateAdded,personReference,candidates",
+        })) as { data?: Array<Record<string, unknown>> };
+        const notes = Array.isArray(notesRes.data) ? notesRes.data : [];
+        for (const note of notes) {
+          const action = typeof note.action === "string" ? note.action : "";
+          if (!args.isAllowlisted(action)) continue;
+          const noteId = typeof note.id === "number" ? note.id : 0;
+          if (!(noteId > 0)) continue;
+          const dateAdded =
+            typeof note.dateAdded === "number" ? note.dateAdded : 0;
+          if (!(dateAdded > 0)) continue;
+          const hitJobs = jobs.jobIds.filter((jid) =>
+            noteReferencesJob(note, jid),
+          );
+          if (hitJobs.length === 0) continue;
+          const primaryJob =
+            hitJobs.find((jid) => jobIdSet.has(jid)) ?? hitJobs[0] ?? null;
+          const fromNote =
+            personName(note.personReference) || personName(note.candidates);
+          byNoteId.set(noteId, {
+            noteId,
+            action,
+            candidateId: app.candidateId,
+            jobId: primaryJob,
+            department: args.department,
+            noteDateAdded: dateAdded,
+            candidateFirst: app.firstName ?? fromNote.firstName,
+            candidateLast: app.lastName ?? fromNote.lastName,
+          });
+        }
+      });
+    }
+
+    const complete =
+      !jobs.jobsTruncated &&
+      !collected.applicantsTruncated &&
+      !collected.submissionDepthTruncated &&
+      !collected.stoppedEarly;
+
+    return {
+      rows: [...byNoteId.values()],
+      complete,
+      jobsTotal: jobs.jobsTotal,
+      jobsLoaded: jobs.jobIds.length,
+      applicantsUnique: collected.applicants.size,
+      submissionRowsSeen: collected.submissionRowsSeen,
+      ...(complete
+        ? {}
+        : {
+            errorSummary: [
+              jobs.jobsTruncated ? "jobs_truncated" : null,
+              collected.applicantsTruncated ? "applicants_truncated" : null,
+              collected.submissionDepthTruncated
+                ? "submission_depth_truncated"
+                : null,
+            ]
+              .filter(Boolean)
+              .join(","),
+          }),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      rows: [],
+      complete: false,
+      jobsTotal: 0,
+      jobsLoaded: 0,
+      applicantsUnique: 0,
+      submissionRowsSeen: 0,
+      errorSummary: msg.slice(0, 500),
+    };
+  }
+}
+
+/**
+ * One newest-first job page association scan — live tail for snapshot reads.
+ */
+export async function liveTailScoutMatches(args: {
+  department: string;
+  noteAction: string;
+  maxJobs?: number;
+  maxCandidates?: number;
+}): Promise<{
+  matches: MatchCandidate[];
+  stoppedForWallTime: boolean;
+}> {
+  const maxJobs = args.maxJobs ?? SNAPSHOT_LIVE_TAIL_JOBS;
+  const maxCandidates =
+    args.maxCandidates ?? AUTO_WIDEN_CANDIDATES_PER_PAGE;
+  const startedAt = Date.now();
+  const wallMs = Math.min(TOPN_WALL_MS, 25_000);
+  const wallHit = () => Date.now() - startedAt >= wallMs;
+
+  const preloaded = await loadDepartmentJobs({
+    department: args.department,
+    openJobsOnly: true,
+    maxJobs: SNAPSHOT_SYNC_MAX_JOBS,
+    pageAll: true,
+  });
+  const sortedRows = sortJobsNewestFirst(preloaded.jobRows).slice(0, maxJobs);
+  if (sortedRows.length === 0) {
+    return { matches: [], stoppedForWallTime: false };
+  }
+  const batch = jobsBundleFromRows(sortedRows, preloaded.jobsTotal, false);
+  const collected = await collectApplicantsForJobs({
+    jobIds: batch.jobIds,
+    applicantPool: "responses",
+    maxCandidatesToScan: maxCandidates,
+    shouldStop: wallHit,
+  });
+  let stoppedForWallTime = collected.stoppedEarly && wallHit();
+  const noteScan = await matchApplicantsByCandidateNotes({
+    applicants: [...collected.applicants.values()],
+    noteAction: args.noteAction,
+    departmentJobIds: preloaded.jobIds,
+    jobTitleById: preloaded.jobTitleById,
+    shouldStop: () => {
+      if (wallHit()) {
+        stoppedForWallTime = true;
+        return true;
+      }
+      return false;
+    },
+  });
+  if (noteScan.stoppedEarly && wallHit()) stoppedForWallTime = true;
+  return { matches: noteScan.matches, stoppedForWallTime };
 }
 
 /** Re-export for tests that assert comment parsing stays wired. */

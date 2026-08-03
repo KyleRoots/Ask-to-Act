@@ -21,6 +21,7 @@ export * from "./bullhorn-tokens";
 export * from "./email-send-logs";
 export * from "./firms";
 export * from "./firm-config";
+export * from "./note-action-snapshot";
 export * from "./user-mailboxes";
 export * from "./users";
 export * from "./seat-activity";

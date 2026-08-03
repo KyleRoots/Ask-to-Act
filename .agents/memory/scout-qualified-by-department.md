@@ -52,12 +52,13 @@ Server behavior:
 - Defaults to **open** jobs.
 - Auto-pages jobs newest-first until exhausted, top-N job-recency early-exit
   proves `confirmedComplete`, or ~75s/95s gateway wall (safety valve).
-- Scan strategy: per newest job page — collect Response applicants, then
+- **Snapshot-first** when `note_snapshot_coverage` is complete and fresh (≤2h):
+  rank from Postgres `note_action_snapshot` + live tail of newest open jobs.
+  See [scout-note-snapshot-design.md](./scout-note-snapshot-design.md).
+- Scan strategy (live fallback): per newest job page — collect Response applicants, then
   candidate-association `get_notes` (JobOrder.notes miss Scout Screen). Early-exit
   when remaining unscanned jobs are older than the Nth matching note.
 - Lucene-first path feature-detects `/search/Note`; falls back when total=0.
-- Snapshot design (only if Lucene stays broken):
-  [scout-note-snapshot-design.md](./scout-note-snapshot-design.md).
 - For top-N / list asks: preload open jobs **newest-first** (`dateAdded` desc) and allow ~95s wall so July-level matches are not stranded behind older Lucene page order.
 - Matches notes across the full association-loaded note set (not just a 50-row display page).
 - Returns top-level `stopReason` + `confirmedComplete`.
