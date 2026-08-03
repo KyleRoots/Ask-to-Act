@@ -78,16 +78,36 @@ Must run inside firm Bullhorn context (route sets `firmContext`).
 
 ### Railway Cron
 
+Service: `note-snapshot-cron` — image **`alpine:3.20`** (not `curlimages/curl`).
+Schedule: **`*/30 * * * *`**. Does not restart the API.
+
+**Why not `curlimages/curl`:** that image’s `ENTRYPOINT` is `curl`, so a Railway
+`startCommand` of `sh -c '…'` becomes `curl sh -c '…'` and fails with
+`curl: try 'curl --help'…`. Use alpine + busybox `wget` (or an image without a
+curl entrypoint).
+
+**startCommand shape (production):** Railway wraps the start command in a way
+that does not expand `$VAR` unless an inner `sh -c "…"` runs. Hardcode the sync
+URL (not secret); expand only `$MCP_BEARER_TOKEN` inside double quotes. Exit **0**
+when response headers contain `HTTP/… 200`, `202`, or `409` (grep); ignore
+unrelated headers (e.g. Clerk). `wget … || true` so a non-zero wget exit does
+not mask a successful status before the grep gate.
+
 ```bash
-curl -sS -X POST \
-  -H "Authorization: Bearer $MCP_BEARER_TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync"
+sh -c "wget -S -O /tmp/out \
+  --header=\"Authorization: Bearer $MCP_BEARER_TOKEN\" \
+  --header=\"Content-Type: application/json\" \
+  --post-data=\"\" \
+  \"https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync\" \
+  2>/tmp/hdr || true; cat /tmp/hdr; grep -E 'HTTP/[0-9.]+ (200|202|409)' /tmp/hdr"
 ```
 
-Expect **202 Accepted**. Point Railway Cron at that URL every **30 minutes**
-(`*/30 * * * *`). Service: `note-snapshot-cron` (curl image; does not restart
-the API). Concurrent duplicate syncs for the same firm/department return **409**.
+Expect **202 Accepted**. Concurrent duplicate syncs return **409** (already
+in-flight). Treat **200 / 202 / 409** as cron success so a long firm walk does
+not mark the Railway job CRASHED every half hour.
+
+Optional env `SYNC_URL` may exist for reference; production startCommand uses the
+hardcoded URL above so expansion cannot fail.
 
 Default snapshot TTL is **2 hours** (`NOTE_SNAPSHOT_TTL_MS`) — a 30‑minute cron
 keeps coverage well inside that window.
