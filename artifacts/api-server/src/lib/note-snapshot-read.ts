@@ -129,13 +129,19 @@ export async function tryServeScoutFromSnapshot(args: {
   if (!coverageServesApplicantPool(coverage, args.applicantPool)) return null;
 
   const startedAt = Date.now();
+  // Legacy responses-only syncs stored only Response applicants without the
+  // response_applicant tag (column defaulted false on 0013). Filter by the
+  // tag only after an all-pool sync has written it correctly.
+  const responseApplicantsOnly =
+    args.applicantPool === "responses" &&
+    coverage!.applicantPoolSynced === "all";
   const rows = await querySnapshotNotes({
     firmId,
     department: args.department,
     noteAction: args.noteAction,
     dateAddedStartMs: args.dateAddedStartMs,
     dateAddedEndMs: args.dateAddedEndMs,
-    responseApplicantsOnly: args.applicantPool === "responses",
+    responseApplicantsOnly,
     limit: args.limit,
   });
   const fromSnap = rankSnapshotCandidates(rows, undefined);

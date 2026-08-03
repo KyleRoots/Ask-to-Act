@@ -111,6 +111,18 @@ describe("coverageServesApplicantPool", () => {
     ).toBe(false);
   });
 
+  it("documents when response_applicant filter applies", () => {
+    // Responses-only sync rows lack reliable response_applicant tags (0013
+    // defaulted false). Filter by the tag only after all-pool sync.
+    const filterFor = (
+      requestPool: "responses" | "all",
+      synced: string,
+    ): boolean => requestPool === "responses" && synced === "all";
+    expect(filterFor("responses", "responses")).toBe(false);
+    expect(filterFor("responses", "all")).toBe(true);
+    expect(filterFor("all", "all")).toBe(false);
+  });
+
   it("refuses stale or incomplete coverage for any pool", () => {
     const now = Date.now();
     expect(
