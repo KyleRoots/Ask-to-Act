@@ -29,8 +29,9 @@ export type NoteSnapshotSyncResult = {
 };
 
 /**
- * Background sync: walk open jobs → Response applicants → allowlisted notes,
- * upsert into note_action_snapshot, write per-department coverage.
+ * Background sync: walk open jobs → all applicants → allowlisted notes,
+ * upsert into note_action_snapshot (with response_applicant tags), write
+ * per-department coverage with applicant_pool_synced=all.
  * Must run inside firmContext.run({ firmId }).
  */
 export async function syncNoteSnapshotForFirm(args: {
@@ -80,6 +81,7 @@ export async function syncNoteSnapshotForFirm(args: {
         department,
         status,
         notesUpserted,
+        applicantPoolSynced: harvested.applicantPool,
         errorSummary: harvested.errorSummary,
       });
     } catch (err) {
@@ -90,6 +92,7 @@ export async function syncNoteSnapshotForFirm(args: {
         department,
         status: "failed",
         notesUpserted,
+        applicantPoolSynced: harvested.applicantPool,
         errorSummary: msg.slice(0, 500),
       });
       summaries.push({
@@ -128,6 +131,7 @@ export async function syncNoteSnapshotForFirm(args: {
         status,
         notesUpserted,
         jobsLoaded: harvested.jobsLoaded,
+        applicantPoolSynced: harvested.applicantPool,
       },
       "note-snapshot sync: department done",
     );

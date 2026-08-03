@@ -4,6 +4,7 @@ import {
   bigint,
   integer,
   timestamp,
+  boolean,
   primaryKey,
   index,
 } from "drizzle-orm/pg-core";
@@ -30,6 +31,8 @@ export const noteActionSnapshotTable = pgTable(
     noteDateAdded: bigint("note_date_added", { mode: "number" }).notNull(),
     candidateFirst: text("candidate_first"),
     candidateLast: text("candidate_last"),
+    /** True when the candidate had a Response-bucket JobSubmission on a scanned open job. */
+    responseApplicant: boolean("response_applicant").notNull().default(false),
     syncedAt: timestamp("synced_at").notNull().defaultNow(),
   },
   (table) => [
@@ -63,6 +66,14 @@ export const noteSnapshotCoverageTable = pgTable(
     lastAttemptAt: timestamp("last_attempt_at").notNull().defaultNow(),
     notesUpserted: integer("notes_upserted").notNull().default(0),
     errorSummary: text("error_summary"),
+    /**
+     * Which applicant pool the last successful sync walked.
+     * `all` = every JobSubmission on open jobs (response_applicant tagged).
+     * `responses` = Response bucket only (legacy / incomplete for pool=all reads).
+     */
+    applicantPoolSynced: text("applicant_pool_synced")
+      .notNull()
+      .default("responses"),
   },
   (table) => [
     primaryKey({ columns: [table.firmId, table.department] }),

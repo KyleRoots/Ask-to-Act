@@ -2,7 +2,7 @@ import { searchAnyEntity } from "./bullhorn-client.js";
 import { currentFirmContextId } from "./bullhorn-auth.js";
 import { isSnapshotIndexedAction } from "./note-snapshot-allowlist.js";
 import {
-  coverageIsServable,
+  coverageServesApplicantPool,
   getCoverage,
   querySnapshotNotes,
   rankSnapshotCandidates,
@@ -103,6 +103,9 @@ async function enrichBullhornUrls(matches: ScoutMatch[]): Promise<void> {
 /**
  * Serve scout_dept_report from Postgres snapshot when coverage is fresh.
  * Returns null to signal caller should use Lucene / live association walk.
+ *
+ * Serves both applicantPool=responses (filtered via response_applicant) and
+ * applicantPool=all when coverage.applicant_pool_synced=all.
  */
 export async function tryServeScoutFromSnapshot(args: {
   department: string;
@@ -117,14 +120,13 @@ export async function tryServeScoutFromSnapshot(args: {
 }): Promise<unknown | null> {
   if (args.mode === "exhaustive") return null;
   if (!args.openJobsOnly) return null;
-  if (args.applicantPool !== "responses") return null;
   if (!isSnapshotIndexedAction(args.noteAction)) return null;
 
   const firmId = currentFirmContextId();
   if (!firmId) return null;
 
   const coverage = await getCoverage(firmId, args.department);
-  if (!coverageIsServable(coverage)) return null;
+  if (!coverageServesApplicantPool(coverage, args.applicantPool)) return null;
 
   const startedAt = Date.now();
   const rows = await querySnapshotNotes({
@@ -133,6 +135,7 @@ export async function tryServeScoutFromSnapshot(args: {
     noteAction: args.noteAction,
     dateAddedStartMs: args.dateAddedStartMs,
     dateAddedEndMs: args.dateAddedEndMs,
+    responseApplicantsOnly: args.applicantPool === "responses",
     limit: args.limit,
   });
   const fromSnap = rankSnapshotCandidates(rows, undefined);
@@ -149,6 +152,7 @@ export async function tryServeScoutFromSnapshot(args: {
   const tail = await liveTailScoutMatches({
     department: args.department,
     noteAction: args.noteAction,
+    applicantPool: args.applicantPool,
   });
   mergeMatches(merged, tail.matches);
 
@@ -183,7 +187,7 @@ export async function tryServeScoutFromSnapshot(args: {
       : {}),
     noteAction: args.noteAction,
     openJobsOnly: true,
-    applicantPool: "responses",
+    applicantPool: args.applicantPool,
     mode: "bounded",
     ...(args.limit !== undefined ? { limit: args.limit } : {}),
     uniqueCandidateCount: ranked.length,
@@ -207,6 +211,7 @@ export async function tryServeScoutFromSnapshot(args: {
       rankedBy: "latestMatchingNoteDate",
       snapshotSyncedAt: syncedAt,
       snapshotCoverageStatus: coverage!.status,
+      snapshotApplicantPoolSynced: coverage!.applicantPoolSynced,
     },
     limits: {
       snapshotTtlHonored: true,
@@ -214,9 +219,10 @@ export async function tryServeScoutFromSnapshot(args: {
     stopReason: confirmedComplete ? "complete" : "wall_time",
     confirmedComplete,
     definition:
-      "Served from firm note_action_snapshot (background sync of allowlisted Note.action values) " +
-      "with a live tail of newest open-job applicants. Falls back to live association walk when " +
-      "coverage is missing, stale, or filters are outside snapshot scope (closed jobs / all applicants / exhaustive).",
+      "Served from firm note_action_snapshot (background sync of allowlisted Note.action values " +
+      "across all open-job applicants, with response_applicant tags) with a live tail of newest " +
+      "open-job applicants. Falls back to live association walk when coverage is missing, stale, " +
+      "or filters are outside snapshot scope (closed jobs / exhaustive / pool=all before all-pool sync).",
     ...(confirmedComplete
       ? { note: userNote }
       : { incomplete: true, note: userNote }),

@@ -11,6 +11,7 @@ import {
 import type { SnapshotNoteHit } from "./scout-screen.js";
 
 export type CoverageStatus = "complete" | "partial" | "failed";
+export type ApplicantPoolSynced = "all" | "responses";
 
 export async function upsertSnapshotNotes(
   firmId: string,
@@ -35,6 +36,7 @@ export async function upsertSnapshotNotes(
           noteDateAdded: r.noteDateAdded,
           candidateFirst: r.candidateFirst ?? null,
           candidateLast: r.candidateLast ?? null,
+          responseApplicant: r.responseApplicant,
           syncedAt: now,
         })),
       )
@@ -51,6 +53,7 @@ export async function upsertSnapshotNotes(
           noteDateAdded: sql`excluded.note_date_added`,
           candidateFirst: sql`excluded.candidate_first`,
           candidateLast: sql`excluded.candidate_last`,
+          responseApplicant: sql`excluded.response_applicant`,
           syncedAt: sql`excluded.synced_at`,
         },
       });
@@ -64,9 +67,11 @@ export async function writeCoverage(args: {
   department: string;
   status: CoverageStatus;
   notesUpserted: number;
+  applicantPoolSynced?: ApplicantPoolSynced;
   errorSummary?: string;
 }): Promise<void> {
   const now = new Date();
+  const applicantPoolSynced = args.applicantPoolSynced ?? "all";
   await db
     .insert(noteSnapshotCoverageTable)
     .values({
@@ -77,6 +82,7 @@ export async function writeCoverage(args: {
       lastFullSyncAt: args.status === "complete" ? now : null,
       notesUpserted: args.notesUpserted,
       errorSummary: args.errorSummary?.slice(0, 500) ?? null,
+      applicantPoolSynced,
     })
     .onConflictDoUpdate({
       target: [
@@ -88,6 +94,7 @@ export async function writeCoverage(args: {
         lastAttemptAt: now,
         notesUpserted: args.notesUpserted,
         errorSummary: args.errorSummary?.slice(0, 500) ?? null,
+        applicantPoolSynced,
         ...(args.status === "complete"
           ? { lastFullSyncAt: now }
           : {}),
@@ -121,6 +128,23 @@ export function coverageIsServable(
   return isCoverageFresh(coverage.lastFullSyncAt, nowMs, noteSnapshotTtlMs());
 }
 
+/**
+ * Whether snapshot coverage can answer the requested applicant pool.
+ * `all` requires applicant_pool_synced=all; `responses` works for either
+ * (all-pool syncs tag response_applicant for filtering).
+ */
+export function coverageServesApplicantPool(
+  coverage: typeof noteSnapshotCoverageTable.$inferSelect | null,
+  applicantPool: "responses" | "all",
+  nowMs: number = Date.now(),
+): boolean {
+  if (!coverageIsServable(coverage, nowMs)) return false;
+  if (applicantPool === "all") {
+    return coverage!.applicantPoolSynced === "all";
+  }
+  return true;
+}
+
 export type SnapshotQueryRow = {
   noteId: number;
   action: string;
@@ -130,6 +154,7 @@ export type SnapshotQueryRow = {
   noteDateAdded: number;
   candidateFirst: string | null;
   candidateLast: string | null;
+  responseApplicant: boolean;
 };
 
 export async function querySnapshotNotes(args: {
@@ -138,6 +163,8 @@ export async function querySnapshotNotes(args: {
   noteAction: string;
   dateAddedStartMs?: number;
   dateAddedEndMs?: number;
+  /** When true, only notes whose candidate had a Response-bucket submission. */
+  responseApplicantsOnly?: boolean;
   limit?: number;
 }): Promise<SnapshotQueryRow[]> {
   const conditions = [
@@ -145,6 +172,9 @@ export async function querySnapshotNotes(args: {
     eq(noteActionSnapshotTable.department, args.department),
     eq(noteActionSnapshotTable.action, args.noteAction),
   ];
+  if (args.responseApplicantsOnly) {
+    conditions.push(eq(noteActionSnapshotTable.responseApplicant, true));
+  }
   if (args.dateAddedStartMs !== undefined) {
     conditions.push(
       gte(noteActionSnapshotTable.noteDateAdded, args.dateAddedStartMs),
@@ -166,6 +196,7 @@ export async function querySnapshotNotes(args: {
       noteDateAdded: noteActionSnapshotTable.noteDateAdded,
       candidateFirst: noteActionSnapshotTable.candidateFirst,
       candidateLast: noteActionSnapshotTable.candidateLast,
+      responseApplicant: noteActionSnapshotTable.responseApplicant,
     })
     .from(noteActionSnapshotTable)
     .where(and(...conditions))

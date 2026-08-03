@@ -704,8 +704,8 @@ router.post(
 
 /**
  * POST /api/firms/:id/note-snapshot/sync
- * Service-only. Walks open jobs → Response applicants → allowlisted Note.action
- * into note_action_snapshot. Intended for Railway Cron.
+ * Service-only. Walks open jobs → all applicants → allowlisted Note.action
+ * into note_action_snapshot (tags response_applicant). Intended for Railway Cron.
  *
  * Default: **async** (HTTP 202) so large departments are not killed by ~300s
  * reverse-proxy timeouts. Pass `?wait=1` to run synchronously (small/debug only).

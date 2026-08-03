@@ -369,6 +369,11 @@ type ApplicantHit = {
   appliedJobIds: Set<number>;
   /** Newest JobSubmission.dateAdded seen for this candidate (ms). */
   latestSubmissionMs: number;
+  /**
+   * True when at least one JobSubmission for this candidate on the scanned jobs
+   * was in the Response bucket (New Lead / Online Applicant).
+   */
+  hadResponseSubmission?: boolean;
 };
 
 /**
@@ -389,6 +394,7 @@ export function upsertApplicantPreferRecent(
     for (const jid of hit.appliedJobIds) existing.appliedJobIds.add(jid);
     if (!existing.firstName && hit.firstName) existing.firstName = hit.firstName;
     if (!existing.lastName && hit.lastName) existing.lastName = hit.lastName;
+    if (hit.hadResponseSubmission) existing.hadResponseSubmission = true;
     return { incomplete: false };
   }
   if (map.size < maxSize) {
@@ -661,6 +667,7 @@ export async function collectApplicantsForJobs(args: {
         const names = personName(row.candidate);
         const submissionMs =
           typeof row.dateAdded === "number" ? row.dateAdded : 0;
+        const isResponse = classifySubmissionStage(status) === "response";
         const { incomplete } = upsertApplicantPreferRecent(
           applicants,
           {
@@ -668,6 +675,9 @@ export async function collectApplicantsForJobs(args: {
             ...names,
             appliedJobIds: new Set(jid !== null ? [jid] : []),
             latestSubmissionMs: submissionMs,
+            // Response-only pools are all response applicants by definition.
+            hadResponseSubmission:
+              args.applicantPool === "responses" ? true : isResponse,
           },
           args.maxCandidatesToScan,
         );
@@ -1717,10 +1727,13 @@ export type SnapshotNoteHit = {
   noteDateAdded: number;
   candidateFirst?: string;
   candidateLast?: string;
+  /** Candidate had a Response-bucket submission on a scanned open job. */
+  responseApplicant: boolean;
 };
 
 /**
- * Walk open jobs → Response applicants → candidate notes for one department.
+ * Walk open jobs → all applicants → allowlisted candidate notes for one department.
+ * Tags each note with responseApplicant from Response-bucket submissions.
  * Used by the background snapshot sync (no ChatGPT wall).
  */
 export async function harvestDepartmentSnapshotNotes(args: {
@@ -1731,6 +1744,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
 }): Promise<{
   rows: SnapshotNoteHit[];
   complete: boolean;
+  applicantPool: "all";
   jobsTotal: number;
   jobsLoaded: number;
   applicantsUnique: number;
@@ -1750,6 +1764,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
       return {
         rows: [],
         complete: !jobs.jobsTruncated,
+        applicantPool: "all",
         jobsTotal: jobs.jobsTotal,
         jobsLoaded: 0,
         applicantsUnique: 0,
@@ -1758,7 +1773,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
     }
     const collected = await collectApplicantsForJobs({
       jobIds: jobs.jobIds,
-      applicantPool: "responses",
+      applicantPool: "all",
       maxCandidatesToScan: maxCandidates,
     });
     const jobIdSet = new Set(jobs.jobIds);
@@ -1799,6 +1814,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
             noteDateAdded: dateAdded,
             candidateFirst: app.firstName ?? fromNote.firstName,
             candidateLast: app.lastName ?? fromNote.lastName,
+            responseApplicant: app.hadResponseSubmission === true,
           });
         }
       });
@@ -1813,6 +1829,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
     return {
       rows: [...byNoteId.values()],
       complete,
+      applicantPool: "all",
       jobsTotal: jobs.jobsTotal,
       jobsLoaded: jobs.jobIds.length,
       applicantsUnique: collected.applicants.size,
@@ -1836,6 +1853,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
     return {
       rows: [],
       complete: false,
+      applicantPool: "all",
       jobsTotal: 0,
       jobsLoaded: 0,
       applicantsUnique: 0,
@@ -1851,6 +1869,7 @@ export async function harvestDepartmentSnapshotNotes(args: {
 export async function liveTailScoutMatches(args: {
   department: string;
   noteAction: string;
+  applicantPool?: ScoutApplicantPool;
   maxJobs?: number;
   maxCandidates?: number;
 }): Promise<{
@@ -1860,6 +1879,8 @@ export async function liveTailScoutMatches(args: {
   const maxJobs = args.maxJobs ?? SNAPSHOT_LIVE_TAIL_JOBS;
   const maxCandidates =
     args.maxCandidates ?? AUTO_WIDEN_CANDIDATES_PER_PAGE;
+  const applicantPool: ScoutApplicantPool =
+    args.applicantPool === "all" ? "all" : "responses";
   const startedAt = Date.now();
   const wallMs = Math.min(TOPN_WALL_MS, 25_000);
   const wallHit = () => Date.now() - startedAt >= wallMs;
@@ -1877,7 +1898,7 @@ export async function liveTailScoutMatches(args: {
   const batch = jobsBundleFromRows(sortedRows, preloaded.jobsTotal, false);
   const collected = await collectApplicantsForJobs({
     jobIds: batch.jobIds,
-    applicantPool: "responses",
+    applicantPool,
     maxCandidatesToScan: maxCandidates,
     shouldStop: wallHit,
   });

@@ -192,6 +192,31 @@ describe("upsertApplicantPreferRecent", () => {
     upsertApplicantPreferRecent(map, hit(3, 100), 2);
     expect([...map.keys()].sort()).toEqual([1, 2]);
   });
+  it("merges hadResponseSubmission with OR across upserts", () => {
+    const map = new Map();
+    upsertApplicantPreferRecent(
+      map,
+      {
+        candidateId: 1,
+        appliedJobIds: new Set([1]),
+        latestSubmissionMs: 100,
+        hadResponseSubmission: false,
+      },
+      5,
+    );
+    upsertApplicantPreferRecent(
+      map,
+      {
+        candidateId: 1,
+        appliedJobIds: new Set([2]),
+        latestSubmissionMs: 50,
+        hadResponseSubmission: true,
+      },
+      5,
+    );
+    expect(map.get(1)!.hadResponseSubmission).toBe(true);
+    expect([...map.get(1)!.appliedJobIds].sort()).toEqual([1, 2]);
+  });
 });
 
 describe("sortJobsNewestFirst", () => {
