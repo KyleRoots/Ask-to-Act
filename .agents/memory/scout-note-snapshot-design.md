@@ -88,23 +88,36 @@ curl entrypoint).
 
 **startCommand shape (production):** Railway wraps the start command in a way
 that does not expand `$VAR` unless an inner `sh -c "…"` runs. Hardcode the sync
-URL (not secret); expand only `$MCP_BEARER_TOKEN` inside double quotes. Exit **0**
-when response headers contain `HTTP/… 200`, `202`, or `409` (grep); ignore
-unrelated headers (e.g. Clerk). `wget … || true` so a non-zero wget exit does
-not mask a successful status before the grep gate.
+URL (not secret); expand only `$MCP_BEARER_TOKEN` inside double quotes.
+
+busybox `wget` exits non-zero on HTTP 4xx and prints `wget: server returned
+error: …` to stderr. Capture headers with `2>/tmp/hdr`, use `wget … || true`,
+then gate success with **fixed-string** `grep -F` for `HTTP/1.1|HTTP/2` +
+`200|202|409`, print `SYNC_OK`, `exit 0`. Fragile `grep -E` / nested quoting
+has failed under Railway before (deploy SUCCESS while cron execution still
+CRASHED → crash email). Apply config via **deploy of current service config**,
+not `redeploy` (redeploy replays the old manifest).
 
 ```bash
 sh -c "wget -S -O /tmp/out \
   --header=\"Authorization: Bearer $MCP_BEARER_TOKEN\" \
   --header=\"Content-Type: application/json\" \
   --post-data=\"\" \
-  \"https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync\" \
-  2>/tmp/hdr || true; cat /tmp/hdr; grep -E 'HTTP/[0-9.]+ (200|202|409)' /tmp/hdr"
+  https://connect.asktoact.ai/api/firms/<FIRM_ID>/note-snapshot/sync \
+  >/tmp/out.body 2>/tmp/hdr || true; cat /tmp/hdr; \
+  if grep -F 'HTTP/1.1 200' /tmp/hdr >/dev/null \
+    || grep -F 'HTTP/1.1 202' /tmp/hdr >/dev/null \
+    || grep -F 'HTTP/1.1 409' /tmp/hdr >/dev/null \
+    || grep -F 'HTTP/2 200' /tmp/hdr >/dev/null \
+    || grep -F 'HTTP/2 202' /tmp/hdr >/dev/null \
+    || grep -F 'HTTP/2 409' /tmp/hdr >/dev/null; \
+  then echo SYNC_OK; exit 0; fi; echo SYNC_FAIL; exit 1"
 ```
 
 Expect **202 Accepted**. Concurrent duplicate syncs return **409** (already
 in-flight). Treat **200 / 202 / 409** as cron success so a long firm walk does
-not mark the Railway job CRASHED every half hour.
+not mark the Railway job CRASHED every half hour. Crash emails track **execution
+exit code**, not merely deploy status.
 
 Optional env `SYNC_URL` may exist for reference; production startCommand uses the
 hardcoded URL above so expansion cannot fail.
@@ -139,4 +152,22 @@ firm picklist.
 - Not a second MCP product.
 - Do not infer actions from résumé text.
 - Do not raise ChatGPT gateway soft walls.
-- Async report jobs remain a later phase.
+
+## Async report jobs (implemented)
+
+When sync `scout_dept_report` hits `stopReason=wall_time` (ChatGPT soft wall),
+continue with an in-process async job (same 202 pattern as note-snapshot sync —
+no Redis/BullMQ):
+
+| Surface | Name |
+|---------|------|
+| **MCP** | `start_scout_dept_report_job` → `get_report_job` |
+| **REST** | `POST /api/v1/reports/scout-qualified-by-department/jobs` → `GET /api/v1/reports/jobs/:jobId` |
+
+Schema: `report_jobs` (firm-scoped; status `queued|running|complete|failed`).
+Runner uses `ASYNC_REPORT_WALL_MS` (~20 min) + existing job/page caps; sync
+`TOPN_WALL_MS` / `EXHAUSTIVE_WALL_MS` are unchanged.
+
+**Ottawa yellow (v1.1 follow-up):** when snapshot coverage is complete+fresh and
+the snapshot alone already holds a full top-N ranking, live-tail `wall_time`
+alone does not force `confirmedComplete=false`.

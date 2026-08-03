@@ -201,6 +201,68 @@ function actionsSpec(baseUrl: string) {
           responses: okReport,
         },
       },
+      "/reports/scout-qualified-by-department/jobs": {
+        post: {
+          operationId: "startScoutDeptReportJob",
+          summary: "Start async scout department report job",
+          description:
+            "Accepts the same body fields as the sync scout report query params. " +
+            "Returns HTTP 202 with jobId. Poll GET /reports/jobs/{jobId}. " +
+            "Use when sync wall_time needs a confirmed-complete answer (no date-window fan-out).",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["department"],
+                  properties: {
+                    department: { type: "string" },
+                    noteAction: { type: "string" },
+                    openJobsOnly: { type: "boolean" },
+                    applicantPool: {
+                      type: "string",
+                      enum: ["responses", "all"],
+                    },
+                    limit: { type: "integer", minimum: 1, maximum: 50 },
+                    mode: {
+                      type: "string",
+                      enum: ["bounded", "exhaustive"],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "202": {
+              description: "Job accepted",
+              content: {
+                "application/json": {
+                  schema: { type: "object", additionalProperties: true },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/reports/jobs/{jobId}": {
+        get: {
+          operationId: "getReportJob",
+          summary: "Poll async report job",
+          description:
+            "Firm-scoped job status. When status=complete, includes the scout report result.",
+          parameters: [
+            {
+              name: "jobId",
+              in: "path",
+              required: true,
+              schema: { type: "string", format: "uuid" },
+            },
+          ],
+          responses: okReport,
+        },
+      },
       "/count": {
         post: {
           operationId: "countEntities",
@@ -257,7 +319,7 @@ const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your fi
 WHAT YOU CAN DO
 - Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
 - Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
-- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. Read stopReason/confirmedComplete — keep working unless complete or a real connector/gateway limit; do not fan out date windows.
+- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. Read stopReason/confirmedComplete — keep working unless complete or a real connector/gateway limit; do not fan out date windows. On wall_time, POST /reports/scout-qualified-by-department/jobs then poll GET /reports/jobs/{jobId}.
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.

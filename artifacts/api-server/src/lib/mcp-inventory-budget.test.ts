@@ -29,6 +29,8 @@ describe("MCP universal inventory hardening", () => {
     const names = Object.keys(reg);
     expect(names.length).toBeGreaterThanOrEqual(65);
     expect(reg["scout_dept_report"]).toBeDefined();
+    expect(reg["start_scout_dept_report_job"]).toBeDefined();
+    expect(reg["get_report_job"]).toBeDefined();
     expect(reg["list_reports"]).toBeDefined();
     expect(reg["add_note"]).toBeDefined();
     expect(reg["update_candidate"]).toBeDefined();
@@ -47,6 +49,8 @@ describe("MCP universal inventory hardening", () => {
       return i;
     };
     expect(idx("list_reports")).toBeLessThan(idx("scout_dept_report"));
+    expect(idx("scout_dept_report")).toBeLessThan(idx("start_scout_dept_report_job"));
+    expect(idx("start_scout_dept_report_job")).toBeLessThan(idx("get_report_job"));
     expect(idx("scout_dept_report")).toBeLessThan(idx("search_entity"));
     expect(idx("scout_dept_report")).toBeLessThan(idx("add_note"));
     expect(idx("add_note")).toBeLessThan(idx("delete_entity"));

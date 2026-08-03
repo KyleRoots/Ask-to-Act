@@ -14,6 +14,11 @@ import {
   scoutQualifiedByDepartment,
   scoutReportQuerySchema,
 } from "../lib/scout-screen.js";
+import {
+  getReportJob,
+  requireFirmIdForReportJobs,
+  startScoutDeptReportJob,
+} from "../lib/report-jobs.js";
 import { logger } from "../lib/logger.js";
 
 /**
@@ -136,6 +141,84 @@ router.get(
   handle("scout_dept_report", (req) =>
     scoutQualifiedByDepartment(scoutReportQuerySchema.parse(req.query)),
   ),
+);
+
+/**
+ * POST /api/v1/reports/scout-qualified-by-department/jobs
+ * Start an async scout_dept_report job (HTTP 202). Poll GET .../jobs/:jobId.
+ */
+router.post(
+  "/reports/scout-qualified-by-department/jobs",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const firmId = requireFirmIdForReportJobs();
+      const args = scoutReportQuerySchema.parse(req.body ?? {});
+      const createdByUserId =
+        req.caller?.kind === "user" ? req.caller.userId : undefined;
+      const started = await startScoutDeptReportJob({
+        firmId,
+        args,
+        createdByUserId,
+      });
+      res.status(202).json({
+        jobId: started.jobId,
+        status: started.status,
+        ...(started.deduped
+          ? { deduped: true, message: started.message }
+          : {}),
+        poll: `/api/v1/reports/jobs/${started.jobId}`,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid request", details: err.issues });
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Internal server error";
+      const mapped = clientErrorStatus(message);
+      if (mapped !== null) {
+        res.status(mapped).json({ error: message });
+        return;
+      }
+      if (/firm Bullhorn context/i.test(message)) {
+        res.status(403).json({ error: message });
+        return;
+      }
+      logger.error({ err, route: "start_scout_dept_report_job" }, "v1 route error");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * GET /api/v1/reports/jobs/:jobId
+ * Firm-scoped poll for async report job status + result.
+ */
+router.get(
+  "/reports/jobs/:jobId",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const firmId = requireFirmIdForReportJobs();
+      const jobId = z.string().uuid().parse(req.params.jobId);
+      const job = await getReportJob({ jobId, firmId });
+      if (!job) {
+        res.status(404).json({ error: "Report job not found" });
+        return;
+      }
+      res.json(job);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid request", details: err.issues });
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Internal server error";
+      if (/firm Bullhorn context/i.test(message)) {
+        res.status(403).json({ error: message });
+        return;
+      }
+      logger.error({ err, route: "get_report_job" }, "v1 route error");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
 );
 
 // --- Ad-hoc lookups (read-only) ---

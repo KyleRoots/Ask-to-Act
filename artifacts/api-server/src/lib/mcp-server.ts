@@ -87,6 +87,11 @@ import {
 import { matchCandidatesForJob } from "./matching.js";
 import { findCandidates } from "./find-candidates.js";
 import { scoutQualifiedByDepartment } from "./scout-screen.js";
+import {
+  getReportJob,
+  requireFirmIdForReportJobs,
+  startScoutDeptReportJob,
+} from "./report-jobs.js";
 import { sendEmailToRecord } from "./send-email-to-record.js";
 import {
   previewEmailsToRecords,
@@ -295,6 +300,8 @@ export const MCP_TOOL_PRIORITY: readonly string[] = [
   // Discovery + Scout / screening-by-department
   "list_reports",
   "scout_dept_report",
+  "start_scout_dept_report_job",
+  "get_report_job",
   "staffing_scorecard",
   "placements_report",
   "open_jobs_report",
@@ -1239,7 +1246,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Screening/Scout notes by Internal Department — NL-ready. Resolves nicknames (STSI→STS-STSI). Defaults OPEN jobs. For 'N most recent' pass limit=N (pages until jobs exhausted or gateway wall). Read stopReason + confirmedComplete: only treat the task as finished when confirmedComplete=true OR stopReason is a real connector/gateway limit (e.g. wall_time, no_matching_jobs) — never give up solely because of an arbitrary search cap. 0+incomplete → clarify or one broader/exhaustive retry. Never date-window fan-out. Link NAME to bullhornUrl.",
+    "Screening/Scout notes by Internal Department — NL-ready. Resolves nicknames (STSI→STS-STSI). Defaults OPEN jobs. For 'N most recent' pass limit=N (pages until jobs exhausted or gateway wall). Read stopReason + confirmedComplete: only treat the task as finished when confirmedComplete=true OR stopReason is a real connector/gateway limit (e.g. wall_time, no_matching_jobs) — never give up solely because of an arbitrary search cap. On wall_time, call start_scout_dept_report_job (same args) then poll get_report_job — never date-window fan-out. 0+incomplete → clarify or one broader/exhaustive retry. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
@@ -1332,6 +1339,91 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
             dateAddedEnd,
           }),
       ),
+  );
+
+  const scoutJobArgsSchema = {
+    department: z
+      .string()
+      .min(1)
+      .describe('Internal Department or nickname, e.g. "STS-STSI", "STSI", "MYT-Ottawa".'),
+    noteAction: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Note.action to match (default: Scout Screen - Qualified)."),
+    openJobsOnly: z
+      .boolean()
+      .optional()
+      .describe("Default true. Leave default for normal asks."),
+    applicantPool: z
+      .enum(["responses", "all"])
+      .optional()
+      .describe("'responses' (default) = New Lead/Online Applicant; 'all' = every submission."),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("For 'N most recent' / 'list N' asks — set to N."),
+    mode: z
+      .enum(["bounded", "exhaustive"])
+      .optional()
+      .describe("Leave default (bounded) for list/most-recent."),
+    maxJobs: z.number().int().min(1).max(2000).optional(),
+    maxCandidatesToScan: z.number().int().min(1).max(800).optional(),
+    dateAddedStart: z.string().optional(),
+    dateAddedEnd: z.string().optional(),
+  };
+
+  tool(
+    "start_scout_dept_report_job",
+    "Start an async scout_dept_report job that runs beyond the ChatGPT soft wall (~20 min safety max). Returns jobId immediately — poll get_report_job until status=complete|failed. Use when sync scout_dept_report returns stopReason=wall_time, or for large departments when a confirmed-complete answer is required. Same args as scout_dept_report. Never date-window fan-out.",
+    scoutJobArgsSchema,
+    async (a) =>
+      rt("start_scout_dept_report_job", a, async () => {
+        const firmId = requireFirmIdForReportJobs();
+        const createdByUserId =
+          caller?.kind === "user" ? caller.userId : undefined;
+        const started = await startScoutDeptReportJob({
+          firmId,
+          args: a,
+          createdByUserId,
+        });
+        return {
+          jobId: started.jobId,
+          status: started.status,
+          ...(started.deduped
+            ? { deduped: true, message: started.message }
+            : {}),
+          pollTool: "get_report_job",
+          note:
+            "Job accepted. Call get_report_job with this jobId until status is complete or failed. " +
+            "Do not fan out date windows.",
+        };
+      }),
+  );
+
+  tool(
+    "get_report_job",
+    "Poll an async report job by id (firm-scoped). Returns status queued|running|complete|failed; when complete, includes the scout_dept_report result payload.",
+    {
+      jobId: z
+        .string()
+        .uuid()
+        .describe("Job id returned by start_scout_dept_report_job."),
+    },
+    async ({ jobId }) =>
+      rt("get_report_job", { jobId }, async () => {
+        const firmId = requireFirmIdForReportJobs();
+        const job = await getReportJob({ jobId, firmId });
+        if (!job) {
+          throw new Error(
+            "Report job not found (wrong id or different firm).",
+          );
+        }
+        return job;
+      }),
   );
 
   tool(

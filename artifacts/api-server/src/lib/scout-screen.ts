@@ -79,6 +79,11 @@ export const EXHAUSTIVE_WALL_MS = 75_000;
  * common ChatGPT/gateway ~120s 504 thresholds.
  */
 export const TOPN_WALL_MS = 95_000;
+/**
+ * Hard safety max for in-process async report jobs (no ChatGPT soft wall).
+ * Sync path keeps TOPN_WALL_MS / EXHAUSTIVE_WALL_MS unchanged.
+ */
+export const ASYNC_REPORT_WALL_MS = 20 * 60 * 1000;
 /** Fewer jobs per note-scan page after newest-first preload. */
 const AUTO_WIDEN_JOB_PAGE = 20;
 /**
@@ -102,6 +107,12 @@ const INCOMPLETE_NO_FANOUT =
   "to chase an exact total — that multiplies per-candidate note fetches and causes timeouts. " +
   "For a fuller single-call lookback count, ONE follow-up with mode=exhaustive is allowed. " +
   "Or narrow the ask (recent window / one department) and keep mode=bounded.";
+
+/** Continuation when sync hits the ChatGPT soft wall — never date-window fan-out. */
+export const ASYNC_CONTINUATION_HINT =
+  "To finish without the ChatGPT soft wall, call start_scout_dept_report_job with the same " +
+  "arguments, then poll get_report_job until status is complete or failed. " +
+  "Do NOT fan out date windows.";
 
 const INCOMPLETE_PARTIAL_RESULTS =
   "uniqueCandidateCount is a LOWER BOUND / partial ranked list for this single call. " +
@@ -273,11 +284,14 @@ export function incompleteGuidanceNote(
   const wall = opts?.stoppedForWallTime
     ? "Scan stopped early under the ChatGPT/gateway timeout budget (stopReason=wall_time) — a real platform limit, not a search-cap give-up. "
     : "";
+  const asyncHint = opts?.stoppedForWallTime
+    ? ` ${ASYNC_CONTINUATION_HINT}`
+    : "";
   const zeroUnconfirmed =
     typeof opts?.matchCount === "number" && opts.matchCount === 0;
 
   if (zeroUnconfirmed) {
-    return wall + INCOMPLETE_ZERO_NOT_CONFIRMED;
+    return wall + INCOMPLETE_ZERO_NOT_CONFIRMED + asyncHint;
   }
 
   if (mode === "exhaustive") {
@@ -286,14 +300,37 @@ export function incompleteGuidanceNote(
       "Result may still be incomplete after server-side date partitioning (job and/or " +
       "per-window applicant caps, or wall-time budget). " +
       INCOMPLETE_PARTIAL_RESULTS +
-      " Prefer an explicit recent dateAddedStart/dateAddedEnd (e.g. last 2–3 weeks) with mode=exhaustive."
+      " Prefer an explicit recent dateAddedStart/dateAddedEnd (e.g. last 2–3 weeks) with mode=exhaustive." +
+      asyncHint
     );
   }
   return (
     wall +
     "Result set may be incomplete (jobs/applicants still unscanned, or wall). " +
-    INCOMPLETE_PARTIAL_RESULTS
+    INCOMPLETE_PARTIAL_RESULTS +
+    asyncHint
   );
+}
+
+/** Append async continuation when a sync result stopped on wall_time. */
+export function withAsyncContinuationHint<T extends Record<string, unknown>>(
+  result: T,
+): T {
+  if (result.stopReason !== "wall_time") return result;
+  const note =
+    typeof result.note === "string" ? result.note : undefined;
+  if (note && note.includes("start_scout_dept_report_job")) return result;
+  return {
+    ...result,
+    asyncContinuation: {
+      tool: "start_scout_dept_report_job",
+      pollTool: "get_report_job",
+      hint: ASYNC_CONTINUATION_HINT,
+    },
+    ...(note
+      ? { note: `${note} ${ASYNC_CONTINUATION_HINT}` }
+      : { note: ASYNC_CONTINUATION_HINT }),
+  };
 }
 
 /** Prefer the most specific incomplete reason for the model. */
@@ -980,6 +1017,13 @@ export async function scoutQualifiedByDepartment(args: {
   maxCandidatesToScan?: number;
   dateAddedStart?: string;
   dateAddedEnd?: string;
+  /**
+   * Optional wall override for async report jobs. Sync callers must omit this
+   * so TOPN_WALL_MS / EXHAUSTIVE_WALL_MS stay in force. When set above the sync
+   * soft walls, an incomplete snapshot+live_tail result falls through to a
+   * live association walk instead of returning wall_time early.
+   */
+  wallMs?: number;
 }): Promise<unknown> {
   const resolved = await resolveDepartmentLabel(args.department);
   const department = resolved.department;
@@ -994,6 +1038,12 @@ export async function scoutQualifiedByDepartment(args: {
     typeof args.limit === "number" && args.limit > 0
       ? Math.min(Math.floor(args.limit), 50)
       : undefined;
+  const wallMsOverride =
+    typeof args.wallMs === "number" && args.wallMs > 0
+      ? args.wallMs
+      : undefined;
+  const asyncBudget =
+    wallMsOverride !== undefined && wallMsOverride > TOPN_WALL_MS;
 
   let dateStartMs: number | undefined;
   let dateEndMs: number | undefined;
@@ -1022,7 +1072,23 @@ export async function scoutQualifiedByDepartment(args: {
       dateAddedStartMs: dateStartMs,
       dateAddedEndMs: dateEndMs,
     });
-    if (fromSnapshot) return fromSnapshot;
+    if (fromSnapshot) {
+      const snap = fromSnapshot as {
+        confirmedComplete?: boolean;
+        stopReason?: string;
+      };
+      // Sync: always return snapshot path. Async high-wall: fall through when
+      // snapshot+tail was incomplete so the live walk can finish.
+      if (
+        !asyncBudget ||
+        snap.confirmedComplete === true ||
+        snap.stopReason !== "wall_time"
+      ) {
+        return withAsyncContinuationHint(
+          fromSnapshot as Record<string, unknown>,
+        );
+      }
+    }
 
     const luceneFirst = await tryScoutViaNoteLucene({
       department,
@@ -1034,29 +1100,36 @@ export async function scoutQualifiedByDepartment(args: {
       dateAddedStartMs: dateStartMs,
       dateAddedEndMs: dateEndMs,
     });
-    if (luceneFirst) return luceneFirst;
+    if (luceneFirst) {
+      return withAsyncContinuationHint(
+        luceneFirst as Record<string, unknown>,
+      );
+    }
 
-    return runAutoWidenScout({
-      department,
-      resolvedFrom: resolved.resolvedFrom,
-      noteAction,
-      openJobsOnly,
-      applicantPool,
-      limit,
-      maxJobsCap: Math.min(
-        Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS, 1),
-        AUTO_WIDEN_MAX_JOBS,
-      ),
-      maxCandidatesPerPage: Math.min(
-        Math.max(
-          args.maxCandidatesToScan ?? AUTO_WIDEN_CANDIDATES_PER_PAGE,
-          1,
+    return withAsyncContinuationHint(
+      (await runAutoWidenScout({
+        department,
+        resolvedFrom: resolved.resolvedFrom,
+        noteAction,
+        openJobsOnly,
+        applicantPool,
+        limit,
+        maxJobsCap: Math.min(
+          Math.max(args.maxJobs ?? AUTO_WIDEN_MAX_JOBS, 1),
+          AUTO_WIDEN_MAX_JOBS,
         ),
-        HARD_MAX_CANDIDATES,
-      ),
-      dateAddedStartMs: dateStartMs,
-      dateAddedEndMs: dateEndMs,
-    });
+        maxCandidatesPerPage: Math.min(
+          Math.max(
+            args.maxCandidatesToScan ?? AUTO_WIDEN_CANDIDATES_PER_PAGE,
+            1,
+          ),
+          HARD_MAX_CANDIDATES,
+        ),
+        dateAddedStartMs: dateStartMs,
+        dateAddedEndMs: dateEndMs,
+        wallMs: wallMsOverride,
+      })) as Record<string, unknown>,
+    );
   }
 
   // --- exhaustive: submission-date windows (counts over a lookback) ---
@@ -1071,6 +1144,7 @@ export async function scoutQualifiedByDepartment(args: {
   );
 
   const startedAt = Date.now();
+  const wallMs = wallMsOverride ?? EXHAUSTIVE_WALL_MS;
   const rangeEnd = dateEndMs ?? startedAt;
   const rangeStart =
     dateStartMs ??
@@ -1106,7 +1180,7 @@ export async function scoutQualifiedByDepartment(args: {
   }> = [];
 
   for (const w of windows) {
-    if (Date.now() - startedAt >= EXHAUSTIVE_WALL_MS) {
+    if (Date.now() - startedAt >= wallMs) {
       stoppedForWallTime = true;
       break;
     }
@@ -1170,7 +1244,7 @@ export async function scoutQualifiedByDepartment(args: {
   });
   const confirmedComplete = stopReason === "complete" && !incomplete;
 
-  return {
+  return withAsyncContinuationHint({
     department,
     ...(resolved.resolvedFrom ? { departmentResolvedFrom: resolved.resolvedFrom } : {}),
     noteAction,
@@ -1203,7 +1277,7 @@ export async function scoutQualifiedByDepartment(args: {
       defaultLookbackDays: EXHAUSTIVE_DEFAULT_LOOKBACK_DAYS,
       windowCount: windowsCompleted,
       windowsPlanned,
-      wallMs: EXHAUSTIVE_WALL_MS,
+      wallMs,
       elapsedMs: Date.now() - startedAt,
       stoppedForWallTime,
       windows: windowSummaries,
@@ -1212,7 +1286,7 @@ export async function scoutQualifiedByDepartment(args: {
       maxJobs,
       maxCandidatesToScan,
       maxWindows: EXHAUSTIVE_MAX_WINDOWS,
-      wallMs: EXHAUSTIVE_WALL_MS,
+      wallMs,
     },
     stopReason,
     confirmedComplete,
@@ -1233,7 +1307,7 @@ export async function scoutQualifiedByDepartment(args: {
             "Exhaustive single-call scan completed without per-window truncation " +
             "in the date range shown. Still not a global Note Lucene total (Bullhorn Note index unavailable).",
         }),
-  };
+  });
 }
 
 /**
@@ -1460,10 +1534,13 @@ async function runAutoWidenScout(args: {
   maxCandidatesPerPage: number;
   dateAddedStartMs?: number;
   dateAddedEndMs?: number;
+  /** Override ChatGPT soft wall (async jobs). Sync path omits → TOPN/EXHAUSTIVE defaults. */
+  wallMs?: number;
 }): Promise<unknown> {
   const startedAt = Date.now();
   const wallMs =
-    args.limit !== undefined ? TOPN_WALL_MS : EXHAUSTIVE_WALL_MS;
+    args.wallMs ??
+    (args.limit !== undefined ? TOPN_WALL_MS : EXHAUSTIVE_WALL_MS);
   const wallHit = () => Date.now() - startedAt >= wallMs;
 
   const merged = new Map<number, MatchCandidate>();
@@ -1635,6 +1712,7 @@ async function runAutoWidenScout(args: {
         : "") +
       `stopReason=${stopReason}; confirmedComplete=false. Present these names. ` +
       INCOMPLETE_NO_FANOUT +
+      (stoppedForWallTime ? ` ${ASYNC_CONTINUATION_HINT}` : "") +
       " Ask a clarifying question only if they need a fuller/more recent set.";
   } else if (incomplete) {
     userNote = incompleteGuidanceNote("bounded", {

@@ -22,6 +22,7 @@ export * from "./email-send-logs";
 export * from "./firms";
 export * from "./firm-config";
 export * from "./note-action-snapshot";
+export * from "./report-jobs";
 export * from "./user-mailboxes";
 export * from "./users";
 export * from "./seat-activity";

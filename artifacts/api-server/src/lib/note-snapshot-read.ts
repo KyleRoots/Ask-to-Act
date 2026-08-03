@@ -165,7 +165,15 @@ export async function tryServeScoutFromSnapshot(args: {
   const ranked = rankLimit([...merged.values()], args.limit);
   await enrichBullhornUrls(ranked);
 
-  const confirmedComplete = !tail.stoppedForWallTime;
+  // Snapshot coverage is complete+fresh when we get here. If the snapshot alone
+  // already supplies a full top-N ranking, do not let a live-tail soft wall
+  // alone mark confirmedComplete=false (Ottawa yellow / large-dept case).
+  const snapshotSatisfiesTopN =
+    typeof args.limit === "number" &&
+    args.limit > 0 &&
+    fromSnap.length >= args.limit;
+  const confirmedComplete =
+    !tail.stoppedForWallTime || snapshotSatisfiesTopN;
   const noteScanPath = "snapshot+live_tail";
   const syncedAt = coverage!.lastFullSyncAt?.toISOString() ?? null;
 
@@ -174,7 +182,10 @@ export async function tryServeScoutFromSnapshot(args: {
     userNote =
       `Top ${ranked.length} most recent matching candidates by Scout/note date ` +
       `from the firm note snapshot (synced ${syncedAt ?? "recently"}) plus a live tail of newest open jobs. ` +
-      `confirmedComplete=true.`;
+      `confirmedComplete=true.` +
+      (snapshotSatisfiesTopN && tail.stoppedForWallTime
+        ? " Live tail hit the soft wall, but the snapshot already held a full top-N ranking."
+        : "");
   } else if (confirmedComplete) {
     userNote =
       `Unique matching candidates from the firm note snapshot (synced ${syncedAt ?? "recently"}) ` +
@@ -213,6 +224,7 @@ export async function tryServeScoutFromSnapshot(args: {
     autoWiden: {
       elapsedMs: Date.now() - startedAt,
       stoppedForWallTime: tail.stoppedForWallTime,
+      snapshotSatisfiesTopN,
       noteScanPath,
       rankedBy: "latestMatchingNoteDate",
       snapshotSyncedAt: syncedAt,

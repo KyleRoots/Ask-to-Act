@@ -20,8 +20,10 @@ See [bullhorn-note-lucene-empty.md](./bullhorn-note-lucene-empty.md) for Bullhor
 
 | Surface | Name | When to use |
 |---------|------|-------------|
-| **MCP** | `scout_dept_report` | ChatGPT / Cursor — one call, department-parameterized |
+| **MCP** | `scout_dept_report` | ChatGPT / Cursor — one call, department-parameterized (fast; soft wall) |
+| **MCP** | `start_scout_dept_report_job` + `get_report_job` | After sync `wall_time`, or when a confirmed-complete answer needs the ~20 min async budget |
 | **REST** | `GET /api/v1/reports/scout-qualified-by-department?department=STSI&limit=5` | Custom GPT Actions, non-MCP clients |
+| **REST** | `POST /api/v1/reports/scout-qualified-by-department/jobs` → `GET /api/v1/reports/jobs/:jobId` | Async same as MCP jobs |
 | **Manual** | `get_notes` + job/submission tools | Debugging a known candidate |
 
 ### Natural-language contract (product non-negotiable)
@@ -65,6 +67,9 @@ Server behavior:
 - For top-N / list asks: preload open jobs **newest-first** (`dateAdded` desc) and allow ~95s wall so July-level matches are not stranded behind older Lucene page order.
 - Matches notes across the full association-loaded note set (not just a 50-row display page).
 - Returns top-level `stopReason` + `confirmedComplete`.
+- On sync `stopReason=wall_time`, note / `asyncContinuation` tells the model to
+  call `start_scout_dept_report_job` (same args) then poll `get_report_job` —
+  **never** date-window fan-out.
 - Applicant note-scan budget prefers **newest JobSubmissions** (ordered query + eviction of older applicants when capped) so "most recent" asks stay accurate under the wall.
 
 ### Modes
