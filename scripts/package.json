@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "asktoact-mcp": "tsx ./src/asktoact-mcp.ts",
     "ops-health": "tsx ./src/ops-health.ts",
+    "ops-agent-notify": "tsx ./src/ops-agent-notify.ts",
     "bh": "tsx ./src/bullhorn-direct.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

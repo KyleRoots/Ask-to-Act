@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import opsHealthRouter from "./ops-health";
+import opsAgentNotifyRouter from "./ops-agent-notify";
 import mcpRouter from "./mcp";
 import authRouter from "./auth";
 import usersRouter from "./users";
@@ -15,6 +16,7 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(opsHealthRouter);
+router.use(opsAgentNotifyRouter);
 router.use(openapiRouter);
 router.use(authRouter);
 router.use(usersRouter);
