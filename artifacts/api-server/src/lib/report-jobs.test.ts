@@ -36,6 +36,8 @@ import {
   matchCandidatesJobDedupeKey,
   recruiterLeaderboardJobDedupeKey,
   sanitizeJsonForPostgres,
+  summarizeReportJobError,
+  toPersistableJson,
   isReportJobClaimable,
   REPORT_JOB_LEASE_TTL_MS,
   REPORT_JOB_HEARTBEAT_MS,
@@ -160,6 +162,40 @@ describe("async report job contracts", () => {
     expect(clean.resumeEvidence[0].quote).toBe("ERP tools and Master schedules");
     expect(clean.nested[1]).toBe("badbyte");
     expect(sanitizeJsonForPostgres("plain")).toBe("plain");
+  });
+
+  it("toPersistableJson round-trips and drops non-json values", () => {
+    const dirty = {
+      quote: "ok\u0000bad",
+      n: Number.NaN,
+      big: BigInt(42),
+    };
+    const clean = toPersistableJson(dirty) as {
+      quote: string;
+      n: null;
+      big: string;
+    };
+    expect(clean.quote).toBe("okbad");
+    expect(clean.n).toBeNull();
+    expect(clean.big).toBe("42");
+  });
+
+  it("summarizeReportJobError drops drizzle params dump and keeps cause", () => {
+    const cause = new Error("unsupported Unicode escape sequence");
+    const err = new Error(
+      'Failed query: update "report_jobs" set "result" = $1\nparams: complete,{"resumeEvidence":[{"quote":"huge…"}]}',
+    );
+    err.cause = cause;
+    const summary = summarizeReportJobError(err);
+    expect(summary).toContain('Failed query: update "report_jobs"');
+    expect(summary).toContain("unsupported Unicode escape sequence");
+    expect(summary).not.toContain("params:");
+    expect(summary).not.toContain("resumeEvidence");
+    expect(
+      summarizeReportJobError(
+        'Failed query: update "report_jobs" set "status" = $1\nparams: complete,{"x":1}',
+      ),
+    ).toBe('Failed query: update "report_jobs" set "status" = $1');
   });
 
   it("dedupe keys are firm-scoped and stable for identical scout args", () => {
