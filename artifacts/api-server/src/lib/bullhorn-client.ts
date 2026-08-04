@@ -1264,7 +1264,7 @@ function buildExcerpts(
     // Clamp a single (merged) window so one long passage can't bloat the result.
     const end = Math.min(r.end, start + MAX_SINGLE_EXCERPT_CHARS);
     if (end < r.end) truncated = true;
-    let quote = text.slice(start, end).trim();
+    let quote = text.slice(start, end).trim().replaceAll("\u0000", "");
     if (start > 0) quote = "…" + quote;
     if (end < text.length) quote = quote + "…";
     if (totalChars + quote.length > MAX_EXCERPT_TOTAL_CHARS && excerpts.length > 0) {

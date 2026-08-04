@@ -56,6 +56,27 @@ function stopReasonFromResult(result: unknown): string | null {
   return typeof sr === "string" ? sr : null;
 }
 
+/**
+ * PostgreSQL jsonb/text reject U+0000. Résumé excerpts (and similar ATS text)
+ * can contain null bytes from PDF/DOC extraction — strip before persist.
+ */
+export function sanitizeJsonForPostgres<T>(value: T): T {
+  if (typeof value === "string") {
+    return (value.includes("\u0000") ? value.replaceAll("\u0000", "") : value) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeJsonForPostgres(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeJsonForPostgres(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 export type StartReportJobResult =
   | { jobId: string; status: "queued"; deduped?: false }
   | {
@@ -197,13 +218,14 @@ async function executeReportJob(opts: {
     const result = await firmContext.run({ firmId: opts.firmId }, () =>
       opts.execute(opts.args),
     );
+    const persistable = sanitizeJsonForPostgres(result);
 
     await db
       .update(reportJobsTable)
       .set({
         status: "complete",
-        result,
-        stopReason: stopReasonFromResult(result),
+        result: persistable,
+        stopReason: stopReasonFromResult(persistable),
         finishedAt: new Date(),
         errorSummary: null,
       })
@@ -219,7 +241,7 @@ async function executeReportJob(opts: {
         jobId: opts.jobId,
         firmId: opts.firmId,
         toolName: opts.toolName,
-        stopReason: stopReasonFromResult(result),
+        stopReason: stopReasonFromResult(persistable),
       },
       "Async report job complete",
     );
@@ -239,7 +261,7 @@ async function executeReportJob(opts: {
         .update(reportJobsTable)
         .set({
           status: "failed",
-          errorSummary: msg.slice(0, 2000),
+          errorSummary: sanitizeJsonForPostgres(msg).slice(0, 2000),
           finishedAt: new Date(),
         })
         .where(

@@ -35,6 +35,7 @@ import {
   scoutJobDedupeKey,
   matchCandidatesJobDedupeKey,
   recruiterLeaderboardJobDedupeKey,
+  sanitizeJsonForPostgres,
 } from "./report-jobs.js";
 
 describe("async report job contracts", () => {
@@ -138,6 +139,18 @@ describe("async report job contracts", () => {
         start: { path: "/reports/recruiter-leaderboard/jobs" },
       },
     });
+  });
+
+  it("strips U+0000 so jsonb persist does not fail on résumé excerpts", () => {
+    const dirty = {
+      resumeEvidence: [{ terms: ["Master"], quote: "ERP\u0000 tools and Master schedules" }],
+      nested: ["ok", "bad\u0000byte"],
+    };
+    const clean = sanitizeJsonForPostgres(dirty);
+    expect(JSON.stringify(clean)).not.toContain("\\u0000");
+    expect(clean.resumeEvidence[0].quote).toBe("ERP tools and Master schedules");
+    expect(clean.nested[1]).toBe("badbyte");
+    expect(sanitizeJsonForPostgres("plain")).toBe("plain");
   });
 
   it("dedupe keys are firm-scoped and stable for identical scout args", () => {
