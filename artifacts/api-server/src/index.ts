@@ -169,6 +169,9 @@ await runAppMigrationsWithRetry();
 await ensureColumnsWithRetry();
 await initStripe();
 
+const { startReportJobWorker } = await import("./lib/report-job-worker.js");
+startReportJobWorker();
+
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");

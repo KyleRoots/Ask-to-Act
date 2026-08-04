@@ -36,6 +36,15 @@ import {
   matchCandidatesJobDedupeKey,
   recruiterLeaderboardJobDedupeKey,
   sanitizeJsonForPostgres,
+  isReportJobClaimable,
+  REPORT_JOB_LEASE_TTL_MS,
+  REPORT_JOB_HEARTBEAT_MS,
+  REPORT_JOB_MAX_ATTEMPTS,
+  REPORT_JOB_MAX_CONCURRENT,
+  getReportJobRunner,
+  SCOUT_DEPT_REPORT_TOOL,
+  MATCH_CANDIDATES_TOOL,
+  RECRUITER_LEADERBOARD_TOOL,
 } from "./report-jobs.js";
 
 describe("async report job contracts", () => {
@@ -201,5 +210,69 @@ describe("snapshot top-N vs live-tail wall (universal)", () => {
     expect(confirmed(3, 5, true)).toBe(false);
     expect(confirmed(10, 5, true)).toBe(true);
     expect(confirmed(0, 5, false)).toBe(true);
+  });
+});
+
+describe("durable report job lease / reclaim", () => {
+  it("exposes lease TTL longer than heartbeat and sane concurrency caps", () => {
+    expect(REPORT_JOB_LEASE_TTL_MS).toBeGreaterThan(REPORT_JOB_HEARTBEAT_MS);
+    expect(REPORT_JOB_LEASE_TTL_MS).toBeGreaterThanOrEqual(60_000);
+    expect(REPORT_JOB_MAX_CONCURRENT).toBeGreaterThanOrEqual(1);
+    expect(REPORT_JOB_MAX_ATTEMPTS).toBeGreaterThanOrEqual(1);
+  });
+
+  it("queued jobs are always claimable", () => {
+    expect(
+      isReportJobClaimable({
+        status: "queued",
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      }),
+    ).toBe(true);
+  });
+
+  it("running jobs with expired lease are reclaimable", () => {
+    const now = new Date("2026-08-04T12:00:00.000Z");
+    expect(
+      isReportJobClaimable({
+        status: "running",
+        leaseExpiresAt: new Date("2026-08-04T11:59:00.000Z"),
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  it("running jobs with live lease are not reclaimable", () => {
+    const now = new Date("2026-08-04T12:00:00.000Z");
+    expect(
+      isReportJobClaimable({
+        status: "running",
+        leaseExpiresAt: new Date("2026-08-04T12:02:00.000Z"),
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("legacy running rows without lease are reclaimable (pre-durable crash)", () => {
+    expect(
+      isReportJobClaimable({ status: "running", leaseExpiresAt: null }),
+    ).toBe(true);
+  });
+
+  it("terminal statuses are not claimable", () => {
+    expect(
+      isReportJobClaimable({ status: "complete", leaseExpiresAt: null }),
+    ).toBe(false);
+    expect(
+      isReportJobClaimable({ status: "failed", leaseExpiresAt: null }),
+    ).toBe(false);
+  });
+
+  it("registers runners for all three async tool names", () => {
+    expect(getReportJobRunner(SCOUT_DEPT_REPORT_TOOL)).toBeTypeOf("function");
+    expect(getReportJobRunner(MATCH_CANDIDATES_TOOL)).toBeTypeOf("function");
+    expect(getReportJobRunner(RECRUITER_LEADERBOARD_TOOL)).toBeTypeOf(
+      "function",
+    );
+    expect(getReportJobRunner("unknown_tool")).toBeNull();
   });
 });

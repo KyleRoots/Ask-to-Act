@@ -19,8 +19,31 @@ Soft walls are **channel realism** for ChatGPT/gateway (~95s sync). They are
    (`tool_name` + jsonb `args`/`result`).
 
 Shared builders: `artifacts/api-server/src/lib/async-job-contract.ts`.
-Shared start/poll runner: `artifacts/api-server/src/lib/report-jobs.ts`
+Shared start/poll: `artifacts/api-server/src/lib/report-jobs.ts`
 (`startReportJob` + per-tool wrappers).
+Durable worker: `artifacts/api-server/src/lib/report-job-worker.ts`.
+
+## Durable worker (survives redeploy)
+
+Jobs are **not** fire-and-forget in the HTTP request process.
+
+1. `start_*` / REST jobs insert `report_jobs` with `status=queued` and return
+   `jobId` immediately (same MCP/REST contracts).
+2. api-server boots an in-process poller that **atomically claims** the next
+   eligible row (`FOR UPDATE SKIP LOCKED`):
+   - `status=queued`, or
+   - `status=running` whose `lease_expires_at` is null/expired (crash/redeploy).
+3. While running, the owner **heartbeats** (`heartbeat_at` + extends
+   `lease_expires_at`). Lease TTL ~120s; heartbeat ~30s.
+4. On complete/fail: clear lease fields; persist sanitized jsonb result
+   (`sanitizeJsonForPostgres` — strips U+0000).
+5. `attempt_count` increments on each claim; after `REPORT_JOB_MAX_ATTEMPTS`
+   (default 5) a reclaim marks the job `failed` (poison pill).
+6. Per-process concurrency capped by `REPORT_JOB_CONCURRENCY` (default 2).
+7. Disable poller with `REPORT_JOB_WORKER=0` (tests / emergency).
+
+No Redis/SQS/Temporal. Separate Railway worker service is optional later if
+API latency requires isolation; claim SQL already works across instances.
 
 ## Tools on the contract today
 
@@ -32,12 +55,12 @@ Shared start/poll runner: `artifacts/api-server/src/lib/report-jobs.ts`
 
 Match also has sync REST: `POST /sourcing/match-candidates-for-job`.
 
-## Non-goals (next rung)
+## Non-goals (later)
 
-- Durable workers / survive deploy (in-process `void run()` today)
-- Multi-tenant cron rewrite
+- Multi-tenant cron rewrite / snapshot generalization
 - Raising sync soft walls
 - Wrapping every paged search tool
+- Full Temporal/Inngest platform
 
 ## Host rules
 
