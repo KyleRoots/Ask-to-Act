@@ -120,6 +120,13 @@
       "when": 1785952800000,
       "tag": "0016_report_jobs_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786040000000,
+      "tag": "0017_ops_alert_state",
+      "breakpoints": true
     }
   ]
 }

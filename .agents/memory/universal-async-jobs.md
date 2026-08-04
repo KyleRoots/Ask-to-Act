@@ -61,6 +61,13 @@ Match also has sync REST: `POST /sourcing/match-candidates-for-job`.
 - Raising sync soft walls
 - Wrapping every paged search tool
 - Full Temporal/Inngest platform
+- Full observability dashboards / PagerDuty
+
+## Ops early-warning
+
+Light health check + email/webhook for stuck `report_jobs` and stale
+note-snapshot coverage — see [ops-alerts](ops-alerts.md). Soft walls stay
+unchanged; this only detects failures after the fact.
 
 ## Host rules
 

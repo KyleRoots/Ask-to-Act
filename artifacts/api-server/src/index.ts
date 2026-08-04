@@ -172,6 +172,9 @@ await initStripe();
 const { startReportJobWorker } = await import("./lib/report-job-worker.js");
 startReportJobWorker();
 
+const { startOpsHealthScheduler } = await import("./lib/ops-health-scheduler.js");
+startOpsHealthScheduler();
+
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
