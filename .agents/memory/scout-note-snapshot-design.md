@@ -162,8 +162,8 @@ raised on the sync MCP path and **never** a dead end — for any department and
 any scout path (live auto-widen, exhaustive, snapshot+live_tail):
 
 1. Sync returns honest incomplete + `stopReason=wall_time` + machine-readable
-   `asyncContinuation` (`start_scout_dept_report_job` / `get_report_job` /
-   optional `resumeArgs`).
+   `asyncContinuation` (MCP `start_scout_dept_report_job` / `get_report_job`
+   **and** REST `rest.start`/`rest.poll`; optional `resumeArgs`).
 2. Model starts one async job with the same args; polls until complete/failed.
 3. **Never** date-window fan-out. **Never** “give up because wall.”
 

@@ -134,6 +134,7 @@ describe("incompleteGuidanceNote", () => {
     });
     expect(note).toMatch(/timeout budget|wall_time/i);
     expect(note).toMatch(/start_scout_dept_report_job/);
+    expect(note).toMatch(/\/reports\/scout-qualified-by-department\/jobs/);
     expect(note).toMatch(/Do NOT issue multiple scout_dept_report/i);
   });
 });

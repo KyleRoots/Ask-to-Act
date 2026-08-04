@@ -111,12 +111,27 @@ const INCOMPLETE_NO_FANOUT =
 /**
  * Universal AI blocker contract (all departments / all scout paths):
  * Soft walls are ChatGPT/channel realism — never raise sync TOPN/EXHAUSTIVE walls.
- * wall_time is never a dead end: continue via start_scout_dept_report_job + get_report_job.
+ * wall_time is never a dead end: continue via MCP tools OR REST start+poll.
  * Never date-window fan-out. Never give up solely because of the soft wall.
  */
+export const ASYNC_CONTINUATION_REST = {
+  start: {
+    method: "POST" as const,
+    /** Relative to OpenAPI servers.url (/api/v1). */
+    path: "/reports/scout-qualified-by-department/jobs",
+  },
+  poll: {
+    method: "GET" as const,
+    /** Relative to OpenAPI servers.url (/api/v1); substitute jobId. */
+    pathTemplate: "/reports/jobs/{jobId}",
+  },
+} as const;
+
 export const ASYNC_CONTINUATION_HINT =
-  "Soft wall is channel realism, not a final answer. Call start_scout_dept_report_job with the same " +
-  "arguments, then poll get_report_job until status is complete or failed. " +
+  "Soft wall is channel realism, not a final answer. Continue with the same arguments via " +
+  "MCP (start_scout_dept_report_job → poll get_report_job) OR REST Actions " +
+  "(POST /reports/scout-qualified-by-department/jobs → poll GET /reports/jobs/{jobId}; " +
+  "paths relative to /api/v1) until status is complete or failed. " +
   "Do NOT fan out date windows. Do NOT give up because of wall_time.";
 
 /** Machine-readable continuation payload — same shape on every wall_time path. */
@@ -126,12 +141,14 @@ export function buildAsyncContinuation(args?: {
 }): {
   tool: "start_scout_dept_report_job";
   pollTool: "get_report_job";
+  rest: typeof ASYNC_CONTINUATION_REST;
   hint: string;
   resumeArgs?: Record<string, unknown>;
 } {
   return {
     tool: "start_scout_dept_report_job",
     pollTool: "get_report_job",
+    rest: ASYNC_CONTINUATION_REST,
     hint: ASYNC_CONTINUATION_HINT,
     ...(args?.resumeArgs ? { resumeArgs: args.resumeArgs } : {}),
   };
@@ -141,8 +158,10 @@ const INCOMPLETE_PARTIAL_RESULTS =
   "uniqueCandidateCount is a LOWER BOUND / partial ranked list for this single call. " +
   "Present these results to the user. Do NOT invent more names. " +
   "Check stopReason / confirmedComplete: treat the task as unfinished until " +
-  "confirmedComplete is true, OR you have continued via start_scout_dept_report_job " +
-  "and get_report_job finished, OR stopReason is a true unworkable connector limit " +
+  "confirmedComplete is true, OR you have continued via MCP " +
+  "(start_scout_dept_report_job / get_report_job) or REST " +
+  "(POST /reports/scout-qualified-by-department/jobs → GET /reports/jobs/{jobId}) " +
+  "and that async job finished, OR stopReason is a true unworkable connector limit " +
   "(e.g. no_matching_jobs) — wall_time alone is NOT a dead end. " +
   INCOMPLETE_NO_FANOUT +
   " If filters are ambiguous, ask one clarifying question; otherwise continue with async or one broader/exhaustive call.";
@@ -152,7 +171,8 @@ const INCOMPLETE_ZERO_NOT_CONFIRMED =
   "this is NOT a confirmed zero. Do NOT tell the user there are no matching candidates. " +
   "Say the first pass found none in the scanned portion, then either ask one clarifying question " +
   "(confirm department, include closed jobs, all applicants vs responses) " +
-  "and/or call start_scout_dept_report_job (same args) / one broader scout_dept_report or mode=exhaustive. " +
+  "and/or continue via MCP start_scout_dept_report_job (same args) / REST " +
+  "POST /reports/scout-qualified-by-department/jobs, or one broader scout_dept_report or mode=exhaustive. " +
   INCOMPLETE_NO_FANOUT;
 
 function escapeLucenePhrase(term: string): string {

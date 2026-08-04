@@ -739,7 +739,7 @@ export const REPORTS_CATALOG = [
     name: "scout_dept_report",
     title: "Scout Screen Qualified by Department",
     description:
-      "Natural-language screening/Scout notes by Internal Department. Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass limit=N. Returns stopReason + confirmedComplete + asyncContinuation on wall_time — soft wall is never a dead end (start_scout_dept_report_job → get_report_job). Never date-window fan-out. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
+      "Natural-language screening/Scout notes by Internal Department. Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass limit=N. Returns stopReason + confirmedComplete + asyncContinuation on wall_time — soft wall is never a dead end (MCP: start_scout_dept_report_job → get_report_job; REST: POST /v1/reports/scout-qualified-by-department/jobs → GET /v1/reports/jobs/{jobId}). Never date-window fan-out. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
     parameters: {
       department: "required Internal Department or nickname, e.g. STS-STSI, STSI, MYT-Ottawa",
       noteAction: "optional; default 'Scout Screen - Qualified'",

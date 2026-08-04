@@ -44,7 +44,7 @@ No department-specific special cases.
 | Sync outcome | Model action |
 |--------------|--------------|
 | `confirmedComplete: true` | Answer under those filters. |
-| `stopReason=wall_time` (+ `asyncContinuation`) | Present partials if any; call `start_scout_dept_report_job` with the same args (or `resumeArgs`); poll `get_report_job`. **Never** date-window fan-out. **Never** give up because of the wall. |
+| `stopReason=wall_time` (+ `asyncContinuation`) | Present partials if any; continue with the same args (or `resumeArgs`) via **MCP** (`start_scout_dept_report_job` → poll `get_report_job`) **or REST/Actions** (`asyncContinuation.rest`: `POST /reports/scout-qualified-by-department/jobs` → poll `GET /reports/jobs/{jobId}`, paths relative to `/api/v1`). **Never** date-window fan-out. **Never** give up because of the wall. |
 | Other incomplete (caps) | Present lower bound; clarify or one broader/exhaustive call — not multi-window fan-out. |
 | `no_matching_jobs` / confirmed zero | Safe to say none under those filters. |
 
@@ -63,7 +63,7 @@ When parameters are clear enough, the model should:
 2. For “list / show **N** most recent”, pass **`limit=N`**.
 3. Make **one** sync call. Then:
    - **`confirmedComplete: true`:** answer confidently under those filters.
-   - **`wall_time` / `asyncContinuation`:** present partials; start async job; poll — never multi-call date-window fan-out.
+   - **`wall_time` / `asyncContinuation`:** present partials; start async job (MCP tools **or** REST start+poll from `asyncContinuation.rest`); poll — never multi-call date-window fan-out.
    - **Other incomplete:** present the partial list; one broader/exhaustive follow-up is OK for totals — never date-window fan-out.
    - **`0` + `confirmedComplete: false`:** **do not conclude zero.** Clarify and/or continue via async / broader.
    - **`0` + `confirmedComplete: true`:** safe to say none matched under those filters.
@@ -89,8 +89,13 @@ Server behavior:
 - Returns top-level `stopReason` + `confirmedComplete`.
 - On sync `stopReason=wall_time` (any path: live walk, exhaustive, or
   snapshot+live_tail), response includes machine-readable `asyncContinuation`
-  (`tool=start_scout_dept_report_job`, `pollTool=get_report_job`, optional
-  `resumeArgs`) — **universal** soft-wall continuation, never date-window fan-out.
+  that is **host-complete**:
+  - MCP: `tool=start_scout_dept_report_job`, `pollTool=get_report_job`
+  - REST/Actions: `rest.start` = `POST /reports/scout-qualified-by-department/jobs`,
+    `rest.poll` = `GET /reports/jobs/{jobId}` (relative to `/api/v1`)
+  - optional `resumeArgs` + dual-host `hint`
+  — **universal** soft-wall continuation, never date-window fan-out.
+  See also [customgpt-actions-surface.md](./customgpt-actions-surface.md).
 - When snapshot coverage is complete+fresh and the snapshot alone already holds
   a full top-N, live-tail soft wall alone does **not** demote
   `confirmedComplete` (universal correctness).

@@ -11,4 +11,18 @@ AskToAct offers TWO onboarding paths for ChatGPT, not one:
 
 **Identity/audit tradeoff to always surface:** a *shared* Custom GPT runs every query under the single key configured in it — all usage collapses to one audit principal. For per-person attribution, each teammate must build their own GPT with their own key. The MCP connector is inherently per-user, which is why it's the recommended production path.
 
-**How to apply:** keep the Actions spec a strict read-only subset; never add write ops to it (writes belong on the MCP connector where identity is per-user). Keep the spec's `servers[0].url` = `getBaseUrl()+"/api/v1"` in lockstep with the mounted v1 routes, or imported actions 404.
+**How to apply:** keep the Actions spec a strict read-only subset; never add write ops to it (writes belong on the MCP connector where identity is per-user). Keep the spec's `servers[0].url` = `getBaseUrl()+"/api/v1"` in lockstep with the mounted v1 routes, or imported actions 404. Keep `lib/api-spec/openapi.yaml` (orval source of truth) in lockstep with `artifacts/api-server/src/routes/openapi.ts` (Actions door).
+
+## Dual-host soft-wall continuation (host-complete)
+
+Sync scout soft walls stay. On `stopReason=wall_time`, the response always carries
+machine-readable `asyncContinuation` that is **host-complete** — both MCP and REST
+clients can continue without improvising:
+
+| Host | Start | Poll |
+|------|-------|------|
+| **MCP** | `asyncContinuation.tool` = `start_scout_dept_report_job` | `pollTool` = `get_report_job` |
+| **REST / Actions** | `asyncContinuation.rest.start` = `POST /reports/scout-qualified-by-department/jobs` | `rest.poll` = `GET /reports/jobs/{jobId}` (paths relative to `/api/v1`) |
+
+Hint text covers both. **Never** date-window fan-out. **Never** give up on `wall_time`.
+See [scout-qualified-by-department.md](./scout-qualified-by-department.md).

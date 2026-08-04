@@ -10,7 +10,7 @@ import { getBaseUrl } from "../lib/getBaseUrl.js";
  */
 const router: IRouter = Router();
 
-function actionsSpec(baseUrl: string) {
+export function actionsSpec(baseUrl: string) {
   const reportResult = {
     type: "object",
     description: "Report or count payload. The exact shape varies by endpoint.",
@@ -134,7 +134,10 @@ function actionsSpec(baseUrl: string) {
           description:
             "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames " +
             "(STSI→STS-STSI). For 'list N most recent' pass limit=N (server auto-pages open jobs, ranks by note date, ONE call). " +
-            "Do not fan out date windows. incomplete = partial list / lower bound.",
+            "Read stopReason + confirmedComplete + asyncContinuation. Soft walls are channel realism — never a dead end. " +
+            "On wall_time, follow asyncContinuation.rest: POST /reports/scout-qualified-by-department/jobs then poll " +
+            "GET /reports/jobs/{jobId} (same args / resumeArgs). Never date-window fan-out. Never give up solely because of wall_time. " +
+            "incomplete without wall_time = partial list / lower bound.",
           parameters: [
             {
               name: "department",
@@ -206,9 +209,11 @@ function actionsSpec(baseUrl: string) {
           operationId: "startScoutDeptReportJob",
           summary: "Start async scout department report job",
           description:
+            "Universal soft-wall continuation for Actions/REST hosts. " +
             "Accepts the same body fields as the sync scout report query params. " +
-            "Returns HTTP 202 with jobId. Poll GET /reports/jobs/{jobId}. " +
-            "Use when sync wall_time needs a confirmed-complete answer (no date-window fan-out).",
+            "Returns HTTP 202 with jobId. Poll GET /reports/jobs/{jobId} until status=complete|failed. " +
+            "Use when sync GET returns stopReason=wall_time / asyncContinuation (same args; ~20 min safety max). " +
+            "Never date-window fan-out. Never give up solely because of the soft wall.",
           requestBody: {
             required: true,
             content: {
@@ -251,7 +256,9 @@ function actionsSpec(baseUrl: string) {
           operationId: "getReportJob",
           summary: "Poll async report job",
           description:
-            "Firm-scoped job status. When status=complete, includes the scout report result.",
+            "Universal soft-wall poll for Actions/REST hosts. Firm-scoped job status " +
+            "(queued|running|complete|failed). When status=complete, includes the scout report result. " +
+            "Keep polling after sync wall_time — never date-window fan-out, never give up on the soft wall alone.",
           parameters: [
             {
               name: "jobId",
@@ -319,7 +326,7 @@ const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your fi
 WHAT YOU CAN DO
 - Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
 - Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
-- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. Read stopReason/confirmedComplete — keep working unless complete or a real connector/gateway limit; do not fan out date windows. On wall_time, POST /reports/scout-qualified-by-department/jobs then poll GET /reports/jobs/{jobId}.
+- Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. Read stopReason/confirmedComplete/asyncContinuation — keep working unless confirmedComplete or a real connector/gateway limit; do not fan out date windows. Soft wall (wall_time) is never a dead end: use asyncContinuation.rest (POST /reports/scout-qualified-by-department/jobs → poll GET /reports/jobs/{jobId}) with the same args until complete|failed.
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.

@@ -206,9 +206,12 @@ paths:
       description: >-
         Screening/Scout notes by Internal Department — natural-language ready.
         Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass
-        limit=N. Returns stopReason + confirmedComplete — keep working unless
-        confirmedComplete or a real connector/gateway limit. Do not fan out
-        date windows.
+        limit=N. Returns stopReason + confirmedComplete + asyncContinuation —
+        soft walls are channel realism, never a dead end. On wall_time follow
+        asyncContinuation.rest: POST /v1/reports/scout-qualified-by-department/jobs
+        then poll GET /v1/reports/jobs/{jobId} (same args). Keep working unless
+        confirmedComplete or a real connector/gateway limit. Never date-window
+        fan-out. Never give up solely because of wall_time.
       security:
         - bearerAuth: []
       parameters:
@@ -275,6 +278,81 @@ paths:
       responses:
         "200":
           description: Scout qualified candidates by department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/reports/scout-qualified-by-department/jobs:
+    post:
+      operationId: startScoutDeptReportJob
+      tags: [reports]
+      summary: Start async scout department report job
+      description: >-
+        Universal soft-wall continuation for Actions/REST hosts. Accepts the
+        same body fields as the sync scout report query params. Returns HTTP
+        202 with jobId. Poll GET /v1/reports/jobs/{jobId} until
+        status=complete|failed. Use when sync GET returns stopReason=wall_time /
+        asyncContinuation (same args; ~20 min safety max). Never date-window
+        fan-out. Never give up solely because of the soft wall.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [department]
+              properties:
+                department:
+                  type: string
+                noteAction:
+                  type: string
+                openJobsOnly:
+                  type: boolean
+                applicantPool:
+                  type: string
+                  enum: [responses, all]
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                mode:
+                  type: string
+                  enum: [bounded, exhaustive]
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/reports/jobs/{jobId}:
+    get:
+      operationId: getReportJob
+      tags: [reports]
+      summary: Poll async report job
+      description: >-
+        Universal soft-wall poll for Actions/REST hosts. Firm-scoped job status
+        (queued|running|complete|failed). When status=complete, includes the
+        scout report result. Keep polling after sync wall_time — never
+        date-window fan-out, never give up on the soft wall alone.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Report job status / result
           content:
             application/json:
               schema:

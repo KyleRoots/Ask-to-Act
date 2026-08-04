@@ -32,16 +32,21 @@ describe("async report job contracts", () => {
     expect(ASYNC_REPORT_WALL_MS).toBeLessThanOrEqual(30 * 60 * 1000);
   });
 
-  it("wall_time guidance points at start_scout_dept_report_job / get_report_job", () => {
+  it("wall_time guidance points at MCP tools and REST start+poll", () => {
     const note = incompleteGuidanceNote("bounded", {
       stoppedForWallTime: true,
       matchCount: 2,
     });
     expect(note).toMatch(/start_scout_dept_report_job/);
     expect(note).toMatch(/get_report_job/);
+    expect(note).toMatch(/\/reports\/scout-qualified-by-department\/jobs/);
+    expect(note).toMatch(/\/reports\/jobs\/\{jobId\}/);
     expect(note).toMatch(/Do NOT issue multiple scout_dept_report/i);
     expect(note).toMatch(/channel realism|never a dead end|Soft wall/i);
     expect(ASYNC_CONTINUATION_HINT).toMatch(/start_scout_dept_report_job/);
+    expect(ASYNC_CONTINUATION_HINT).toMatch(
+      /\/reports\/scout-qualified-by-department\/jobs/,
+    );
     expect(ASYNC_CONTINUATION_HINT).toMatch(/Do NOT give up/i);
 
     const wrapped = withAsyncContinuationHint(
@@ -55,9 +60,22 @@ describe("async report job contracts", () => {
     expect(wrapped.asyncContinuation).toMatchObject({
       tool: "start_scout_dept_report_job",
       pollTool: "get_report_job",
+      rest: {
+        start: {
+          method: "POST",
+          path: "/reports/scout-qualified-by-department/jobs",
+        },
+        poll: {
+          method: "GET",
+          pathTemplate: "/reports/jobs/{jobId}",
+        },
+      },
       resumeArgs: { department: "STSI", limit: 5 },
     });
     expect(String(wrapped.note)).toMatch(/start_scout_dept_report_job/);
+    expect(String(wrapped.note)).toMatch(
+      /\/reports\/scout-qualified-by-department\/jobs/,
+    );
 
     const complete = withAsyncContinuationHint({
       stopReason: "complete",
