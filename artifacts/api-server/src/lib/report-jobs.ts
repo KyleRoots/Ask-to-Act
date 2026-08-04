@@ -100,6 +100,57 @@ export function sanitizeJsonForPostgres<T>(value: T): T {
   return value;
 }
 
+/**
+ * Drizzle "Failed query" messages embed full SQL + params, which for report_jobs
+ * complete often includes the entire result payload — then error_summary (2KB)
+ * truncates before the real Postgres cause is visible. Prefer cause chain and
+ * drop the params dump so ops-health can show why persist failed.
+ */
+function trimReportJobErrorMessage(msg: string): string {
+  const paramsIdx = msg.indexOf("\nparams:");
+  let out = paramsIdx >= 0 ? msg.slice(0, paramsIdx) : msg;
+  if (out.length > 600) out = `${out.slice(0, 600)}…`;
+  return out;
+}
+
+export function summarizeReportJobError(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; current != null && depth < 4; depth += 1) {
+    if (current instanceof Error) {
+      const msg = trimReportJobErrorMessage(current.message || current.name);
+      if (msg) parts.push(msg);
+      current = current.cause;
+      continue;
+    }
+    if (typeof current === "string") {
+      const msg = trimReportJobErrorMessage(current);
+      if (msg) parts.push(msg);
+      break;
+    }
+    const asString = trimReportJobErrorMessage(String(current));
+    if (asString) parts.push(asString);
+    break;
+  }
+  const joined = parts.length > 0 ? parts.join(" | ") : "Unknown report job error";
+  return sanitizeJsonForPostgres(joined).slice(0, 2000);
+}
+
+/** Sanitize + JSON round-trip so only jsonb-safe values are persisted. */
+export function toPersistableJson(value: unknown): unknown {
+  const sanitized = sanitizeJsonForPostgres(value);
+  return JSON.parse(
+    JSON.stringify(sanitized, (_key, v) => {
+      if (typeof v === "string") {
+        return v.includes("\u0000") ? v.replaceAll("\u0000", "") : v;
+      }
+      if (typeof v === "bigint") return v.toString();
+      if (typeof v === "number" && !Number.isFinite(v)) return null;
+      return v;
+    }),
+  );
+}
+
 export type StartReportJobResult =
   | { jobId: string; status: "queued"; deduped?: false }
   | {
@@ -351,7 +402,7 @@ export async function completeReportJob(opts: {
   leaseOwner: string;
   result: unknown;
 }): Promise<boolean> {
-  const persistable = sanitizeJsonForPostgres(opts.result);
+  const persistable = toPersistableJson(opts.result);
   const updated = await db
     .update(reportJobsTable)
     .set({
@@ -385,7 +436,7 @@ export async function failReportJob(opts: {
     .update(reportJobsTable)
     .set({
       status: "failed",
-      errorSummary: sanitizeJsonForPostgres(opts.error).slice(0, 2000),
+      errorSummary: summarizeReportJobError(opts.error).slice(0, 2000),
       finishedAt: new Date(),
       leaseOwner: null,
       leaseExpiresAt: null,
@@ -508,7 +559,7 @@ export async function runClaimedReportJob(opts: {
     );
     return "complete";
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = summarizeReportJobError(err);
     logger.error(
       {
         jobId: opts.job.id,
@@ -516,6 +567,7 @@ export async function runClaimedReportJob(opts: {
         toolName: opts.job.toolName,
         attemptCount: opts.job.attemptCount,
         err,
+        errorSummary: msg,
       },
       "Async report job failed",
     );
