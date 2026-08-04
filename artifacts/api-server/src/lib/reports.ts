@@ -14,9 +14,15 @@
  * - Departments are resolved per firm: Myticas falls back to the hardcoded
  *   DEPARTMENTS list (byte-identical); other firms auto-discover live values.
  */
+import { z } from "zod";
 import { countEntity, listPlacements, ACTIVE_OPPS_DEFINITION } from "./bullhorn-client.js";
 import { currentFirmContextId } from "./bullhorn-auth.js";
 import { resolveDeptField, getFirmFieldMap } from "./firm-config.js";
+import {
+  RECRUITER_LEADERBOARD_ASYNC_SPEC,
+  SYNC_SOFT_WALL_MS,
+  withAsyncContinuationHint,
+} from "./async-job-contract.js";
 
 /**
  * Myticas' configured Internal Departments — used as the fallback groupValues list
@@ -210,21 +216,30 @@ async function fetchAllPlacements(opts: {
   dateAddedEnd?: string;
   fields?: string;
   deptField?: string;
-}): Promise<PlacementRow[]> {
+  deadlineMs?: number;
+}): Promise<{ rows: PlacementRow[]; truncated: boolean; wallHit: boolean }> {
   const deptField = opts.deptField ?? "correlatedCustomText1";
   const fields =
     opts.fields ?? `id,status,employmentType,${deptField},owner(id,name,firstName,lastName)`;
   const pageSize = 500;
   const all: PlacementRow[] = [];
+  let truncated = false;
+  let wallHit = false;
   for (let page = 0, start = 0; page < 40; page++, start += pageSize) {
+    if (opts.deadlineMs != null && Date.now() >= opts.deadlineMs) {
+      wallHit = true;
+      truncated = true;
+      break;
+    }
     const res = (await listPlacements({ ...opts, count: pageSize, start, fields })) as {
       data?: PlacementRow[];
     };
     const rows = res.data ?? [];
     all.push(...rows);
     if (rows.length < pageSize) break;
+    if (page === 39) truncated = true;
   }
-  return all;
+  return { rows: all, truncated, wallHit };
 }
 
 function employmentColumn(t?: string): "contract" | "contractToHire" | "directHire" | "other" {
@@ -294,7 +309,7 @@ export async function staffingScorecard(args: { year?: number }): Promise<unknow
   const placementDeptField = (await resolveDeptField(firmId, "Placement")) ?? "correlatedCustomText1";
 
   // Resolve department name lists per firm (Myticas falls back to hardcoded DEPARTMENTS).
-  const [jobDeptResult, oppDeptResult, placementsRaw] = await Promise.all([
+  const [jobDeptResult, oppDeptResult, placementsFetch] = await Promise.all([
     resolveDeptNames(firmId, "JobOrder", jobDeptField),
     resolveDeptNames(firmId, "Opportunity", oppDeptField),
     fetchAllPlacements({
@@ -303,6 +318,7 @@ export async function staffingScorecard(args: { year?: number }): Promise<unknow
       deptField: placementDeptField,
     }),
   ]);
+  const placementsRaw = placementsFetch.rows;
 
   // Use the same dept list for display rows — prefer job dept names as the canonical
   // set; merge in any opp-only names so no dept is silently dropped.
@@ -424,7 +440,7 @@ export async function placementsReport(args: {
   const firmId = currentFirmContextId();
   const placementDeptField = (await resolveDeptField(firmId, "Placement")) ?? "correlatedCustomText1";
 
-  const [placements, placementDeptResult] = await Promise.all([
+  const [placementsFetch, placementDeptResult] = await Promise.all([
     fetchAllPlacements({
       dateAddedStart: range.startStr,
       dateAddedEnd: range.endStr,
@@ -432,6 +448,7 @@ export async function placementsReport(args: {
     }),
     resolveDeptNames(firmId, "Placement", placementDeptField),
   ]);
+  const placements = placementsFetch.rows;
   const { departments, source: deptSource } = placementDeptResult;
 
   const agg: Record<
@@ -585,6 +602,12 @@ export async function jobAgingReport(): Promise<unknown> {
   };
 }
 
+/** Shared MCP/REST args for recruiter_leaderboard (public — no wallMs). */
+export const recruiterLeaderboardArgsSchema = z.object({
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
 /**
  * 6. Recruiter Submission-to-Placement Conversion Leaderboard.
  *
@@ -598,19 +621,32 @@ export async function jobAgingReport(): Promise<unknown> {
 export async function recruiterLeaderboard(args: {
   startDate?: string;
   endDate?: string;
+  /** Async jobs only — never accept from public HTTP/MCP input. */
+  wallMs?: number;
 }): Promise<unknown> {
   const range = resolveRange({ startDate: args.startDate, endDate: args.endDate, year: undefined });
+  const wallMs = args.wallMs ?? SYNC_SOFT_WALL_MS;
+  const deadlineMs = Date.now() + wallMs;
+  const asyncBudget = wallMs > SYNC_SOFT_WALL_MS;
+  const resumeArgs: Record<string, unknown> = {
+    ...(args.startDate ? { startDate: args.startDate } : {}),
+    ...(args.endDate ? { endDate: args.endDate } : {}),
+  };
+
   // Numerator (placements) and denominator (submissions) MUST cover the exact same
   // window or the rate is inconsistent. The submission count below uses the epoch
   // instants [startMs, endMs]; mirror them here as ISO timestamps so the placement
   // query resolves to the identical bounds (dateAdded >= startMs AND < endMs). Passing
   // the day-only range.startStr/endStr would drop "today" from placements while keeping
   // it in submissions (endMs = now), systematically depressing current-period rates.
-  const placements = await fetchAllPlacements({
+  const placementsFetch = await fetchAllPlacements({
     dateAddedStart: new Date(range.startMs).toISOString(),
     dateAddedEnd: new Date(range.endMs).toISOString(),
     fields: "id,status,dateAdded,jobSubmission(id,sendingUser(id,name,firstName,lastName))",
+    deadlineMs,
   });
+  const placements = placementsFetch.rows;
+  let stoppedForWallTime = placementsFetch.wallHit;
 
   // Numerator: confirmed placements credited to the submitting recruiter.
   const byRec = new Map<number, { id: number; name: string; placements: number }>();
@@ -629,12 +665,22 @@ export async function recruiterLeaderboard(args: {
 
   // Denominator: each recruiter's own submissions in the period.
   const recs = [...byRec.values()];
-  const submissions = await mapLimit(recs, 4, (r) =>
-    countTotal("JobSubmission", `sendingUser.id:${r.id} AND dateAdded:[${range.startMs} TO ${range.endMs}]`),
-  );
+  const submissions: number[] = new Array(recs.length).fill(0);
+  let submissionCountsIncomplete = false;
+  await mapLimit(recs, 4, async (r, i) => {
+    if (Date.now() >= deadlineMs) {
+      stoppedForWallTime = true;
+      submissionCountsIncomplete = true;
+      return;
+    }
+    submissions[i] = await countTotal(
+      "JobSubmission",
+      `sendingUser.id:${r.id} AND dateAdded:[${range.startMs} TO ${range.endMs}]`,
+    );
+  });
 
   const rows = recs.map((r, i) => {
-    const subs = submissions[i];
+    const subs = submissions[i] ?? 0;
     const rawRate = subs > 0 ? r.placements / subs : null;
     const cappedAt100 = rawRate !== null && rawRate > 1;
     const conversionRate = rawRate === null ? null : Number((Math.min(rawRate, 1) * 100).toFixed(1));
@@ -660,7 +706,19 @@ export async function recruiterLeaderboard(args: {
   const ranked = rows.map((r, i) => ({ rank: i + 1, ...r }));
   const leader = ranked.find((r) => !r.lowVolume && r.conversionRate !== null);
 
-  return {
+  const incomplete =
+    stoppedForWallTime ||
+    placementsFetch.truncated ||
+    submissionCountsIncomplete;
+  const stopReason = stoppedForWallTime
+    ? "wall_time"
+    : placementsFetch.truncated
+      ? "placement_page_cap"
+      : submissionCountsIncomplete
+        ? "submission_counts_incomplete"
+        : "complete";
+
+  const result: Record<string, unknown> = {
     report: "recruiter_leaderboard",
     period: range.label,
     generatedAt: new Date().toISOString(),
@@ -673,12 +731,22 @@ export async function recruiterLeaderboard(args: {
       placementsFromSubmissions: ranked.reduce((a, r) => a + r.placementsFromSubmissions, 0),
       unattributedPlacements,
     },
+    stopReason,
+    confirmedComplete: !incomplete,
+    incomplete,
+    wallMs,
+    asyncBudget,
     definitions: { conversionRate: CONVERSION_DEFINITION, placementsMade: DEPT_DEFINITIONS.placementsMade },
     notes: [
       "Conversion credits the recruiter who SUBMITTED the candidate (JobSubmission.sendingUser), NOT the placement owner — they differ often on this instance, which previously caused impossible >100% rates.",
       `Reliable rows are listed first; lowVolume = fewer than ${MIN_SUBMISSIONS_FOR_RELIABLE_RATE} submissions (rate is volatile and should not be ranked at face value).`,
       "conversionRate is capped at 100%; a placement whose submission predates the period can otherwise exceed it (flagged cappedAt100).",
       "v1 lists only recruiters whose submissions produced at least one confirmed placement in the period; unattributedPlacements counts confirmed placements with no submission sender.",
+      ...(stoppedForWallTime
+        ? [
+            "Soft wall is channel realism — not a final answer. Continue via start_recruiter_leaderboard_job / get_report_job (or REST asyncContinuation.rest).",
+          ]
+        : []),
     ],
     summary: leader
       ? `${leader.recruiter} leads with a ${leader.conversionRate}% submission-to-placement conversion (${leader.placementsFromSubmissions}/${leader.submissions}) in ${range.label}.`
@@ -686,6 +754,10 @@ export async function recruiterLeaderboard(args: {
         ? `No recruiter met the ${MIN_SUBMISSIONS_FOR_RELIABLE_RATE}-submission reliability threshold in ${range.label}; only low-volume rows available.`
         : `No confirmed placements in ${range.label}.`,
   };
+
+  return withAsyncContinuationHint(result, RECRUITER_LEADERBOARD_ASYNC_SPEC, {
+    resumeArgs,
+  });
 }
 
 /** Catalog of available reports (the "library"), for the list_reports tool. */
@@ -729,7 +801,7 @@ export const REPORTS_CATALOG = [
     name: "recruiter_leaderboard",
     title: "Recruiter Submission-to-Placement Conversion",
     description:
-      "Recruiters ranked by submission-to-placement conversion over a period. Conversion credits the recruiter who SUBMITTED the candidate (not the placement owner), so rates are trustworthy and bounded 0–100%; low-volume recruiters (<10 submissions) are flagged and ranked below reliable ones.",
+      "Recruiters ranked by submission-to-placement conversion over a period. Conversion credits the recruiter who SUBMITTED the candidate (not the placement owner), so rates are trustworthy and bounded 0–100%; low-volume recruiters (<10 submissions) are flagged and ranked below reliable ones. Soft wall returns stopReason=wall_time + asyncContinuation (MCP: start_recruiter_leaderboard_job → get_report_job; REST: POST /v1/reports/recruiter-leaderboard/jobs → GET /v1/reports/jobs/{jobId}).",
     parameters: {
       startDate: "optional YYYY-MM-DD (default: start of current year)",
       endDate: "optional YYYY-MM-DD inclusive (default: today)",

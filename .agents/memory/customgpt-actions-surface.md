@@ -15,14 +15,16 @@ AskToAct offers TWO onboarding paths for ChatGPT, not one:
 
 ## Dual-host soft-wall continuation (host-complete)
 
-Sync scout soft walls stay. On `stopReason=wall_time`, the response always carries
+Sync soft walls stay. On `stopReason=wall_time`, the response always carries
 machine-readable `asyncContinuation` that is **host-complete** — both MCP and REST
-clients can continue without improvising:
+clients can continue without improvising. Shared poll for all tools:
+`get_report_job` / `GET /reports/jobs/{jobId}`.
 
-| Host | Start | Poll |
-|------|-------|------|
-| **MCP** | `asyncContinuation.tool` = `start_scout_dept_report_job` | `pollTool` = `get_report_job` |
-| **REST / Actions** | `asyncContinuation.rest.start` = `POST /reports/scout-qualified-by-department/jobs` | `rest.poll` = `GET /reports/jobs/{jobId}` (paths relative to `/api/v1`) |
+| Tool | MCP start | REST start |
+|------|-----------|------------|
+| Scout | `start_scout_dept_report_job` | `POST /reports/scout-qualified-by-department/jobs` |
+| Match | `start_match_candidates_job` | `POST /sourcing/match-candidates-for-job/jobs` |
+| Recruiter leaderboard | `start_recruiter_leaderboard_job` | `POST /reports/recruiter-leaderboard/jobs` |
 
-Hint text covers both. **Never** date-window fan-out. **Never** give up on `wall_time`.
-See [scout-qualified-by-department.md](./scout-qualified-by-department.md).
+Hint text covers both hosts. **Never** date-window fan-out (scout). **Never** give up on `wall_time`.
+See [universal-async-jobs.md](./universal-async-jobs.md) and [scout-qualified-by-department.md](./scout-qualified-by-department.md).

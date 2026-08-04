@@ -101,15 +101,20 @@ describe("public OpenAPI door stays read-only", () => {
       expect(doc.includes(name)).toBe(false);
     }
     // Every declared path must be a read-only reporting op:
-    // GET reports, POST /count, or POST async scout job start (no Bullhorn writes).
+    // GET reports, POST /count, POST sourcing match, or POST async job starts.
     const paths = body.paths as Record<string, Record<string, unknown>>;
+    const asyncJobPosts = new Set([
+      "/reports/scout-qualified-by-department/jobs",
+      "/reports/recruiter-leaderboard/jobs",
+      "/sourcing/match-candidates-for-job",
+      "/sourcing/match-candidates-for-job/jobs",
+    ]);
     for (const [path, methods] of Object.entries(paths)) {
       for (const method of Object.keys(methods)) {
         const isReadOnly =
           method === "get" ||
           (method === "post" && path === "/count") ||
-          (method === "post" &&
-            path === "/reports/scout-qualified-by-department/jobs");
+          (method === "post" && asyncJobPosts.has(path));
         expect(
           isReadOnly,
           `public path ${method.toUpperCase()} ${path} must be read-only`,
@@ -117,6 +122,9 @@ describe("public OpenAPI door stays read-only", () => {
       }
     }
     expect(paths["/reports/scout-qualified-by-department/jobs"]?.post).toBeDefined();
+    expect(paths["/reports/recruiter-leaderboard/jobs"]?.post).toBeDefined();
+    expect(paths["/sourcing/match-candidates-for-job"]?.post).toBeDefined();
+    expect(paths["/sourcing/match-candidates-for-job/jobs"]?.post).toBeDefined();
     expect(paths["/reports/jobs/{jobId}"]?.get).toBeDefined();
     const scoutDesc = String(
       (paths["/reports/scout-qualified-by-department"]?.get as { description?: string })

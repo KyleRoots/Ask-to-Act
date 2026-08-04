@@ -9,6 +9,7 @@
  *   - ranks with shared recruiter signals (no unconditional local boost for remote roles),
  *   - returns eligible vs needs-verification buckets with transparent criterion outcomes.
  */
+import { z } from "zod";
 import {
   getJob,
   searchCandidates,
@@ -29,24 +30,33 @@ import type { ReconciledExperience } from "./resume-experience.js";
 import { isTrueSubmission } from "./submission-status.js";
 import { extractJobRequirements } from "./match-requirements.js";
 import { evaluateCandidate } from "./match-criteria.js";
+import {
+  MATCH_ASYNC_SPEC,
+  SYNC_SOFT_WALL_MS,
+  withAsyncContinuationHint,
+} from "./async-job-contract.js";
 
-export interface MatchCandidatesArgs {
-  jobId: number;
-  /** Override the must-have skills; otherwise derived from the job's skills/skillList. */
-  mustHaveSkills?: string[];
-  /** Extra nice-to-have terms that boost ranking but are not required. */
-  niceToHaveSkills?: string[];
-  /** How many matches to return (after filtering). Default 6, max 15. */
-  limit?: number;
-  /** Candidate pool to fetch before filtering. Default 50, max 100. */
-  poolSize?: number;
-  /** Drop candidates whose location does not match the job's. Default false. */
-  localOnly?: boolean;
-  includePlaced?: boolean;
-  includeSubmitted?: boolean;
-  includeDoNotContact?: boolean;
-  includeInactive?: boolean;
-}
+/** Shared MCP/REST/async-job args for match_candidates_for_job (public — no wallMs). */
+export const matchCandidatesArgsSchema = z.object({
+  jobId: z.number().int().positive(),
+  mustHaveSkills: z.array(z.string()).optional(),
+  niceToHaveSkills: z.array(z.string()).optional(),
+  limit: z.number().int().min(1).max(15).optional(),
+  poolSize: z.number().int().min(1).max(100).optional(),
+  localOnly: z.boolean().optional(),
+  includePlaced: z.boolean().optional(),
+  includeSubmitted: z.boolean().optional(),
+  includeDoNotContact: z.boolean().optional(),
+  includeInactive: z.boolean().optional(),
+});
+
+export type MatchCandidatesArgs = z.infer<typeof matchCandidatesArgsSchema> & {
+  /**
+   * Soft-wall budget override. Sync callers omit this (SYNC_SOFT_WALL_MS).
+   * Async jobs pass ASYNC_REPORT_WALL_MS. Never accept from public HTTP/MCP input.
+   */
+  wallMs?: number;
+};
 
 const DEFAULT_LIMIT = 6;
 const MAX_LIMIT = 15;
@@ -87,14 +97,27 @@ const SEARCH_FIELDS = [
 
 async function fetchJobPipelineCandidateIds(
   jobId: number,
-): Promise<{ submitted: Set<number>; applied: Set<number>; pagesFetched: number; truncated: boolean }> {
+  opts?: { deadlineMs?: number },
+): Promise<{
+  submitted: Set<number>;
+  applied: Set<number>;
+  pagesFetched: number;
+  truncated: boolean;
+  wallHit: boolean;
+}> {
   const submitted = new Set<number>();
   const applied = new Set<number>();
   const PAGE = 200;
   const MAX_PAGES = 50;
   let pagesFetched = 0;
   let truncated = false;
+  let wallHit = false;
   for (let page = 0; page < MAX_PAGES; page++) {
+    if (opts?.deadlineMs != null && Date.now() >= opts.deadlineMs) {
+      wallHit = true;
+      truncated = true;
+      break;
+    }
     const res = await listSubmissionsForJob({
       jobId,
       count: PAGE,
@@ -113,7 +136,7 @@ async function fetchJobPipelineCandidateIds(
     if (rows.length < PAGE) break;
     if (page === MAX_PAGES - 1) truncated = true;
   }
-  return { submitted, applied, pagesFetched, truncated };
+  return { submitted, applied, pagesFetched, truncated, wallHit };
 }
 
 function fullName(c: Record<string, unknown>): string {
@@ -168,6 +191,22 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   }
   const limit = Math.min(Math.max(1, args.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   const poolSize = Math.min(Math.max(limit * 4, args.poolSize ?? DEFAULT_POOL), MAX_POOL);
+  const wallMs = args.wallMs ?? SYNC_SOFT_WALL_MS;
+  const deadlineMs = Date.now() + wallMs;
+  const asyncBudget = wallMs > SYNC_SOFT_WALL_MS;
+
+  const resumeArgs: Record<string, unknown> = {
+    jobId: args.jobId,
+    ...(args.mustHaveSkills ? { mustHaveSkills: args.mustHaveSkills } : {}),
+    ...(args.niceToHaveSkills ? { niceToHaveSkills: args.niceToHaveSkills } : {}),
+    ...(args.limit != null ? { limit: args.limit } : {}),
+    ...(args.poolSize != null ? { poolSize: args.poolSize } : {}),
+    ...(args.localOnly ? { localOnly: true } : {}),
+    ...(args.includePlaced ? { includePlaced: true } : {}),
+    ...(args.includeSubmitted ? { includeSubmitted: true } : {}),
+    ...(args.includeDoNotContact ? { includeDoNotContact: true } : {}),
+    ...(args.includeInactive ? { includeInactive: true } : {}),
+  };
 
   // 1. Read the job and extract structured requirements.
   const job = entityOf(await getJob({ id: args.jobId }));
@@ -250,8 +289,13 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
           fields: SEARCH_FIELDS,
         })
       : Promise.resolve({ data: [] }),
-    fetchJobPipelineCandidateIds(args.jobId),
+    fetchJobPipelineCandidateIds(args.jobId, { deadlineMs }),
   ]);
+
+  let stoppedForWallTime = pipeline.wallHit;
+  if (!stoppedForWallTime && Date.now() >= deadlineMs) {
+    stoppedForWallTime = true;
+  }
 
   const pool = mergePools(
     asArray(keywordSearch) as Array<Record<string, unknown>>,
@@ -466,18 +510,40 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   const poolCapped = pool.length >= poolSize || (locationQuery != null && asArray(locationSearch).length >= 40);
   const verificationIncomplete = verifyCount < kept.length;
   let status: "complete" | "partial" | "needs_clarification" | "no_eligible_matches" = "complete";
-  if (matches.length === 0) status = "no_eligible_matches";
-  else if (poolCapped || verificationIncomplete || pipeline.truncated || requirements.skillDerivation === "title_fallback") {
+  if (stoppedForWallTime) {
+    // Soft wall — never claim a confirmed empty set.
+    status = "partial";
+  } else if (matches.length === 0) {
+    status = "no_eligible_matches";
+  } else if (
+    poolCapped ||
+    verificationIncomplete ||
+    pipeline.truncated ||
+    requirements.skillDerivation === "title_fallback"
+  ) {
     status = "partial";
   }
 
   const stopReasons: string[] = [];
+  if (stoppedForWallTime) stopReasons.push("wall_time");
   if (poolCapped) stopReasons.push(`search_pool_capped_at_${poolSize}`);
   if (verificationIncomplete) stopReasons.push("résumé_verification_limited_to_shortlist");
-  if (pipeline.truncated) stopReasons.push("submission_pagination_safety_ceiling");
+  if (pipeline.truncated && !stoppedForWallTime) {
+    stopReasons.push("submission_pagination_safety_ceiling");
+  }
   if (requirements.skillDerivation === "title_fallback") {
     stopReasons.push("skills_derived_from_title_tokens");
   }
+
+  // Top-level stopReason for the universal asyncContinuation contract.
+  const stopReason = stoppedForWallTime
+    ? "wall_time"
+    : status === "complete"
+      ? "complete"
+      : status === "no_eligible_matches"
+        ? "no_eligible_matches"
+        : "partial";
+  const confirmedComplete = !stoppedForWallTime && status === "complete";
 
   const presentationGuidance = [
     status === "partial"
@@ -487,10 +553,17 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
         : "Eligible matches passed hard constraints with verified evidence where required.",
     "Never claim a skill without resumeEvidence. Treat clearance as UNVERIFIED until résumé-confirmed.",
     "Link each candidate NAME to bullhornUrl. Leave emails/phones as plain text.",
+    ...(stoppedForWallTime
+      ? [
+          "Soft wall is channel realism — not a final answer. Continue via start_match_candidates_job / get_report_job (or REST asyncContinuation.rest).",
+        ]
+      : []),
   ];
 
-  return {
+  const result: Record<string, unknown> = {
     status,
+    stopReason,
+    confirmedComplete,
     job: {
       id: job.id,
       title: requirements.title,
@@ -529,11 +602,14 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       matchesReturned: matches.length,
       poolSizeRequested: poolSize,
       submissionPagesFetched: pipeline.pagesFetched,
+      wallMs,
+      asyncBudget,
     },
     completeness: {
       poolCapped,
       verificationIncomplete,
       submissionSetTruncated: pipeline.truncated,
+      wallHit: stoppedForWallTime,
       stopReasons,
     },
     eligibleMatches: takeEligible.map((m, i) => ({ ...m, rank: i + 1 })),
@@ -550,4 +626,6 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       ...presentationGuidance,
     ],
   };
+
+  return withAsyncContinuationHint(result, MATCH_ASYNC_SPEC, { resumeArgs });
 }

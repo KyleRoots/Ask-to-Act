@@ -22,12 +22,27 @@ import {
   incompleteGuidanceNote,
   withAsyncContinuationHint,
 } from "./scout-screen.js";
-import { scoutJobDedupeKey } from "./report-jobs.js";
+import {
+  ASYNC_REPORT_WALL_MS as CONTRACT_ASYNC_WALL,
+  SYNC_SOFT_WALL_MS,
+  MATCH_ASYNC_SPEC,
+  RECRUITER_LEADERBOARD_ASYNC_SPEC,
+  SCOUT_ASYNC_SPEC,
+  buildAsyncContinuation,
+  withAsyncContinuationHint as withGenericContinuation,
+} from "./async-job-contract.js";
+import {
+  scoutJobDedupeKey,
+  matchCandidatesJobDedupeKey,
+  recruiterLeaderboardJobDedupeKey,
+} from "./report-jobs.js";
 
 describe("async report job contracts", () => {
   it("keeps sync soft walls unchanged and defines a high async safety max", () => {
     expect(TOPN_WALL_MS).toBe(95_000);
     expect(EXHAUSTIVE_WALL_MS).toBe(75_000);
+    expect(SYNC_SOFT_WALL_MS).toBe(95_000);
+    expect(ASYNC_REPORT_WALL_MS).toBe(CONTRACT_ASYNC_WALL);
     expect(ASYNC_REPORT_WALL_MS).toBeGreaterThanOrEqual(15 * 60 * 1000);
     expect(ASYNC_REPORT_WALL_MS).toBeLessThanOrEqual(30 * 60 * 1000);
   });
@@ -86,6 +101,45 @@ describe("async report job contracts", () => {
     expect(complete.note).toBe("done");
   });
 
+  it("shared contract builds host-complete continuations for match and leaderboard", () => {
+    expect(SCOUT_ASYNC_SPEC.startTool).toBe("start_scout_dept_report_job");
+    expect(MATCH_ASYNC_SPEC.startTool).toBe("start_match_candidates_job");
+    expect(RECRUITER_LEADERBOARD_ASYNC_SPEC.startTool).toBe(
+      "start_recruiter_leaderboard_job",
+    );
+
+    const matchCont = buildAsyncContinuation(MATCH_ASYNC_SPEC, {
+      resumeArgs: { jobId: 42 },
+    });
+    expect(matchCont).toMatchObject({
+      tool: "start_match_candidates_job",
+      pollTool: "get_report_job",
+      rest: {
+        start: {
+          method: "POST",
+          path: "/sourcing/match-candidates-for-job/jobs",
+        },
+        poll: {
+          method: "GET",
+          pathTemplate: "/reports/jobs/{jobId}",
+        },
+      },
+      resumeArgs: { jobId: 42 },
+    });
+
+    const wrapped = withGenericContinuation(
+      { stopReason: "wall_time", note: "partial" },
+      RECRUITER_LEADERBOARD_ASYNC_SPEC,
+      { resumeArgs: { startDate: "2026-01-01" } },
+    ) as Record<string, unknown>;
+    expect(wrapped.asyncContinuation).toMatchObject({
+      tool: "start_recruiter_leaderboard_job",
+      rest: {
+        start: { path: "/reports/recruiter-leaderboard/jobs" },
+      },
+    });
+  });
+
   it("dedupe keys are firm-scoped and stable for identical scout args", () => {
     const a = scoutJobDedupeKey("firm-a", { department: "STSI", limit: 5 });
     const b = scoutJobDedupeKey("firm-a", {
@@ -100,6 +154,26 @@ describe("async report job contracts", () => {
     expect(a).toBe(b);
     expect(a).not.toBe(c);
     expect(a).not.toBe(d);
+  });
+
+  it("dedupe keys are firm-scoped for match and recruiter leaderboard", () => {
+    const m1 = matchCandidatesJobDedupeKey("firm-a", { jobId: 10, limit: 6 });
+    const m2 = matchCandidatesJobDedupeKey("firm-a", { jobId: 10, limit: 6 });
+    const m3 = matchCandidatesJobDedupeKey("firm-a", { jobId: 11, limit: 6 });
+    expect(m1).toBe(m2);
+    expect(m1).not.toBe(m3);
+
+    const r1 = recruiterLeaderboardJobDedupeKey("firm-a", {
+      startDate: "2026-01-01",
+    });
+    const r2 = recruiterLeaderboardJobDedupeKey("firm-a", {
+      startDate: "2026-01-01",
+    });
+    const r3 = recruiterLeaderboardJobDedupeKey("firm-b", {
+      startDate: "2026-01-01",
+    });
+    expect(r1).toBe(r2);
+    expect(r1).not.toBe(r3);
   });
 });
 

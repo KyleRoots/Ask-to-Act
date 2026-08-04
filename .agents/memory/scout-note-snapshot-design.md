@@ -158,8 +158,12 @@ firm picklist.
 ### Universal soft-wall → async pattern
 
 Soft walls are **channel realism** for ChatGPT (~95s sync). They are **never**
-raised on the sync MCP path and **never** a dead end — for any department and
-any scout path (live auto-widen, exhaustive, snapshot+live_tail):
+raised on the sync MCP path and **never** a dead end. Shared builders live in
+`async-job-contract.ts`; jobs reuse firm-scoped `report_jobs`. First tools beyond
+Scout: `match_candidates_for_job` and `recruiter_leaderboard` — see
+[universal-async-jobs.md](./universal-async-jobs.md).
+
+For scout specifically:
 
 1. Sync returns honest incomplete + `stopReason=wall_time` + machine-readable
    `asyncContinuation` (MCP `start_scout_dept_report_job` / `get_report_job`

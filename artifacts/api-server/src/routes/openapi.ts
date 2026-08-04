@@ -119,12 +119,46 @@ export function actionsSpec(baseUrl: string) {
           operationId: "getRecruiterLeaderboard",
           summary: "Recruiter leaderboard",
           description:
-            "Recruiters ranked by confirmed placements over a period, with submission activity.",
+            "Recruiters ranked by submission-to-placement conversion over a period. Soft walls are channel realism — never a dead end. " +
+            "On wall_time, follow asyncContinuation.rest: POST /reports/recruiter-leaderboard/jobs then poll GET /reports/jobs/{jobId}.",
           parameters: [
             dateParam("startDate", "Inclusive start date (YYYY-MM-DD). Defaults to start of current year."),
             dateParam("endDate", "Inclusive end date (YYYY-MM-DD). Defaults to today."),
           ],
           responses: okReport,
+        },
+      },
+      "/reports/recruiter-leaderboard/jobs": {
+        post: {
+          operationId: "startRecruiterLeaderboardJob",
+          summary: "Start async recruiter leaderboard job",
+          description:
+            "Soft-wall continuation for Actions/REST hosts. Returns HTTP 202 with jobId. " +
+            "Poll GET /reports/jobs/{jobId} until status=complete|failed. Use when sync GET returns stopReason=wall_time.",
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    startDate: { type: "string" },
+                    endDate: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "202": {
+              description: "Job accepted",
+              content: {
+                "application/json": {
+                  schema: { type: "object", additionalProperties: true },
+                },
+              },
+            },
+          },
         },
       },
       "/reports/scout-qualified-by-department": {
@@ -257,8 +291,9 @@ export function actionsSpec(baseUrl: string) {
           summary: "Poll async report job",
           description:
             "Universal soft-wall poll for Actions/REST hosts. Firm-scoped job status " +
-            "(queued|running|complete|failed). When status=complete, includes the scout report result. " +
-            "Keep polling after sync wall_time — never date-window fan-out, never give up on the soft wall alone.",
+            "(queued|running|complete|failed). When status=complete, includes the tool result " +
+            "(scout, match_candidates_for_job, or recruiter_leaderboard). " +
+            "Keep polling after sync wall_time — never give up on the soft wall alone.",
           parameters: [
             {
               name: "jobId",
@@ -268,6 +303,93 @@ export function actionsSpec(baseUrl: string) {
             },
           ],
           responses: okReport,
+        },
+      },
+      "/sourcing/match-candidates-for-job": {
+        post: {
+          operationId: "matchCandidatesForJob",
+          summary: "Match candidates for a job",
+          description:
+            "Ranked, résumé-verified shortlist for a JobOrder. Soft walls are channel realism — never a dead end. " +
+            "On wall_time, follow asyncContinuation.rest: POST /sourcing/match-candidates-for-job/jobs then poll GET /reports/jobs/{jobId}.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["jobId"],
+                  properties: {
+                    jobId: { type: "integer" },
+                    mustHaveSkills: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    niceToHaveSkills: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    limit: { type: "integer", minimum: 1, maximum: 15 },
+                    poolSize: { type: "integer", minimum: 1, maximum: 100 },
+                    localOnly: { type: "boolean" },
+                    includePlaced: { type: "boolean" },
+                    includeSubmitted: { type: "boolean" },
+                    includeDoNotContact: { type: "boolean" },
+                    includeInactive: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          responses: okReport,
+        },
+      },
+      "/sourcing/match-candidates-for-job/jobs": {
+        post: {
+          operationId: "startMatchCandidatesJob",
+          summary: "Start async match-candidates job",
+          description:
+            "Soft-wall continuation for Actions/REST hosts. Same body as sync match. " +
+            "Returns HTTP 202 with jobId. Poll GET /reports/jobs/{jobId} until complete|failed.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["jobId"],
+                  properties: {
+                    jobId: { type: "integer" },
+                    mustHaveSkills: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    niceToHaveSkills: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    limit: { type: "integer", minimum: 1, maximum: 15 },
+                    poolSize: { type: "integer", minimum: 1, maximum: 100 },
+                    localOnly: { type: "boolean" },
+                    includePlaced: { type: "boolean" },
+                    includeSubmitted: { type: "boolean" },
+                    includeDoNotContact: { type: "boolean" },
+                    includeInactive: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "202": {
+              description: "Job accepted",
+              content: {
+                "application/json": {
+                  schema: { type: "object", additionalProperties: true },
+                },
+              },
+            },
+          },
         },
       },
       "/count": {
@@ -325,8 +447,12 @@ const GPT_INSTRUCTIONS = `You are AskToAct, an AI assistant connected to your fi
 
 WHAT YOU CAN DO
 - Pull live staffing analytics: staffing scorecard, placements, open jobs, sales pipeline, job aging, recruiter leaderboard, and Scout Screen qualified-by-department.
+- Match candidates for a job: POST /sourcing/match-candidates-for-job with jobId (ranked, résumé-verified shortlist).
 - Run exact record counts for searchable Bullhorn entities (Candidate, JobOrder, Placement, Opportunity, etc.), optionally broken down by a field.
 - Scout Screen by department: GET /reports/scout-qualified-by-department?department=STSI&limit=5 (nicknames resolve; limit=N for most recent). Do NOT search Note via Lucene. Read stopReason/confirmedComplete/asyncContinuation — keep working unless confirmedComplete or a real connector/gateway limit; do not fan out date windows. Soft wall (wall_time) is never a dead end: use asyncContinuation.rest (POST /reports/scout-qualified-by-department/jobs → poll GET /reports/jobs/{jobId}) with the same args until complete|failed.
+- Recruiter leaderboard soft wall: use asyncContinuation.rest (POST /reports/recruiter-leaderboard/jobs → poll GET /reports/jobs/{jobId}).
+- Match soft wall: use asyncContinuation.rest (POST /sourcing/match-candidates-for-job/jobs → poll GET /reports/jobs/{jobId}).
+- Shared poll for all async jobs: GET /reports/jobs/{jobId}.
 
 HOW TO BEHAVE
 - Always call the Actions to fetch live numbers. Never invent, estimate, or rely on prior knowledge for figures that the Actions can return.

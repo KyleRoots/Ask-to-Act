@@ -1,10 +1,11 @@
 /**
  * In-process async report jobs (mirror note-snapshot sync 202 pattern).
  * Persist row → return jobId → void run() with firm Bullhorn context.
- * No Redis / BullMQ.
+ * No Redis / BullMQ. Shared across scout, match, recruiter_leaderboard, …
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { db, reportJobsTable } from "@workspace/db";
 import { firmContext, currentFirmContextId } from "./bullhorn-auth.js";
 import { logger } from "./logger.js";
@@ -13,11 +14,24 @@ import {
   scoutQualifiedByDepartment,
   scoutReportQuerySchema,
 } from "./scout-screen.js";
-import type { z } from "zod";
+import {
+  matchCandidatesForJob,
+  matchCandidatesArgsSchema,
+} from "./matching.js";
+import {
+  recruiterLeaderboard,
+  recruiterLeaderboardArgsSchema,
+} from "./reports.js";
 
 export const SCOUT_DEPT_REPORT_TOOL = "scout_dept_report";
+export const MATCH_CANDIDATES_TOOL = "match_candidates_for_job";
+export const RECRUITER_LEADERBOARD_TOOL = "recruiter_leaderboard";
 
 export type ScoutReportJobArgs = z.infer<typeof scoutReportQuerySchema>;
+export type MatchCandidatesJobArgs = z.infer<typeof matchCandidatesArgsSchema>;
+export type RecruiterLeaderboardJobArgs = z.infer<
+  typeof recruiterLeaderboardArgsSchema
+>;
 
 export type ReportJobStatus = "queued" | "running" | "complete" | "failed";
 
@@ -33,6 +47,23 @@ function firmRunningSet(firmId: string): Set<string> {
   }
   return s;
 }
+
+function stopReasonFromResult(result: unknown): string | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return null;
+  }
+  const sr = (result as { stopReason?: unknown }).stopReason;
+  return typeof sr === "string" ? sr : null;
+}
+
+export type StartReportJobResult =
+  | { jobId: string; status: "queued"; deduped?: false }
+  | {
+      jobId: string;
+      status: ReportJobStatus;
+      deduped: true;
+      message: string;
+    };
 
 /** Stable fingerprint for firm-scoped dedupe of identical in-flight scout jobs. */
 export function scoutJobDedupeKey(
@@ -54,56 +85,68 @@ export function scoutJobDedupeKey(
   return `${firmId}:scout_dept_report:${JSON.stringify(normalized)}`;
 }
 
-function stopReasonFromResult(result: unknown): string | null {
-  if (!result || typeof result !== "object" || Array.isArray(result)) {
-    return null;
-  }
-  const sr = (result as { stopReason?: unknown }).stopReason;
-  return typeof sr === "string" ? sr : null;
+export function matchCandidatesJobDedupeKey(
+  firmId: string,
+  args: MatchCandidatesJobArgs,
+): string {
+  const normalized = {
+    jobId: args.jobId,
+    mustHaveSkills: args.mustHaveSkills ?? null,
+    niceToHaveSkills: args.niceToHaveSkills ?? null,
+    limit: args.limit ?? null,
+    poolSize: args.poolSize ?? null,
+    localOnly: !!args.localOnly,
+    includePlaced: !!args.includePlaced,
+    includeSubmitted: !!args.includeSubmitted,
+    includeDoNotContact: !!args.includeDoNotContact,
+    includeInactive: !!args.includeInactive,
+  };
+  return `${firmId}:match_candidates_for_job:${JSON.stringify(normalized)}`;
 }
 
-export type StartScoutJobResult =
-  | { jobId: string; status: "queued"; deduped?: false }
-  | {
-      jobId: string;
-      status: ReportJobStatus;
-      deduped: true;
-      message: string;
-    };
+export function recruiterLeaderboardJobDedupeKey(
+  firmId: string,
+  args: RecruiterLeaderboardJobArgs,
+): string {
+  const normalized = {
+    startDate: args.startDate ?? null,
+    endDate: args.endDate ?? null,
+  };
+  return `${firmId}:recruiter_leaderboard:${JSON.stringify(normalized)}`;
+}
 
 /**
- * Persist a scout_dept_report job and start it in-process (HTTP 202 pattern).
- * Firm-scoped: identical args already queued/running return that job id.
+ * Generic persist → 202 → in-process execute for any report_jobs tool_name.
  */
-export async function startScoutDeptReportJob(opts: {
+export async function startReportJob(opts: {
   firmId: string;
-  args: ScoutReportJobArgs;
+  toolName: string;
+  args: Record<string, unknown>;
   createdByUserId?: string | null;
-}): Promise<StartScoutJobResult> {
-  const parsed = scoutReportQuerySchema.parse(opts.args);
-  const dedupeKey = scoutJobDedupeKey(opts.firmId, parsed);
-
-  if (dedupeInFlight.has(dedupeKey)) {
-    const existing = await findActiveScoutJob(opts.firmId, parsed);
+  dedupeKey: string;
+  dedupeMessage: string;
+  findActive: () => Promise<{ id: string; status: string } | null>;
+  execute: (args: Record<string, unknown>) => Promise<unknown>;
+}): Promise<StartReportJobResult> {
+  if (dedupeInFlight.has(opts.dedupeKey)) {
+    const existing = await opts.findActive();
     if (existing) {
       return {
         jobId: existing.id,
         status: existing.status as ReportJobStatus,
         deduped: true,
-        message:
-          "An identical scout_dept_report job is already queued or running for this firm.",
+        message: opts.dedupeMessage,
       };
     }
   }
 
-  const existing = await findActiveScoutJob(opts.firmId, parsed);
+  const existing = await opts.findActive();
   if (existing) {
     return {
       jobId: existing.id,
       status: existing.status as ReportJobStatus,
       deduped: true,
-      message:
-        "An identical scout_dept_report job is already queued or running for this firm.",
+      message: opts.dedupeMessage,
     };
   }
 
@@ -111,69 +154,48 @@ export async function startScoutDeptReportJob(opts: {
   await db.insert(reportJobsTable).values({
     id: jobId,
     firmId: opts.firmId,
-    toolName: SCOUT_DEPT_REPORT_TOOL,
-    args: parsed,
+    toolName: opts.toolName,
+    args: opts.args,
     status: "queued",
     createdByUserId: opts.createdByUserId ?? null,
   });
 
-  dedupeInFlight.add(dedupeKey);
+  dedupeInFlight.add(opts.dedupeKey);
   firmRunningSet(opts.firmId).add(jobId);
 
-  void executeScoutJob(jobId, opts.firmId, parsed, dedupeKey);
+  void executeReportJob({
+    jobId,
+    firmId: opts.firmId,
+    toolName: opts.toolName,
+    args: opts.args,
+    dedupeKey: opts.dedupeKey,
+    execute: opts.execute,
+  });
 
   return { jobId, status: "queued" };
 }
 
-async function findActiveScoutJob(
-  firmId: string,
-  args: ScoutReportJobArgs,
-): Promise<{ id: string; status: string } | null> {
-  const rows = await db
-    .select({
-      id: reportJobsTable.id,
-      status: reportJobsTable.status,
-      args: reportJobsTable.args,
-    })
-    .from(reportJobsTable)
-    .where(
-      and(
-        eq(reportJobsTable.firmId, firmId),
-        eq(reportJobsTable.toolName, SCOUT_DEPT_REPORT_TOOL),
-        inArray(reportJobsTable.status, ["queued", "running"]),
-      ),
-    );
-
-  const want = scoutJobDedupeKey(firmId, args);
-  for (const row of rows) {
-    const rowArgs = scoutReportQuerySchema.safeParse(row.args);
-    if (!rowArgs.success) continue;
-    if (scoutJobDedupeKey(firmId, rowArgs.data) === want) {
-      return { id: row.id, status: row.status };
-    }
-  }
-  return null;
-}
-
-async function executeScoutJob(
-  jobId: string,
-  firmId: string,
-  args: ScoutReportJobArgs,
-  dedupeKey: string,
-): Promise<void> {
+async function executeReportJob(opts: {
+  jobId: string;
+  firmId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  dedupeKey: string;
+  execute: (args: Record<string, unknown>) => Promise<unknown>;
+}): Promise<void> {
   try {
     await db
       .update(reportJobsTable)
       .set({ status: "running", startedAt: new Date() })
       .where(
-        and(eq(reportJobsTable.id, jobId), eq(reportJobsTable.firmId, firmId)),
+        and(
+          eq(reportJobsTable.id, opts.jobId),
+          eq(reportJobsTable.firmId, opts.firmId),
+        ),
       );
 
-    const result = await firmContext.run({ firmId }, () =>
-      scoutQualifiedByDepartment({
-        ...args,
-        wallMs: ASYNC_REPORT_WALL_MS,
-      }),
+    const result = await firmContext.run({ firmId: opts.firmId }, () =>
+      opts.execute(opts.args),
     );
 
     await db
@@ -186,23 +208,31 @@ async function executeScoutJob(
         errorSummary: null,
       })
       .where(
-        and(eq(reportJobsTable.id, jobId), eq(reportJobsTable.firmId, firmId)),
+        and(
+          eq(reportJobsTable.id, opts.jobId),
+          eq(reportJobsTable.firmId, opts.firmId),
+        ),
       );
 
     logger.info(
       {
-        jobId,
-        firmId,
-        department: args.department,
+        jobId: opts.jobId,
+        firmId: opts.firmId,
+        toolName: opts.toolName,
         stopReason: stopReasonFromResult(result),
       },
-      "Async scout_dept_report job complete",
+      "Async report job complete",
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error(
-      { jobId, firmId, department: args.department, err },
-      "Async scout_dept_report job failed",
+      {
+        jobId: opts.jobId,
+        firmId: opts.firmId,
+        toolName: opts.toolName,
+        err,
+      },
+      "Async report job failed",
     );
     try {
       await db
@@ -214,20 +244,158 @@ async function executeScoutJob(
         })
         .where(
           and(
-            eq(reportJobsTable.id, jobId),
-            eq(reportJobsTable.firmId, firmId),
+            eq(reportJobsTable.id, opts.jobId),
+            eq(reportJobsTable.firmId, opts.firmId),
           ),
         );
     } catch (updateErr) {
       logger.error(
-        { jobId, firmId, err: updateErr },
+        { jobId: opts.jobId, firmId: opts.firmId, err: updateErr },
         "Failed to persist report job failure",
       );
     }
   } finally {
-    dedupeInFlight.delete(dedupeKey);
-    firmRunningSet(firmId).delete(jobId);
+    dedupeInFlight.delete(opts.dedupeKey);
+    firmRunningSet(opts.firmId).delete(opts.jobId);
   }
+}
+
+async function findActiveJobByDedupe(opts: {
+  firmId: string;
+  toolName: string;
+  dedupeKey: string;
+  argsKey: (firmId: string, args: unknown) => string | null;
+}): Promise<{ id: string; status: string } | null> {
+  const rows = await db
+    .select({
+      id: reportJobsTable.id,
+      status: reportJobsTable.status,
+      args: reportJobsTable.args,
+    })
+    .from(reportJobsTable)
+    .where(
+      and(
+        eq(reportJobsTable.firmId, opts.firmId),
+        eq(reportJobsTable.toolName, opts.toolName),
+        inArray(reportJobsTable.status, ["queued", "running"]),
+      ),
+    );
+
+  for (const row of rows) {
+    const key = opts.argsKey(opts.firmId, row.args);
+    if (key === opts.dedupeKey) {
+      return { id: row.id, status: row.status };
+    }
+  }
+  return null;
+}
+
+/**
+ * Persist a scout_dept_report job and start it in-process (HTTP 202 pattern).
+ * Firm-scoped: identical args already queued/running return that job id.
+ */
+export async function startScoutDeptReportJob(opts: {
+  firmId: string;
+  args: ScoutReportJobArgs;
+  createdByUserId?: string | null;
+}): Promise<StartReportJobResult> {
+  const parsed = scoutReportQuerySchema.parse(opts.args);
+  const dedupeKey = scoutJobDedupeKey(opts.firmId, parsed);
+  return startReportJob({
+    firmId: opts.firmId,
+    toolName: SCOUT_DEPT_REPORT_TOOL,
+    args: parsed,
+    createdByUserId: opts.createdByUserId,
+    dedupeKey,
+    dedupeMessage:
+      "An identical scout_dept_report job is already queued or running for this firm.",
+    findActive: () =>
+      findActiveJobByDedupe({
+        firmId: opts.firmId,
+        toolName: SCOUT_DEPT_REPORT_TOOL,
+        dedupeKey,
+        argsKey: (firmId, raw) => {
+          const rowArgs = scoutReportQuerySchema.safeParse(raw);
+          if (!rowArgs.success) return null;
+          return scoutJobDedupeKey(firmId, rowArgs.data);
+        },
+      }),
+    execute: (args) =>
+      scoutQualifiedByDepartment({
+        ...(args as ScoutReportJobArgs),
+        wallMs: ASYNC_REPORT_WALL_MS,
+      }),
+  });
+}
+
+/** Async match_candidates_for_job beyond the sync soft wall. */
+export async function startMatchCandidatesJob(opts: {
+  firmId: string;
+  args: MatchCandidatesJobArgs;
+  createdByUserId?: string | null;
+}): Promise<StartReportJobResult> {
+  const parsed = matchCandidatesArgsSchema.parse(opts.args);
+  const dedupeKey = matchCandidatesJobDedupeKey(opts.firmId, parsed);
+  return startReportJob({
+    firmId: opts.firmId,
+    toolName: MATCH_CANDIDATES_TOOL,
+    args: parsed,
+    createdByUserId: opts.createdByUserId,
+    dedupeKey,
+    dedupeMessage:
+      "An identical match_candidates_for_job job is already queued or running for this firm.",
+    findActive: () =>
+      findActiveJobByDedupe({
+        firmId: opts.firmId,
+        toolName: MATCH_CANDIDATES_TOOL,
+        dedupeKey,
+        argsKey: (firmId, raw) => {
+          const rowArgs = matchCandidatesArgsSchema.safeParse(raw);
+          if (!rowArgs.success) return null;
+          return matchCandidatesJobDedupeKey(firmId, rowArgs.data);
+        },
+      }),
+    execute: (args) =>
+      matchCandidatesForJob({
+        ...(args as MatchCandidatesJobArgs),
+        wallMs: ASYNC_REPORT_WALL_MS,
+      }),
+  });
+}
+
+/** Async recruiter_leaderboard beyond the sync soft wall. */
+export async function startRecruiterLeaderboardJob(opts: {
+  firmId: string;
+  args: RecruiterLeaderboardJobArgs;
+  createdByUserId?: string | null;
+}): Promise<StartReportJobResult> {
+  const parsed = recruiterLeaderboardArgsSchema.parse(opts.args);
+  const dedupeKey = recruiterLeaderboardJobDedupeKey(opts.firmId, parsed);
+  return startReportJob({
+    firmId: opts.firmId,
+    toolName: RECRUITER_LEADERBOARD_TOOL,
+    args: parsed,
+    createdByUserId: opts.createdByUserId,
+    dedupeKey,
+    dedupeMessage:
+      "An identical recruiter_leaderboard job is already queued or running for this firm.",
+    findActive: () =>
+      findActiveJobByDedupe({
+        firmId: opts.firmId,
+        toolName: RECRUITER_LEADERBOARD_TOOL,
+        dedupeKey,
+        argsKey: (firmId, raw) => {
+          const rowArgs = recruiterLeaderboardArgsSchema.safeParse(raw);
+          if (!rowArgs.success) return null;
+          return recruiterLeaderboardJobDedupeKey(firmId, rowArgs.data);
+        },
+      }),
+    execute: (args) =>
+      recruiterLeaderboard({
+        ...(args as RecruiterLeaderboardJobArgs),
+        wallMs: ASYNC_REPORT_WALL_MS,
+      }),
+  });
 }
 
 export type ReportJobView = {
@@ -298,3 +466,6 @@ export function __resetReportJobLocksForTests(): void {
   runningByFirm.clear();
   dedupeInFlight.clear();
 }
+
+/** @deprecated alias — prefer StartReportJobResult */
+export type StartScoutJobResult = StartReportJobResult;

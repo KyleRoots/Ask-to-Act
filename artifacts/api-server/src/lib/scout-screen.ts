@@ -31,6 +31,16 @@ import {
   queryJobSubmissions,
 } from "./bullhorn-client.js";
 import { classifySubmissionStage } from "./submission-status.js";
+import {
+  ASYNC_POLL_REST,
+  SCOUT_ASYNC_SPEC,
+  buildAsyncContinuation as buildAsyncContinuationFromSpec,
+  buildAsyncContinuationHint,
+  withAsyncContinuationHint as withAsyncContinuationHintFromSpec,
+} from "./async-job-contract.js";
+
+/** Re-export shared async safety max (sync TOPN/EXHAUSTIVE walls stay local). */
+export { ASYNC_REPORT_WALL_MS } from "./async-job-contract.js";
 
 /** Fallback Internal Department names when live discovery fails (Myticas). */
 const DEPARTMENT_FALLBACK = [
@@ -79,11 +89,6 @@ export const EXHAUSTIVE_WALL_MS = 75_000;
  * common ChatGPT/gateway ~120s 504 thresholds.
  */
 export const TOPN_WALL_MS = 95_000;
-/**
- * Hard safety max for in-process async report jobs (no ChatGPT soft wall).
- * Sync path keeps TOPN_WALL_MS / EXHAUSTIVE_WALL_MS unchanged.
- */
-export const ASYNC_REPORT_WALL_MS = 20 * 60 * 1000;
 /** Fewer jobs per note-scan page after newest-first preload. */
 const AUTO_WIDEN_JOB_PAGE = 20;
 /**
@@ -109,49 +114,27 @@ const INCOMPLETE_NO_FANOUT =
   "Or narrow the ask (recent window / one department) and keep mode=bounded.";
 
 /**
- * Universal AI blocker contract (all departments / all scout paths):
+ * Scout soft-wall continuation — thin wrapper over the shared async-job contract.
  * Soft walls are ChatGPT/channel realism — never raise sync TOPN/EXHAUSTIVE walls.
  * wall_time is never a dead end: continue via MCP tools OR REST start+poll.
- * Never date-window fan-out. Never give up solely because of the soft wall.
  */
 export const ASYNC_CONTINUATION_REST = {
   start: {
     method: "POST" as const,
-    /** Relative to OpenAPI servers.url (/api/v1). */
-    path: "/reports/scout-qualified-by-department/jobs",
+    path: SCOUT_ASYNC_SPEC.restStartPath,
   },
-  poll: {
-    method: "GET" as const,
-    /** Relative to OpenAPI servers.url (/api/v1); substitute jobId. */
-    pathTemplate: "/reports/jobs/{jobId}",
-  },
+  poll: ASYNC_POLL_REST,
 } as const;
 
 export const ASYNC_CONTINUATION_HINT =
-  "Soft wall is channel realism, not a final answer. Continue with the same arguments via " +
-  "MCP (start_scout_dept_report_job → poll get_report_job) OR REST Actions " +
-  "(POST /reports/scout-qualified-by-department/jobs → poll GET /reports/jobs/{jobId}; " +
-  "paths relative to /api/v1) until status is complete or failed. " +
-  "Do NOT fan out date windows. Do NOT give up because of wall_time.";
+  buildAsyncContinuationHint(SCOUT_ASYNC_SPEC);
 
 /** Machine-readable continuation payload — same shape on every wall_time path. */
 export function buildAsyncContinuation(args?: {
   /** Echo of the scout args so the model can re-issue without improvising. */
   resumeArgs?: Record<string, unknown>;
-}): {
-  tool: "start_scout_dept_report_job";
-  pollTool: "get_report_job";
-  rest: typeof ASYNC_CONTINUATION_REST;
-  hint: string;
-  resumeArgs?: Record<string, unknown>;
-} {
-  return {
-    tool: "start_scout_dept_report_job",
-    pollTool: "get_report_job",
-    rest: ASYNC_CONTINUATION_REST,
-    hint: ASYNC_CONTINUATION_HINT,
-    ...(args?.resumeArgs ? { resumeArgs: args.resumeArgs } : {}),
-  };
+}) {
+  return buildAsyncContinuationFromSpec(SCOUT_ASYNC_SPEC, args);
 }
 
 const INCOMPLETE_PARTIAL_RESULTS =
@@ -357,33 +340,12 @@ export function incompleteGuidanceNote(
   );
 }
 
-/** Append async continuation when a sync result stopped on wall_time (universal). */
+/** Append async continuation when a sync result stopped on wall_time (scout). */
 export function withAsyncContinuationHint<T extends Record<string, unknown>>(
   result: T,
   opts?: { resumeArgs?: Record<string, unknown> },
 ): T {
-  if (result.stopReason !== "wall_time") return result;
-  const note =
-    typeof result.note === "string" ? result.note : undefined;
-  if (note && note.includes("start_scout_dept_report_job")) {
-    // Ensure machine-readable field even if note already mentions the tool.
-    if (result.asyncContinuation) return result;
-    return {
-      ...result,
-      asyncContinuation: buildAsyncContinuation({
-        resumeArgs: opts?.resumeArgs,
-      }),
-    };
-  }
-  return {
-    ...result,
-    asyncContinuation: buildAsyncContinuation({
-      resumeArgs: opts?.resumeArgs,
-    }),
-    ...(note
-      ? { note: `${note} ${ASYNC_CONTINUATION_HINT}` }
-      : { note: ASYNC_CONTINUATION_HINT }),
-  };
+  return withAsyncContinuationHintFromSpec(result, SCOUT_ASYNC_SPEC, opts);
 }
 
 /** Prefer the most specific incomplete reason for the model. */

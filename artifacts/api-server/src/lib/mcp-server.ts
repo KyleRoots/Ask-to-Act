@@ -83,14 +83,17 @@ import {
   jobAgingReport,
   recruiterLeaderboard,
   listReports,
+  recruiterLeaderboardArgsSchema,
 } from "./reports.js";
-import { matchCandidatesForJob } from "./matching.js";
+import { matchCandidatesForJob, matchCandidatesArgsSchema } from "./matching.js";
 import { findCandidates } from "./find-candidates.js";
 import { scoutQualifiedByDepartment } from "./scout-screen.js";
 import {
   getReportJob,
   requireFirmIdForReportJobs,
   startScoutDeptReportJob,
+  startMatchCandidatesJob,
+  startRecruiterLeaderboardJob,
 } from "./report-jobs.js";
 import { sendEmailToRecord } from "./send-email-to-record.js";
 import {
@@ -301,6 +304,8 @@ export const MCP_TOOL_PRIORITY: readonly string[] = [
   "list_reports",
   "scout_dept_report",
   "start_scout_dept_report_job",
+  "start_match_candidates_job",
+  "start_recruiter_leaderboard_job",
   "get_report_job",
   "staffing_scorecard",
   "placements_report",
@@ -732,7 +737,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "Server reads structured JobOrder fields (onSite/isWorkFromHome, yearsRequired, willSponsor, pay, skills) plus description fallbacks; " +
       "searches with synonym expansion; excludes placed/DNC/inactive and true submissions by candidate ID; " +
       "evaluates location/experience/authorization/skills as pass|fail|unknown; returns eligibleMatches vs needsVerification with criterion evidence. " +
-      "If status=partial, say highest-ranked among N evaluated — never best/fully-qualified. Cite resumeEvidence for skills. Link NAME to bullhornUrl.",
+      "If status=partial, say highest-ranked among N evaluated — never best/fully-qualified. Cite resumeEvidence for skills. Link NAME to bullhornUrl. " +
+      "Soft wall (stopReason=wall_time) is never a dead end — call start_match_candidates_job (same args) then poll get_report_job.",
     {
       jobId: z.number().int().positive().describe("Bullhorn job order ID to match candidates against."),
       mustHaveSkills: z
@@ -751,6 +757,13 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .min(1)
         .optional()
         .describe("How many ranked matches to return (default 6, max 15)."),
+      poolSize: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Candidate pool size before filtering (default 50, max 100)."),
       localOnly: z
         .boolean()
         .optional()
@@ -1404,14 +1417,86 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       }),
   );
 
+  const matchJobArgsSchema = {
+    jobId: z.number().int().positive(),
+    mustHaveSkills: z.array(z.string()).optional(),
+    niceToHaveSkills: z.array(z.string()).optional(),
+    limit: z.number().int().min(1).max(15).optional(),
+    poolSize: z.number().int().min(1).max(100).optional(),
+    localOnly: z.boolean().optional(),
+    includePlaced: z.boolean().optional(),
+    includeSubmitted: z.boolean().optional(),
+    includeDoNotContact: z.boolean().optional(),
+    includeInactive: z.boolean().optional(),
+  };
+
+  tool(
+    "start_match_candidates_job",
+    "Start an async match_candidates_for_job that runs beyond the ChatGPT soft wall (~20 min safety max). Returns jobId immediately — poll get_report_job until status=complete|failed. Use when sync match_candidates_for_job returns stopReason=wall_time (hot jobs with deep submission walks). Same args as match_candidates_for_job.",
+    matchJobArgsSchema,
+    async (a) =>
+      rt("start_match_candidates_job", a, async () => {
+        const firmId = requireFirmIdForReportJobs();
+        const createdByUserId =
+          caller?.kind === "user" ? caller.userId : undefined;
+        const started = await startMatchCandidatesJob({
+          firmId,
+          args: matchCandidatesArgsSchema.parse(a),
+          createdByUserId,
+        });
+        return {
+          jobId: started.jobId,
+          status: started.status,
+          ...(started.deduped
+            ? { deduped: true, message: started.message }
+            : {}),
+          pollTool: "get_report_job",
+          note:
+            "Job accepted. Call get_report_job with this jobId until status is complete or failed.",
+        };
+      }),
+  );
+
+  tool(
+    "start_recruiter_leaderboard_job",
+    "Start an async recruiter_leaderboard job beyond the ChatGPT soft wall (~20 min safety max). Returns jobId immediately — poll get_report_job until status=complete|failed. Use when sync recruiter_leaderboard returns stopReason=wall_time. Same args as recruiter_leaderboard.",
+    {
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+    },
+    async (a) =>
+      rt("start_recruiter_leaderboard_job", a, async () => {
+        const firmId = requireFirmIdForReportJobs();
+        const createdByUserId =
+          caller?.kind === "user" ? caller.userId : undefined;
+        const started = await startRecruiterLeaderboardJob({
+          firmId,
+          args: recruiterLeaderboardArgsSchema.parse(a),
+          createdByUserId,
+        });
+        return {
+          jobId: started.jobId,
+          status: started.status,
+          ...(started.deduped
+            ? { deduped: true, message: started.message }
+            : {}),
+          pollTool: "get_report_job",
+          note:
+            "Job accepted. Call get_report_job with this jobId until status is complete or failed.",
+        };
+      }),
+  );
+
   tool(
     "get_report_job",
-    "Poll an async report job by id (firm-scoped). Returns status queued|running|complete|failed; when complete, includes the scout_dept_report result payload.",
+    "Poll an async report job by id (firm-scoped). Works for scout_dept_report, match_candidates_for_job, and recruiter_leaderboard jobs. Returns status queued|running|complete|failed; when complete, includes the tool result payload.",
     {
       jobId: z
         .string()
         .uuid()
-        .describe("Job id returned by start_scout_dept_report_job."),
+        .describe(
+          "Job id returned by start_scout_dept_report_job, start_match_candidates_job, or start_recruiter_leaderboard_job.",
+        ),
     },
     async ({ jobId }) =>
       rt("get_report_job", { jobId }, async () => {
@@ -1479,7 +1564,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "recruiter_leaderboard",
-    "Report: submission-to-placement conversion by SUBMITTER (JobSubmission.sendingUser), not placement owner. Rates capped at 100%; lowVolume (<10 submissions) ranked below reliable rows.",
+    "Report: submission-to-placement conversion by SUBMITTER (JobSubmission.sendingUser), not placement owner. Rates capped at 100%; lowVolume (<10 submissions) ranked below reliable rows. Soft wall (stopReason=wall_time) is never a dead end — call start_recruiter_leaderboard_job then poll get_report_job.",
     {
       startDate: z.string().optional().describe("Start date YYYY-MM-DD (default: start of current year)."),
       endDate: z.string().optional().describe("End date YYYY-MM-DD, inclusive (default: today)."),

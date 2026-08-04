@@ -30,6 +30,8 @@ describe("MCP universal inventory hardening", () => {
     expect(names.length).toBeGreaterThanOrEqual(65);
     expect(reg["scout_dept_report"]).toBeDefined();
     expect(reg["start_scout_dept_report_job"]).toBeDefined();
+    expect(reg["start_match_candidates_job"]).toBeDefined();
+    expect(reg["start_recruiter_leaderboard_job"]).toBeDefined();
     expect(reg["get_report_job"]).toBeDefined();
     expect(reg["list_reports"]).toBeDefined();
     expect(reg["add_note"]).toBeDefined();
@@ -50,7 +52,15 @@ describe("MCP universal inventory hardening", () => {
     };
     expect(idx("list_reports")).toBeLessThan(idx("scout_dept_report"));
     expect(idx("scout_dept_report")).toBeLessThan(idx("start_scout_dept_report_job"));
-    expect(idx("start_scout_dept_report_job")).toBeLessThan(idx("get_report_job"));
+    expect(idx("start_scout_dept_report_job")).toBeLessThan(
+      idx("start_match_candidates_job"),
+    );
+    expect(idx("start_match_candidates_job")).toBeLessThan(
+      idx("start_recruiter_leaderboard_job"),
+    );
+    expect(idx("start_recruiter_leaderboard_job")).toBeLessThan(
+      idx("get_report_job"),
+    );
     expect(idx("scout_dept_report")).toBeLessThan(idx("search_entity"));
     expect(idx("scout_dept_report")).toBeLessThan(idx("add_note"));
     expect(idx("add_note")).toBeLessThan(idx("delete_entity"));

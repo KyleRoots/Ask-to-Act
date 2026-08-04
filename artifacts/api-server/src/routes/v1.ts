@@ -7,6 +7,7 @@ import {
   salesPipelineReport,
   jobAgingReport,
   recruiterLeaderboard,
+  recruiterLeaderboardArgsSchema,
   listReports,
 } from "../lib/reports.js";
 import { countEntity } from "../lib/bullhorn-client.js";
@@ -15,9 +16,15 @@ import {
   scoutReportQuerySchema,
 } from "../lib/scout-screen.js";
 import {
+  matchCandidatesForJob,
+  matchCandidatesArgsSchema,
+} from "../lib/matching.js";
+import {
   getReportJob,
   requireFirmIdForReportJobs,
   startScoutDeptReportJob,
+  startMatchCandidatesJob,
+  startRecruiterLeaderboardJob,
 } from "../lib/report-jobs.js";
 import { logger } from "../lib/logger.js";
 
@@ -136,6 +143,52 @@ router.get(
   handle("recruiter_leaderboard", (req) => recruiterLeaderboard(dateRangeQuery.parse(req.query))),
 );
 
+/**
+ * POST /api/v1/reports/recruiter-leaderboard/jobs
+ * Start an async recruiter_leaderboard job (HTTP 202). Poll GET .../jobs/:jobId.
+ */
+router.post(
+  "/reports/recruiter-leaderboard/jobs",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const firmId = requireFirmIdForReportJobs();
+      const args = recruiterLeaderboardArgsSchema.parse(req.body ?? {});
+      const createdByUserId =
+        req.caller?.kind === "user" ? req.caller.userId : undefined;
+      const started = await startRecruiterLeaderboardJob({
+        firmId,
+        args,
+        createdByUserId,
+      });
+      res.status(202).json({
+        jobId: started.jobId,
+        status: started.status,
+        ...(started.deduped
+          ? { deduped: true, message: started.message }
+          : {}),
+        poll: `/api/v1/reports/jobs/${started.jobId}`,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid request", details: err.issues });
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Internal server error";
+      const mapped = clientErrorStatus(message);
+      if (mapped !== null) {
+        res.status(mapped).json({ error: message });
+        return;
+      }
+      if (/firm Bullhorn context/i.test(message)) {
+        res.status(403).json({ error: message });
+        return;
+      }
+      logger.error({ err, route: "start_recruiter_leaderboard_job" }, "v1 route error");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
 router.get(
   "/reports/scout-qualified-by-department",
   handle("scout_dept_report", (req) =>
@@ -216,6 +269,63 @@ router.get(
         return;
       }
       logger.error({ err, route: "get_report_job" }, "v1 route error");
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * POST /api/v1/sourcing/match-candidates-for-job
+ * Sync match (same engine as MCP match_candidates_for_job).
+ */
+router.post(
+  "/sourcing/match-candidates-for-job",
+  handle("match_candidates_for_job", (req) =>
+    matchCandidatesForJob(matchCandidatesArgsSchema.parse(req.body ?? {})),
+  ),
+);
+
+/**
+ * POST /api/v1/sourcing/match-candidates-for-job/jobs
+ * Start async match job (HTTP 202). Poll GET /reports/jobs/:jobId.
+ */
+router.post(
+  "/sourcing/match-candidates-for-job/jobs",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const firmId = requireFirmIdForReportJobs();
+      const args = matchCandidatesArgsSchema.parse(req.body ?? {});
+      const createdByUserId =
+        req.caller?.kind === "user" ? req.caller.userId : undefined;
+      const started = await startMatchCandidatesJob({
+        firmId,
+        args,
+        createdByUserId,
+      });
+      res.status(202).json({
+        jobId: started.jobId,
+        status: started.status,
+        ...(started.deduped
+          ? { deduped: true, message: started.message }
+          : {}),
+        poll: `/api/v1/reports/jobs/${started.jobId}`,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid request", details: err.issues });
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Internal server error";
+      const mapped = clientErrorStatus(message);
+      if (mapped !== null) {
+        res.status(mapped).json({ error: message });
+        return;
+      }
+      if (/firm Bullhorn context/i.test(message)) {
+        res.status(403).json({ error: message });
+        return;
+      }
+      logger.error({ err, route: "start_match_candidates_job" }, "v1 route error");
       res.status(500).json({ error: "Internal server error" });
     }
   },
