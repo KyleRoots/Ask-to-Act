@@ -4,7 +4,7 @@ import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
 import { classifySubmissionStage } from "./submission-status.js";
 import {
-  isTransientBullhornHttpStatus,
+  isTransientBullhornResponse,
   TRANSIENT_HTTP_MAX_RETRIES,
   transientHttpBackoffMs,
 } from "./bullhorn-transient.js";
@@ -111,20 +111,20 @@ async function bullhornFetch(
     );
   }
 
-  // Gateway / Bullhorn 502–504 during long note-snapshot walks — bounded backoff.
-  if (isTransientBullhornHttpStatus(res.status) && transientRetries > 0) {
-    const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
-    const delay = transientHttpBackoffMs(attempt);
-    logger.warn(
-      { attempt, delay, status: res.status, path },
-      "Bullhorn: transient HTTP on read — backing off",
-    );
-    await sleep(delay);
-    return bullhornFetch(path, params, retries, rlRetries, transientRetries - 1);
-  }
-
   if (!res.ok) {
     const text = await res.text();
+    // Gateway 502–504, plus Bullhorn 500s whose body names an upstream transport
+    // failure, during long note-snapshot walks — bounded backoff.
+    if (isTransientBullhornResponse(res.status, text) && transientRetries > 0) {
+      const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
+      const delay = transientHttpBackoffMs(attempt);
+      logger.warn(
+        { attempt, delay, status: res.status, path },
+        "Bullhorn: transient HTTP on read — backing off",
+      );
+      await sleep(delay);
+      return bullhornFetch(path, params, retries, rlRetries, transientRetries - 1);
+    }
     throw formatBullhornError("API", res.status, text);
   }
 
@@ -512,20 +512,19 @@ async function searchEntity(
         throw new Error("Bullhorn API rate limit exceeded. Please try again shortly.");
       }
 
-      if (isTransientBullhornHttpStatus(res.status) && transientRetries > 0) {
-        const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
-        const delay = transientHttpBackoffMs(attempt);
-        logger.warn(
-          { attempt, delay, status: res.status, entity },
-          "Bullhorn: transient HTTP on search — backing off",
-        );
-        await sleep(delay);
-        transientRetries -= 1;
-        continue;
-      }
-
       if (!res.ok) {
         const text = await res.text();
+        if (isTransientBullhornResponse(res.status, text) && transientRetries > 0) {
+          const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
+          const delay = transientHttpBackoffMs(attempt);
+          logger.warn(
+            { attempt, delay, status: res.status, entity },
+            "Bullhorn: transient HTTP on search — backing off",
+          );
+          await sleep(delay);
+          transientRetries -= 1;
+          continue;
+        }
         throw formatBullhornError("search", res.status, text);
       }
       raw = await res.json();
