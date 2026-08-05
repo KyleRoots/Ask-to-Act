@@ -75,7 +75,8 @@ export type OpsHealthReport = {
 
 export const OPS_QUEUED_WARN_MS = 10 * 60 * 1000;
 export const OPS_QUEUED_CRITICAL_MS = 30 * 60 * 1000;
-export const OPS_FAILED_LOOKBACK_MS = 6 * 60 * 60 * 1000;
+/** Lookback for terminal failed jobs in health alerts (was 6h; shortened to cut thrash). */
+export const OPS_FAILED_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 /** Default alert cooldown (3h). Override with OPS_ALERT_COOLDOWN_MINUTES. */
 export const OPS_ALERT_COOLDOWN_DEFAULT_MINUTES = 180;
 

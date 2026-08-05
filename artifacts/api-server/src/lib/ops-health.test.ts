@@ -179,6 +179,23 @@ describe("evaluateReportJobsHealth", () => {
       true,
     );
 
+    // Aged terminal failures outside the 2h lookback must not keep alerting.
+    const aged = evaluateReportJobsHealth({
+      jobs: [
+        job({
+          id: "j-aged",
+          status: "failed",
+          attemptCount: 1,
+          createdAt: new Date(now - 3 * 60 * 60 * 1000),
+        }),
+      ],
+      nowMs: now,
+      maxAttempts: 5,
+    });
+    expect(aged.some((i) => i.code.startsWith("report_jobs.failed"))).toBe(
+      false,
+    );
+
     const poison = evaluateReportJobsHealth({
       jobs: [
         job({

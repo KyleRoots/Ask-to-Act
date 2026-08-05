@@ -4,6 +4,10 @@ import { db, usersTable, firmsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { getFirmBullhornHealthStatus, firmContext } from "../lib/bullhorn-auth.js";
+import {
+  assertFirmEntitled,
+  FirmNotEntitledError,
+} from "../lib/entitlements.js";
 
 export type CallerIdentity =
   | { kind: "service" }
@@ -181,6 +185,30 @@ export async function requireBullhornFirm(req: Request, res: Response, next: Nex
           "Forbidden: your firm's AskToAct access has been suspended. Please contact your administrator.",
       });
       return;
+    }
+
+    // Billing entitlement (default OFF). When ENTITLEMENTS_ENFORCED=1, pilots/
+    // paid firms with subscription_status active|trialing pass; others get 402.
+    // See entitlements.ts — Stripe plugs in later without changing this call site.
+    try {
+      await assertFirmEntitled(callerFirmId);
+    } catch (err) {
+      if (err instanceof FirmNotEntitledError) {
+        logger.warn(
+          {
+            callerFirmId,
+            entitlementStatus: err.entitlementStatus,
+            userId: req.caller.userId,
+          },
+          "requireBullhornFirm: firm not entitled",
+        );
+        res.status(err.statusCode).json({
+          error: err.message,
+          entitlementStatus: err.entitlementStatus,
+        });
+        return;
+      }
+      throw err;
     }
 
     next();

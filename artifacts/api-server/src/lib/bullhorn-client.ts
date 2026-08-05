@@ -3,6 +3,11 @@ import { resolveDeptField } from "./firm-config.js";
 import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
 import { classifySubmissionStage } from "./submission-status.js";
+import {
+  isTransientBullhornHttpStatus,
+  TRANSIENT_HTTP_MAX_RETRIES,
+  transientHttpBackoffMs,
+} from "./bullhorn-transient.js";
 // pdf-parse and mammoth are loaded via dynamic import inside the extraction
 // helper — avoids CJS/ESM default-export interop issues at module startup.
 
@@ -66,6 +71,7 @@ async function bullhornFetch(
   params: Record<string, string | number>,
   retries = MAX_RETRIES,
   rlRetries = RATE_LIMIT_RETRIES,
+  transientRetries = TRANSIENT_HTTP_MAX_RETRIES,
 ): Promise<unknown> {
   // Cache key excludes the rotating BhRestToken; same path+params => same read.
   // Prefixed with the firm context so one tenant's cached read can never be
@@ -89,7 +95,7 @@ async function bullhornFetch(
   if (res.status === 401 && retries > 0) {
     logger.warn("Bullhorn: 401 received, re-authenticating");
     await invalidateSession();
-    return bullhornFetch(path, params, retries - 1, rlRetries);
+    return bullhornFetch(path, params, retries - 1, rlRetries, transientRetries);
   }
 
   if (res.status === 429) {
@@ -98,11 +104,23 @@ async function bullhornFetch(
       const delay = backoffMs(attempt);
       logger.warn({ attempt, delay }, "Bullhorn: read rate limit hit — backing off");
       await sleep(delay);
-      return bullhornFetch(path, params, retries, rlRetries - 1);
+      return bullhornFetch(path, params, retries, rlRetries - 1, transientRetries);
     }
     throw new Error(
       "Bullhorn API rate limit exceeded after multiple retries. Wait 60 seconds and try again.",
     );
+  }
+
+  // Gateway / Bullhorn 502–504 during long note-snapshot walks — bounded backoff.
+  if (isTransientBullhornHttpStatus(res.status) && transientRetries > 0) {
+    const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
+    const delay = transientHttpBackoffMs(attempt);
+    logger.warn(
+      { attempt, delay, status: res.status, path },
+      "Bullhorn: transient HTTP on read — backing off",
+    );
+    await sleep(delay);
+    return bullhornFetch(path, params, retries, rlRetries, transientRetries - 1);
   }
 
   if (!res.ok) {
@@ -459,38 +477,61 @@ async function searchEntity(
   const cacheKey = `${currentFirmContextId() ?? "no-firm"}:search:${entity}:${query}:${fields}:${count}:${start}`;
   let raw = cacheGet<unknown>(cacheKey);
   if (raw === undefined) {
-    const session = await getSession();
-    const url = new URL(`search/${entity}`, session.restUrl);
-    url.searchParams.set("BhRestToken", session.BhRestToken);
-    url.searchParams.set("query", query);
-    url.searchParams.set("fields", fields);
-    url.searchParams.set("count", String(count));
-    url.searchParams.set("start", String(start));
+    let authRetries = MAX_RETRIES;
+    let rlRetries = RATE_LIMIT_RETRIES;
+    let transientRetries = TRANSIENT_HTTP_MAX_RETRIES;
 
-    let res = await fetch(url.toString(), { redirect: "follow" });
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const session = await getSession();
+      const url = new URL(`search/${entity}`, session.restUrl);
+      url.searchParams.set("BhRestToken", session.BhRestToken);
+      url.searchParams.set("query", query);
+      url.searchParams.set("fields", fields);
+      url.searchParams.set("count", String(count));
+      url.searchParams.set("start", String(start));
 
-    if (res.status === 401) {
-      logger.warn("Bullhorn: 401 on search, re-authenticating");
-      await invalidateSession();
-      const session2 = await getSession();
-      const url2 = new URL(`search/${entity}`, session2.restUrl);
-      url2.searchParams.set("BhRestToken", session2.BhRestToken);
-      url2.searchParams.set("query", query);
-      url2.searchParams.set("fields", fields);
-      url2.searchParams.set("count", String(count));
-      url2.searchParams.set("start", String(start));
-      res = await fetch(url2.toString(), { redirect: "follow" });
-    }
+      const res = await fetch(url.toString(), { redirect: "follow" });
 
-    if (res.status === 429) {
-      throw new Error("Bullhorn API rate limit exceeded. Please try again shortly.");
+      if (res.status === 401 && authRetries > 0) {
+        logger.warn("Bullhorn: 401 on search, re-authenticating");
+        await invalidateSession();
+        authRetries -= 1;
+        continue;
+      }
+
+      if (res.status === 429) {
+        if (rlRetries > 0) {
+          const attempt = RATE_LIMIT_RETRIES - rlRetries + 1;
+          const delay = backoffMs(attempt);
+          logger.warn({ attempt, delay }, "Bullhorn: search rate limit — backing off");
+          await sleep(delay);
+          rlRetries -= 1;
+          continue;
+        }
+        throw new Error("Bullhorn API rate limit exceeded. Please try again shortly.");
+      }
+
+      if (isTransientBullhornHttpStatus(res.status) && transientRetries > 0) {
+        const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
+        const delay = transientHttpBackoffMs(attempt);
+        logger.warn(
+          { attempt, delay, status: res.status, entity },
+          "Bullhorn: transient HTTP on search — backing off",
+        );
+        await sleep(delay);
+        transientRetries -= 1;
+        continue;
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw formatBullhornError("search", res.status, text);
+      }
+      raw = await res.json();
+      cacheSet(cacheKey, raw);
+      break;
     }
-    if (!res.ok) {
-      const text = await res.text();
-      throw formatBullhornError("search", res.status, text);
-    }
-    raw = await res.json();
-    cacheSet(cacheKey, raw);
   }
 
   const processed = redactCandidateDescriptions(
