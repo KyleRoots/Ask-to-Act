@@ -123,7 +123,13 @@ async function bullhornFetch(
         "Bullhorn: transient HTTP on read — backing off",
       );
       await sleep(delay);
-      return bullhornFetch(path, params, retries, rlRetries, transientRetries - 1);
+      return bullhornFetch(
+        path,
+        params,
+        retries,
+        rlRetries,
+        transientRetries - 1,
+      );
     }
     throw formatBullhornError("API", res.status, text);
   }
@@ -514,7 +520,10 @@ async function searchEntity(
 
       if (!res.ok) {
         const text = await res.text();
-        if (isTransientBullhornResponse(res.status, text) && transientRetries > 0) {
+        if (
+          isTransientBullhornResponse(res.status, text) &&
+          transientRetries > 0
+        ) {
           const attempt = TRANSIENT_HTTP_MAX_RETRIES - transientRetries + 1;
           const delay = transientHttpBackoffMs(attempt);
           logger.warn(

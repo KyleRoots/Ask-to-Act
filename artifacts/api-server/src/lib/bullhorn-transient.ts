@@ -34,7 +34,9 @@ const TRANSIENT_BULLHORN_BODY_PATTERNS: RegExp[] = [
 ];
 
 /** True when a Bullhorn error body names an upstream transport failure. */
-export function isTransientBullhornErrorBody(body: string | null | undefined): boolean {
+export function isTransientBullhornErrorBody(
+  body: string | null | undefined,
+): boolean {
   if (!body) return false;
   return TRANSIENT_BULLHORN_BODY_PATTERNS.some((re) => re.test(body));
 }
