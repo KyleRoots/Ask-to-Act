@@ -81,6 +81,12 @@ Must run inside firm Bullhorn context (route sets `firmContext`).
 Service: `note-snapshot-cron` — image **`alpine:3.20`** (not `curlimages/curl`).
 Schedule: **`*/30 * * * *`**. Does not restart the API.
 
+**Single-firm by design (until customer #2):** production `startCommand` posts
+one firm URL (`/api/firms/e44c50e3e95e698c/note-snapshot/sync` — Myticas).
+Runtime sync code is firm-scoped; the cron is not a multi-tenant walker.
+Add a second cron (or a firm walker) when onboarding customer #2 — do not treat
+this as a tenant leak.
+
 **Why not `curlimages/curl`:** that image’s `ENTRYPOINT` is `curl`, so a Railway
 `startCommand` of `sh -c '…'` becomes `curl sh -c '…'` and fails with
 `curl: try 'curl --help'…`. Use alpine + busybox `wget` (or an image without a

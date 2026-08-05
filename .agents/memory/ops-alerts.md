@@ -27,8 +27,15 @@ pnpm --filter @workspace/scripts ops-health -- --alert
 pnpm --filter @workspace/scripts ops-health -- --json
 ```
 
-Auth for scripts: `OPS_HEALTH_SECRET` or `ASKTOACT_MCP_API_KEY`.
+Auth for scripts: `OPS_HEALTH_SECRET` or `ASKTOACT_MCP_API_KEY` **when that key is the service bearer**.
 Base URL: `ASKTOACT_MCP_BASE_URL` (default `https://connect.asktoact.ai`).
+
+**Gotcha:** ops routes do **not** accept portal user apiKeys. If
+`ASKTOACT_MCP_API_KEY` is a recruiter key (fine for MCP tools / writes),
+`ops-health` returns `403 Forbidden: invalid ops credentials`. Fix: set
+`OPS_HEALTH_SECRET` to the dedicated ops secret (or to `MCP_BEARER_TOKEN`), or
+use the service bearer as `ASKTOACT_MCP_API_KEY` for ops-only agent secrets.
+See [asktoact-mcp-api-key.md](./asktoact-mcp-api-key.md).
 
 ### Checks
 
@@ -107,7 +114,8 @@ patch Automations via API — paste manually in the Automations editor):
 You are the AskToAct ops health responder. You have no Slack — communicate only via email notify + your final reply.
 
 1. Run: pnpm --filter @workspace/scripts ops-health -- --json
-   Auth: ASKTOACT_MCP_API_KEY or OPS_HEALTH_SECRET (Cursor Secrets). Base: ASKTOACT_MCP_BASE_URL (default https://connect.asktoact.ai).
+   Auth: OPS_HEALTH_SECRET or service MCP_BEARER_TOKEN as ASKTOACT_MCP_API_KEY
+   (portal user keys 403). Base: ASKTOACT_MCP_BASE_URL (default https://connect.asktoact.ai).
 
 2. If status is ok: stop. Do not send notify emails.
 

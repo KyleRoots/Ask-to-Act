@@ -74,3 +74,20 @@ unchanged; this only detects failures after the fact.
 - Never date-window fan-out for scout.
 - Never give up solely because of `wall_time`.
 - Present partials; continue via MCP **or** REST from `asyncContinuation`.
+
+## Staff verification (2026-08-05)
+
+Soft walls unchanged. Live prod smoke via
+`pnpm --filter @workspace/scripts asktoact-mcp`:
+
+1. `start_scout_dept_report_job` → poll `get_report_job` until `complete`
+2. `start_match_candidates_job` → poll until `complete` (match *result*
+   `status=partial` is normal sourcing completeness, not job failure)
+
+Contract tests (`report-jobs.test.ts`) assert `wall_time` →
+host-complete `asyncContinuation` for scout/match/leaderboard. Sync
+`wall_time` is hard to force when note-snapshot serves scout quickly —
+that is expected; the start→poll path is the staff proof.
+
+**Not wrapping further tools yet** — see milestone board §8
+([universal-connector-milestone-9.md](./universal-connector-milestone-9.md)).

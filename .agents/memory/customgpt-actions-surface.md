@@ -28,3 +28,9 @@ clients can continue without improvising. Shared poll for all tools:
 
 Hint text covers both hosts. **Never** date-window fan-out (scout). **Never** give up on `wall_time`.
 See [universal-async-jobs.md](./universal-async-jobs.md) and [scout-qualified-by-department.md](./scout-qualified-by-department.md).
+
+**Host setup reminders (docs-only):** Custom GPT Actions use the REST half of
+`asyncContinuation` (MCP start_* tools are invisible there). Prefer per-user MCP
+connectors over one shared GPT key. Cursor ops secrets: service bearer for
+`ASKTOACT_MCP_API_KEY` when calling ops-health — user keys 403 on ops routes
+([asktoact-mcp-api-key.md](./asktoact-mcp-api-key.md)).

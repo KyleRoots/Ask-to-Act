@@ -13,13 +13,33 @@ in source, commits, or agent transcripts.
 `ASKTOACT_MCP_API_KEY`. Prefer **Runtime Secret** so the value is redacted from
 tool output and commits. Restart the cloud agent after adding.
 
-**What value to use (either works):**
-- **Service token** — same value as production `MCP_BEARER_TOKEN` (read-only service
-  firm / Myticas headless session).
-- **User api_key** — a recruiter's portal API key (`/api/mcp/<apiKey>` path form
-  also works). Writes run under that user's Bullhorn OAuth session.
+**What value to use:**
+
+| Use case | Put in `ASKTOACT_MCP_API_KEY` |
+|----------|------------------------------|
+| Ops health, note-snapshot admin, headless reads, cloud-agent smokes | Production **service** `MCP_BEARER_TOKEN` |
+| Recruiter writes / per-user attribution | That recruiter’s portal **user api_key** |
+
+Both authenticate MCP `/api/mcp` and REST `/api/v1`. Prefer the **service bearer**
+in Cursor Secrets for ops and automation so one secret covers tools **and**
+ops-health (see gotcha below).
 
 **Optional:** `ASKTOACT_MCP_BASE_URL` (default `https://connect.asktoact.ai`).
+
+### Ops-health auth gotcha
+
+`GET /api/internal/ops-health` (and `ops-agent-notify`) accept **only**:
+
+- production `MCP_BEARER_TOKEN` (service), or
+- dedicated `OPS_HEALTH_SECRET`
+
+A **portal user apiKey** that works for MCP tools returns
+`403 Forbidden: invalid ops credentials`. If
+`pnpm --filter @workspace/scripts ops-health` fails with that message, the Cursor
+secret is a user key — set `OPS_HEALTH_SECRET` (preferred) or replace
+`ASKTOACT_MCP_API_KEY` with the service bearer for ops runs.
+
+See [ops-alerts.md](./ops-alerts.md).
 
 **How to call (preferred — keeps the secret in the shell, not agent context):**
 ```bash
