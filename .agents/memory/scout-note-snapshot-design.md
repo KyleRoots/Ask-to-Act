@@ -125,6 +125,10 @@ hardcoded URL above so expansion cannot fail.
 Default snapshot TTL is **2 hours** (`NOTE_SNAPSHOT_TTL_MS`) — a 30‑minute cron
 keeps coverage well inside that window.
 
+**Transient Bullhorn HTTP:** association/`bullhornFetch` and Lucene search retry
+**502/503/504** with bounded backoff (see `bullhorn-transient.ts`) so a single
+gateway timeout does not mark a department `failed`.
+
 ## Read path
 
 `scoutQualifiedByDepartment`:

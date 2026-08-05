@@ -35,8 +35,9 @@ Base URL: `ASKTOACT_MCP_BASE_URL` (default `https://connect.asktoact.ai`).
 1. **Note-snapshot coverage** — for active firms: failed/partial rows, or
    `last_full_sync_at` older than `NOTE_SNAPSHOT_TTL_MS` (warn) / 2× TTL
    (critical). Empty coverage → warn (cron may never have succeeded).
-2. **report_jobs** — recent `failed` (esp. poison / max attempts), `queued`
-   older than 10m/30m, `running` with expired lease or high `attempt_count`.
+2. **report_jobs** — recent `failed` (esp. poison / max attempts) within
+   `OPS_FAILED_LOOKBACK_MS` (**2h**), `queued` older than 10m/30m, `running`
+   with expired lease or high `attempt_count`.
 
 Response: `status` (`ok` | `warn` | `critical`) + `summary` + pasteable
 `agentBrief` + `fingerprint` for dedupe.

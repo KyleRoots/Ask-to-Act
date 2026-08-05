@@ -11,8 +11,10 @@ wiring — an admin flips it from the admin UI.
 
 **The cutoff that matters:** `requireBullhornFirm` (bearer-auth.ts) is the ONLY runtime gate that
 blocks an already-enrolled firm's users. Subscription status is checked only at onboarding
-(users add/enroll, firm detail), NOT on the live MCP/`/api/v1` path — so the lifecycle gate must
-live in `requireBullhornFirm`, which fronts BOTH `/mcp*` and `/v1/*`.
+(users add/enroll, firm detail) **unless** `ENTITLEMENTS_ENFORCED=1`, which also runs
+`assertFirmEntitled` on this same live path (default OFF — see
+[universal-connector-milestone-9.md](./universal-connector-milestone-9.md)). Lifecycle
+(`firms.status`) always applies; billing entitlement is opt-in until Stripe is trusted.
 
 **Why:** non-paying / offboarded firms whose users were already enrolled would otherwise keep
 working forever, since the runtime path never re-checks billing.
