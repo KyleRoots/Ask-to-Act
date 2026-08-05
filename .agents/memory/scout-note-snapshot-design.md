@@ -135,6 +135,15 @@ keeps coverage well inside that window.
 **502/503/504** with bounded backoff (see `bullhorn-transient.ts`) so a single
 gateway timeout does not mark a department `failed`.
 
+Bullhorn also answers **500** when its own REST tier cannot reach an internal
+backend (`Could not access HTTP invoker remote service at
+[http://localhost:8083/data-services-4.0/sr/SelectBuilder]; nested exception is
+org.apache.http.NoHttpResponseException`). Status alone cannot separate that from
+a real 500, so read paths read the error body and retry only when it names a Java
+transport exception (`isTransientBullhornResponse`). Genuine 500s — bad query,
+unsupported field — still fail fast. Do **not** widen those body patterns to
+request-shape errors; retrying a malformed query just burns the walk budget.
+
 ## Read path
 
 `scoutQualifiedByDepartment`:
