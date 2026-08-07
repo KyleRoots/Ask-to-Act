@@ -64,6 +64,16 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
+  // go=1 now persists OAuth state in Postgres (multi-instance safe).
+  const { pool } = await import("@workspace/db");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS oauth_states (
+      state TEXT PRIMARY KEY NOT NULL,
+      firm_id TEXT,
+      expires_at TIMESTAMP NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT now()
+    );
+  `);
   await cleanup();
   // `subscriptionStatus: active` so the enroll route's subscription gate passes.
   await db
@@ -97,6 +107,7 @@ describe("GET /api/auth/user/enroll — first-time consent bounce recovery", () 
     const res = await request(app).get(`/api/auth/user/enroll?token=${TOKEN}`);
     expect(res.status).toBe(200);
     expect(res.text).toContain("Connect your Bullhorn account");
+    expect(res.text).toContain("Connect manually (recommended)");
     expect(res.text).toContain(`token=${TOKEN}&manual=1`);
     expect(res.text).toContain(`token=${TOKEN}&go=1`);
     expect(res.headers["location"]).toBeUndefined();
@@ -121,5 +132,14 @@ describe("GET /api/auth/user/enroll — first-time consent bounce recovery", () 
     const setCookie = res.headers["set-cookie"];
     const cookieHeader = Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "");
     expect(cookieHeader).toContain(`${COOKIE}=`);
+  });
+
+  it("shows manual form banner when oauth_failed=1", async () => {
+    const res = await request(app).get(
+      `/api/auth/user/enroll?token=${TOKEN}&manual=1&oauth_failed=1`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Automatic Bullhorn sign-in did not finish");
+    expect(res.text).toContain('name="bhUsername"');
   });
 });

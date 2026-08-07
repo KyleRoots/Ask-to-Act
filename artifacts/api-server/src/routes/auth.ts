@@ -16,6 +16,7 @@ import {
 } from "../lib/m365-auth.js";
 import { countEntity } from "../lib/bullhorn-client.js";
 import { rememberState, consumeState, userIdFromState, peekFirmId } from "../lib/oauth-state.js";
+import { publicErrorReason } from "../lib/public-error.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { logger } from "../lib/logger.js";
 import { db, usersTable } from "@workspace/db";
@@ -53,17 +54,18 @@ router.get("/auth/bullhorn/login", bearerAuth, requireService, async (req: Reque
       return;
     }
     const state = randomBytes(16).toString("hex");
-    rememberState(state, firmId);
-    const url = await getAuthorizeUrl(state);
+    await rememberState(state, firmId);
+    const url = await getAuthorizeUrl(state, firmId);
     res.redirect(url);
   } catch (err) {
     logger.error({ err }, "Bullhorn login redirect failed");
+    const reason = publicErrorReason(err, "Could not build the Bullhorn authorization link.");
     res
-      .status(500)
+      .status(502)
       .send(
         page(
           "Could not start Bullhorn login",
-          "The server could not build the Bullhorn authorization link. Check that BULLHORN_CLIENT_ID and BULLHORN_REDIRECT_URI are configured correctly.",
+          `${reason} Check that BULLHORN_CLIENT_ID and BULLHORN_REDIRECT_URI are configured correctly, or connect via the headless/admin path.`,
         ),
       );
   }
@@ -89,12 +91,14 @@ router.get(
     }
     try {
       const state = randomBytes(16).toString("hex");
-      rememberState(state, firmId);
-      const url = await getAuthorizeUrl(state);
+      await rememberState(state, firmId);
+      const url = await getAuthorizeUrl(state, firmId);
       res.json({ url });
     } catch (err) {
       logger.error({ err, firmId }, "Bullhorn login-url build failed");
-      res.status(500).json({ error: "Could not build the Bullhorn authorization link." });
+      res.status(502).json({
+        error: publicErrorReason(err, "Could not build the Bullhorn authorization link."),
+      });
     }
   },
 );
@@ -133,9 +137,9 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
   }
 
   // Peek at firmId BEFORE consuming the state (consumeState deletes the entry).
-  const firmId = peekFirmId(state) ?? undefined;
+  const firmId = (await peekFirmId(state)) ?? undefined;
 
-  if (!consumeState(state)) {
+  if (!(await consumeState(state))) {
     res
       .status(400)
       .send(
@@ -189,12 +193,38 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
       );
     } catch (err) {
       logger.error({ err, userId }, "User enrollment code exchange failed");
+      const reason = publicErrorReason(err, "The authorization code could not be exchanged.");
+
+      // Prefer recovering to manual enroll while the one-time token is still valid.
+      const [enrollRow] = await db
+        .select({
+          enrollToken: usersTable.enrollToken,
+          enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
+        })
+        .from(usersTable)
+        .where(eq(usersTable.id, userId))
+        .limit(1);
+
+      if (
+        enrollRow?.enrollToken &&
+        enrollRow.enrollTokenExpiresAt &&
+        enrollRow.enrollTokenExpiresAt > new Date()
+      ) {
+        const reconnect = isEnrollReconnectRequest(req) ? "&force=1" : "";
+        res.set("Cache-Control", "no-store");
+        res.redirect(
+          302,
+          `/api/auth/user/enroll?token=${encodeURIComponent(enrollRow.enrollToken)}&manual=1&oauth_failed=1${reconnect}`,
+        );
+        return;
+      }
+
       res
-        .status(500)
+        .status(502)
         .send(
           page(
             "Could not complete enrollment",
-            "The authorization code could not be exchanged. Please try enrolling again.",
+            `${reason} Re-open your enrollment link and use Connect manually — that path avoids Bullhorn's browser sign-in issues.`,
           ),
         );
     }
@@ -223,13 +253,14 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
       ),
     );
   } catch (err) {
-    logger.error({ err }, "Bullhorn authorization exchange failed");
+    logger.error({ err, firmId }, "Bullhorn authorization exchange failed");
+    const reason = publicErrorReason(err, "The authorization code could not be exchanged for a session.");
     res
-      .status(500)
+      .status(502)
       .send(
         page(
           "Could not complete Bullhorn connection",
-          "The authorization code could not be exchanged for a session. Please try connecting again.",
+          `${reason} Please try connecting again from the admin wizard, or use the headless connect path.`,
         ),
       );
   }
@@ -264,7 +295,7 @@ router.get("/auth/m365/start", async (req: Request, res: Response) => {
     }
 
     const state = `mailbox:${resolved.userId}:${randomBytes(16).toString("hex")}`;
-    rememberState(state);
+    await rememberState(state);
     const authorizeUrl = await getMicrosoftAuthorizeUrl(state);
     res.set("Cache-Control", "no-store");
     res.redirect(authorizeUrl);
@@ -293,7 +324,7 @@ router.get("/auth/m365/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  if (typeof state !== "string" || !consumeState(state)) {
+  if (typeof state !== "string" || !(await consumeState(state))) {
     res
       .status(400)
       .send(

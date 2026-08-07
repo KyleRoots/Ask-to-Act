@@ -28,6 +28,24 @@ export async function ensureColumns(): Promise<void> {
         WHERE enroll_token IS NOT NULL;
     `);
 
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS oauth_states (
+        state TEXT PRIMARY KEY NOT NULL,
+        firm_id TEXT,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT now()
+      );
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS oauth_states_expires_at_idx
+        ON oauth_states (expires_at);
+    `);
+    await client.query(`
+      ALTER TABLE oauth_states ENABLE ROW LEVEL SECURITY;
+    `).catch(() => {
+      /* already enabled or unsupported in some local DBs */
+    });
+
     console.info("[db] ensureColumns: schema columns verified/applied");
   } catch (err) {
     console.warn("[db] ensureColumns: migration warning —", (err as Error).message);

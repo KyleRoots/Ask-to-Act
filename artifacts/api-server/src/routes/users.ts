@@ -13,6 +13,7 @@ import {
   getUserMailboxStatus,
 } from "../lib/m365-auth.js";
 import { rememberState } from "../lib/oauth-state.js";
+import { publicErrorReason } from "../lib/public-error.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
@@ -891,15 +892,15 @@ function enrollChoicePage(
     ? "Reconnect your Bullhorn account"
     : "Connect your Bullhorn account";
   const sub = isReconnect
-    ? `Hi ${e(userName)} — your Bullhorn session needs a quick refresh${firmLine}. Sign in again below. <strong>Your existing AI connector URL stays the same</strong> — you will not need to reinstall it.`
-    : `Hi ${e(userName)} — choose how to link Bullhorn${firmLine}. If Bullhorn's sign-in sends you back to its login screen after you click Agree, use <strong>Connect manually</strong> instead.`;
-  const primaryLabel = isReconnect ? "Reconnect manually" : "Connect manually";
+    ? `Hi ${e(userName)} — your Bullhorn session needs a quick refresh${firmLine}. Prefer <strong>Reconnect manually</strong> (most reliable). <strong>Your existing AI connector URL stays the same</strong> — you will not need to reinstall it.`
+    : `Hi ${e(userName)} — choose how to link Bullhorn${firmLine}. <strong>Connect manually</strong> is recommended: it avoids Bullhorn's browser consent bounce and most automatic sign-in failures. Use Bullhorn sign-in only if you prefer their login page.`;
+  const primaryLabel = isReconnect ? "Reconnect manually (recommended)" : "Connect manually (recommended)";
   const secondaryLabel = isReconnect
     ? "Continue with Bullhorn sign-in"
     : "Continue with Bullhorn sign-in";
   const hint = isReconnect
-    ? "<strong>Reconnect manually</strong> is the most reliable path: enter your Bullhorn username and password once here; we refresh the session on the server. Your ChatGPT / Claude connector does not change."
-    : "<strong>Connect manually</strong> is the most reliable path: enter your Bullhorn username and password once here; we finish the connection on the server. <strong>Bullhorn sign-in</strong> uses Bullhorn's own login page (no password on this site), but Bullhorn sometimes interrupts first-time consent.";
+    ? "<strong>Reconnect manually</strong> is the reliable path: enter your Bullhorn username and password once here; we refresh the session on the server. Your ChatGPT / Claude connector does not change. If automatic Bullhorn sign-in fails or loops back to login, return here and use manual."
+    : "<strong>Connect manually</strong> is the reliable path: enter your Bullhorn username and password once here; we finish the connection on the server (no password stored). Browser Bullhorn sign-in can fail with a consent bounce or a server error after Agree — if that happens, re-open this link and use Connect manually.";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <style${nonceAttr()}>
@@ -954,10 +955,10 @@ function bounceRecoveryPage(
   const sub = isReconnect
     ? `Hi ${e(userName)} — the Bullhorn reconnect${firmLine} didn't complete. Use <strong>Reconnect manually</strong> to finish. Your AI connector URL stays the same.`
     : `Hi ${e(userName)} — it looks like the Bullhorn connection${firmLine} didn't complete. Bullhorn often interrupts the very first sign-in and sends you back to its own login screen. Use <strong>Connect manually</strong> to finish:`;
-  const primaryLabel = isReconnect ? "Reconnect manually" : "Connect manually";
+  const primaryLabel = isReconnect ? "Reconnect manually (recommended)" : "Connect manually (recommended)";
   const hint = isReconnect
-    ? "\"Reconnect manually\" lets you enter your Bullhorn username and password once on this page — we refresh the session on the server."
-    : "\"Connect manually\" lets you enter your Bullhorn username and password once on this page — we complete the connection securely on the server, which avoids Bullhorn's first-time interruption entirely.";
+    ? "\"Reconnect manually\" lets you enter your Bullhorn username and password once on this page — we refresh the session on the server. Prefer this if Bullhorn sign-in bounced or showed an error."
+    : "\"Connect manually\" lets you enter your Bullhorn username and password once on this page — we complete the connection securely on the server, which avoids Bullhorn's first-time interruption and most automatic sign-in failures.";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${isReconnect ? "Finish reconnecting" : "Finish connecting"} | AskToAct</title>
 <style${nonceAttr()}>
@@ -1077,7 +1078,11 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     // crawlers without a valid enroll link never see a Bullhorn password field
     // (that pattern previously got the domain flagged as a "deceptive site").
     if (req.query["manual"] === "1") {
-      res.send(enrollForm(token, rows[0].name, firmName, undefined, forceReconnect));
+      const oauthFailedBanner =
+        req.query["oauth_failed"] === "1"
+          ? "Automatic Bullhorn sign-in did not finish. Connect manually below — enter your Bullhorn username and password once; we complete the connection on the server."
+          : undefined;
+      res.send(enrollForm(token, rows[0].name, firmName, oauthFailedBanner, forceReconnect));
       return;
     }
 
@@ -1094,19 +1099,36 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
 
     // ?go=1 — recruiter chose Bullhorn browser OAuth from the choice page.
     // Redirect to Bullhorn; plant attempt cookie so a bounce can be recovered.
+    // On authorize-URL build failure, recover to the manual form (502) instead
+    // of a bare catch-all 500.
     if (forceRedirect) {
-      const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
-      rememberState(state);
-      const authorizeUrl = await getAuthorizeUrl(state);
-      res.cookie(ENROLL_ATTEMPT_COOKIE, rows[0].id, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        maxAge: 15 * 60 * 1000,
-        path: "/api/auth/user/enroll",
-      });
-      res.set("Cache-Control", "no-store");
-      res.redirect(authorizeUrl);
+      try {
+        const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
+        const userFirmId = rows[0].firmId ?? undefined;
+        await rememberState(state, userFirmId);
+        const authorizeUrl = await getAuthorizeUrl(state, userFirmId);
+        res.cookie(ENROLL_ATTEMPT_COOKIE, rows[0].id, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          maxAge: 15 * 60 * 1000,
+          path: "/api/auth/user/enroll",
+        });
+        res.set("Cache-Control", "no-store");
+        res.redirect(authorizeUrl);
+      } catch (err) {
+        logger.error({ err, userId: rows[0].id }, "Bullhorn enroll authorize URL build failed");
+        const reason = publicErrorReason(err, "Could not start Bullhorn sign-in.");
+        res.status(502).send(
+          enrollForm(
+            token,
+            rows[0].name,
+            firmName,
+            `Automatic Bullhorn sign-in failed (${reason}). Connect manually instead — enter your username and password below.`,
+            forceReconnect,
+          ),
+        );
+      }
       return;
     }
 

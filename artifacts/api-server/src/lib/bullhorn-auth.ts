@@ -453,9 +453,14 @@ async function discoverEndpoints(): Promise<Endpoints> {
  * user logs in on Bullhorn's own page and approves consent; Bullhorn then
  * redirects back to our callback with an authorization code. No username or
  * password is sent from the server.
+ *
+ * When `firmId` is known, prefer that firm's stored oauthUrl so authorize and
+ * the later code exchange hit the same swimlane (avoids multi-tenant / second-
+ * instance mismatches). Falls back to service discoverEndpoints otherwise.
  */
-export async function getAuthorizeUrl(state: string): Promise<string> {
-  const { oauthUrl } = await discoverEndpoints();
+export async function getAuthorizeUrl(state: string, firmId?: string): Promise<string> {
+  const row = firmId ? await loadTokenRow(firmId) : null;
+  const { oauthUrl } = await resolveFirmEndpoints(row);
   const url = new URL(`${oauthUrl}/authorize`);
   url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
   url.searchParams.set("response_type", "code");

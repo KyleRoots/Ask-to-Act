@@ -23,6 +23,7 @@ export * from "./firms";
 export * from "./firm-config";
 export * from "./note-action-snapshot";
 export * from "./ops-alert-state";
+export * from "./oauth-states";
 export * from "./report-jobs";
 export * from "./user-mailboxes";
 export * from "./users";
