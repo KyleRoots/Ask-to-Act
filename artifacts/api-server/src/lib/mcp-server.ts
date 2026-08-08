@@ -2467,13 +2467,22 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "upload_file_to_record",
-    "WRITE: Uploads a file (e.g. a résumé or document) and attaches it to an existing Bullhorn record, as YOU. " +
-      "Provide the file as base64-encoded bytes in fileContentBase64. Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc.",
+    "WRITE: Uploads a file (e.g. a résumé or document) and attaches it to an existing Bullhorn record's Files tab, as YOU. " +
+      "Pass the file as base64-encoded bytes in fileContentBase64 with the original fileName (and contentType when known). " +
+      "CHAT ATTACHMENTS: When the user attached a PDF/doc in this chat and asked to add it to a matched candidate (or other record), encode those exact attachment bytes as fileContentBase64 — that IS how you pass file contents; do not refuse claiming contents must be 'passed directly'. " +
+      "NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents to 'make upload work'. " +
+      "If your host cannot access the chat attachment bytes, say so clearly and ask the user to re-attach the file in chat or upload it in Bullhorn — do not invent workarounds. " +
+      "Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc.",
     {
       entityType: z.string().min(1).describe("Bullhorn entity to attach to (e.g. 'Candidate', 'JobOrder')."),
       entityId: z.number().int().positive().describe("ID of the record to attach the file to."),
-      fileName: z.string().min(1).describe("File name including extension (e.g. 'jane_doe_resume.pdf')."),
-      fileContentBase64: z.string().min(1).describe("Base64-encoded file bytes."),
+      fileName: z.string().min(1).describe("Original file name including extension (e.g. 'jane_doe_resume.pdf') — keep the user's name; do not rename to force a format change."),
+      fileContentBase64: z
+        .string()
+        .min(1)
+        .describe(
+          "Base64-encoded exact file bytes from the chat attachment or user-provided file. Do not compress, convert, or alter the document before encoding.",
+        ),
       contentType: z.string().optional().describe("MIME type (e.g. 'application/pdf'). Defaults to application/octet-stream."),
       fileType: z.string().optional().describe("Bullhorn file type/category. Defaults to 'SAMPLE'."),
       description: z.string().optional().describe("Optional file description."),
@@ -2488,12 +2497,19 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "create_candidate_from_resume",
     "WRITE: Parses a résumé file and creates a new Candidate from it in Bullhorn, as YOU, then attaches the original file. " +
-      "Provide the résumé as base64-encoded bytes; supported types: pdf, doc, docx, rtf, txt, html, odt. " +
+      "Pass the résumé as base64-encoded bytes in fileContentBase64 with the original fileName; supported types: pdf, doc, docx, rtf, txt, html, odt. " +
+      "CHAT ATTACHMENTS: When the user attached a résumé in this chat, encode those exact bytes as fileContentBase64 — same pattern as upload_file_to_record. " +
+      "NEVER suggest compressing, converting, or altering the résumé to 'make upload work'. If your host cannot access the attachment bytes, say so clearly and ask the user to re-attach or create the candidate in Bullhorn — do not invent workarounds. " +
       "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner) — overrides win over parsed values. " +
       "ALWAYS confirm with the user before creating a new candidate record.",
     {
-      fileName: z.string().min(1).describe("Résumé file name including extension (drives the parse format)."),
-      fileContentBase64: z.string().min(1).describe("Base64-encoded résumé file bytes."),
+      fileName: z.string().min(1).describe("Original résumé file name including extension (drives the parse format) — keep the user's name; do not rename to force a format change."),
+      fileContentBase64: z
+        .string()
+        .min(1)
+        .describe(
+          "Base64-encoded exact résumé file bytes from the chat attachment or user-provided file. Do not compress, convert, or alter before encoding.",
+        ),
       contentType: z.string().optional().describe("MIME type of the résumé (e.g. 'application/pdf')."),
       overrideFields: z
         .record(z.string(), writeFieldValueSchema)
