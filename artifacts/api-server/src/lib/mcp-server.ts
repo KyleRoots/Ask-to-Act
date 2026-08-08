@@ -64,7 +64,13 @@ import {
   restoreEntity,
   archiveOrCancelPlacement,
   SOFT_DELETABLE_ENTITIES,
+  BullhornFieldValidationError,
 } from "./bullhorn-client.js";
+import {
+  createStagedFileSession,
+  resolveUploadBytes,
+  StagedFileValidationError,
+} from "./staged-file-uploads.js";
 import {
   BullhornReconnectRequiredError,
   getUserSession,
@@ -236,8 +242,9 @@ const SERVER_INSTRUCTIONS = [
   "",
   "FILE UPLOADS — chat attachments → Bullhorn Files:",
   "- ALWAYS call upload_file_to_record (existing record) or create_candidate_from_resume (new candidate) when the user attached a file and asked to upload/attach it — unless a prior tool error already failed for that same file.",
-  "- Pass exact chat-attachment bytes as fileContentBase64 with the original fileName. That is the supported path (same for both tools). Base64 of chat attachments is reliable here; do not invent corruption or size limits.",
-  "- Typical résumé/security PDFs are multi-MB and expected. ~600KB is trivial. NEVER refuse or stall for size speculation — only stop after a real tool error.",
+  "- Prefer fileRef when the host provides a connect/upload URL or when create_file_upload_link was used. Otherwise pass exact chat-attachment bytes as fileContentBase64 with the original fileName. Provide ONE of fileContentBase64 OR fileRef (not both).",
+  "- Base64 of chat attachments is reliable here when the host injects bytes; do not invent corruption or size limits. Typical résumé/security PDFs are multi-MB and expected. ~600KB is trivial.",
+  "- If the host cannot supply attachment bytes (empty base64, missing file content, path-only attachment), call create_file_upload_link, give the user the uploadUrl once (“open this link, drop the PDF”), then call upload_file_to_record / create_candidate_from_resume with the returned fileRef. Never invent size/corruption excuses instead of that flow.",
   "- NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering the document.",
   "",
   "PRESENTING RECORDS — make every Bullhorn record open in one click:",
@@ -366,9 +373,10 @@ export const MCP_TOOL_PRIORITY: readonly string[] = [
   "update_company",
   "create_placement",
   "update_placement",
-  "create_sendout",
-  "create_candidate_from_resume",
   "upload_file_to_record",
+  "create_candidate_from_resume",
+  "create_file_upload_link",
+  "create_sendout",
   "create_lead",
   "update_lead",
   "create_opportunity",
@@ -478,6 +486,31 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       );
     }
     return getUserSession(caller.userId);
+  }
+
+  /** Firm/user scope for staged fileRef uploads (same identity as write tools). */
+  function requireStagedFileScope(): { firmId: string; userId: string } {
+    if (!caller || caller.kind !== "user" || !caller.firmId) {
+      throw new Error(
+        "File staging requires your personal AskToAct user API key (same as write tools).",
+      );
+    }
+    return { firmId: caller.firmId, userId: caller.userId };
+  }
+
+  async function resolveToolUploadBytes(args: {
+    fileContentBase64?: string;
+    fileRef?: string;
+    label?: string;
+  }) {
+    try {
+      return await resolveUploadBytes(requireStagedFileScope(), args);
+    } catch (err) {
+      if (err instanceof StagedFileValidationError) {
+        throw new BullhornFieldValidationError(err.message);
+      }
+      throw err;
+    }
   }
 
   /** Runs a write tool: logs, executes, returns result. Writes are never cached. */
@@ -2472,13 +2505,32 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   );
 
   writeTool(
+    "create_file_upload_link",
+    "WRITE helper: Creates a short-lived staged upload (fileRef + one-time uploadUrl) so ChatGPT/Cursor can attach a chat PDF without inline base64. " +
+      "Use when the host cannot inject chat-attachment bytes as fileContentBase64, or when the user should open a link once and drop the file. " +
+      "After the user uploads via uploadUrl, call upload_file_to_record or create_candidate_from_resume with the returned fileRef (omit fileContentBase64). " +
+      "ANTI-REFUSAL: Do not invent size/corruption limits instead of using this flow. Link expires in ~1 hour; max ~25MB.",
+    {
+      fileName: z
+        .string()
+        .optional()
+        .describe("Optional expected file name (e.g. 'resume.pdf') — shown on the upload page."),
+      contentType: z.string().optional().describe("Optional MIME type hint (e.g. 'application/pdf')."),
+    },
+    async ({ fileName, contentType }) =>
+      runWriteTool("create_file_upload_link", { fileName }, async () => {
+        return createStagedFileSession(requireStagedFileScope(), { fileName, contentType });
+      }),
+  );
+
+  writeTool(
     "upload_file_to_record",
     "WRITE: Uploads a file (e.g. a résumé or security PDF) and attaches it to an existing Bullhorn record's Files tab, as YOU. " +
       "ALWAYS attempt this tool when the user attached a file in chat and asked to upload/attach it — unless a prior tool error already failed for that same file. " +
-      "Pass exact chat-attachment bytes as fileContentBase64 with the original fileName (and contentType when known). That IS the supported path (same as create_candidate_from_resume). " +
-      "ANTI-REFUSAL: Base64 of chat attachments is reliable here and does not corrupt files. Typical résumé/security PDFs are multi-MB and expected; ~600KB is trivial. " +
-      "NEVER refuse, stall, or invent a size/reliability limit without calling this tool. NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents. " +
-      "Only after a real tool/host error: say the host could not send the attachment bytes and ask the user to re-attach or upload in Bullhorn — do not invent workarounds. " +
+      "Provide EITHER fileContentBase64 (exact chat-attachment bytes) OR fileRef (from create_file_upload_link after the user opened uploadUrl) — not both. Prefer fileRef when the host gave an upload link or cannot inject base64. " +
+      "ANTI-REFUSAL: Base64 of chat attachments is reliable when the host injects bytes; multi-MB PDFs are expected; ~600KB is trivial. " +
+      "NEVER refuse, stall, or invent a size/reliability/corruption limit without calling this tool (or create_file_upload_link first). NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents. " +
+      "Only after a real tool/host error: use create_file_upload_link and ask the user to open uploadUrl once — or re-attach / upload in Bullhorn. Do not invent workarounds. " +
       "Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc.",
     {
       entityType: z.string().min(1).describe("Bullhorn entity to attach to (e.g. 'Candidate', 'JobOrder')."),
@@ -2486,18 +2538,37 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fileName: z.string().min(1).describe("Original file name including extension (e.g. 'jane_doe_resume.pdf') — keep the user's name; do not rename to force a format change."),
       fileContentBase64: z
         .string()
-        .min(1)
+        .optional()
         .describe(
-          "Base64-encoded exact file bytes from the chat attachment (supported path; same as create_candidate_from_resume). Multi-MB PDFs are expected; never refuse for size speculation. Do not compress, convert, or alter before encoding.",
+          "Base64-encoded exact file bytes from the chat attachment (omit when using fileRef). Multi-MB PDFs are expected; never refuse for size speculation. Do not compress, convert, or alter before encoding.",
+        ),
+      fileRef: z
+        .string()
+        .optional()
+        .describe(
+          "Staged upload id from create_file_upload_link (omit when using fileContentBase64). Prefer this when the user uploaded via uploadUrl.",
         ),
       contentType: z.string().optional().describe("MIME type (e.g. 'application/pdf'). Defaults to application/octet-stream."),
       fileType: z.string().optional().describe("Bullhorn file type/category. Defaults to 'SAMPLE'."),
       description: z.string().optional().describe("Optional file description."),
     },
-    async ({ entityType, entityId, fileName, fileContentBase64, contentType, fileType, description }) =>
-      runWriteTool("upload_file_to_record", { entityType, entityId, fileName }, async () => {
+    async ({ entityType, entityId, fileName, fileContentBase64, fileRef, contentType, fileType, description }) =>
+      runWriteTool("upload_file_to_record", { entityType, entityId, fileName, fileRef }, async () => {
         const session = await resolveWriteSession();
-        return uploadFileToRecord(session, { entityType, entityId, fileName, fileContentBase64, contentType, fileType, description });
+        const resolved = await resolveToolUploadBytes({
+          fileContentBase64,
+          fileRef,
+          label: "File",
+        });
+        return uploadFileToRecord(session, {
+          entityType,
+          entityId,
+          fileName: fileName || resolved.fileName || "upload.bin",
+          fileBytes: resolved.bytes,
+          contentType: contentType ?? resolved.contentType,
+          fileType,
+          description,
+        });
       }),
   );
 
@@ -2505,18 +2576,24 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "create_candidate_from_resume",
     "WRITE: Parses a résumé file and creates a new Candidate from it in Bullhorn, as YOU, then attaches the original file. " +
       "ALWAYS attempt this tool when the user attached a résumé in chat and asked to create a candidate — unless a prior tool error already failed for that same file. " +
-      "Pass exact chat-attachment bytes as fileContentBase64 with the original fileName; supported types: pdf, doc, docx, rtf, txt, html, odt. Same pattern as upload_file_to_record. " +
-      "ANTI-REFUSAL: Base64 of chat attachments is reliable here. Typical résumés are multi-MB and expected; ~600KB is trivial. NEVER refuse for invented size/corruption concerns — only stop after a real tool error. " +
-      "NEVER suggest compressing, converting, or altering the résumé. If a real host error says attachment bytes are unavailable, ask the user to re-attach or create the candidate in Bullhorn — do not invent workarounds. " +
+      "Provide EITHER fileContentBase64 OR fileRef (from create_file_upload_link); supported types: pdf, doc, docx, rtf, txt, html, odt. Prefer fileRef when the host cannot inject base64. " +
+      "ANTI-REFUSAL: Base64 of chat attachments is reliable when the host injects bytes. Typical résumés are multi-MB and expected; ~600KB is trivial. NEVER refuse for invented size/corruption concerns — only stop after a real tool error (then use create_file_upload_link). " +
+      "NEVER suggest compressing, converting, or altering the résumé. " +
       "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner) — overrides win over parsed values. " +
       "ALWAYS confirm with the user before creating a new candidate record.",
     {
       fileName: z.string().min(1).describe("Original résumé file name including extension (drives the parse format) — keep the user's name; do not rename to force a format change."),
       fileContentBase64: z
         .string()
-        .min(1)
+        .optional()
         .describe(
-          "Base64-encoded exact résumé bytes from the chat attachment (supported path; same as upload_file_to_record). Multi-MB files are expected; never refuse for size speculation. Do not compress, convert, or alter before encoding.",
+          "Base64-encoded exact résumé bytes from the chat attachment (omit when using fileRef). Multi-MB files are expected; never refuse for size speculation. Do not compress, convert, or alter before encoding.",
+        ),
+      fileRef: z
+        .string()
+        .optional()
+        .describe(
+          "Staged upload id from create_file_upload_link (omit when using fileContentBase64).",
         ),
       contentType: z.string().optional().describe("MIME type of the résumé (e.g. 'application/pdf')."),
       overrideFields: z
@@ -2524,10 +2601,20 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .optional()
         .describe("Optional Candidate fields to set/override (exact Bullhorn names; use list_field_options for picklists like status)."),
     },
-    async ({ fileName, fileContentBase64, contentType, overrideFields }) =>
-      runWriteTool("create_candidate_from_resume", { fileName }, async () => {
+    async ({ fileName, fileContentBase64, fileRef, contentType, overrideFields }) =>
+      runWriteTool("create_candidate_from_resume", { fileName, fileRef }, async () => {
         const session = await resolveWriteSession();
-        return createCandidateFromResume(session, { fileName, fileContentBase64, contentType, overrideFields });
+        const resolved = await resolveToolUploadBytes({
+          fileContentBase64,
+          fileRef,
+          label: "Résumé",
+        });
+        return createCandidateFromResume(session, {
+          fileName: fileName || resolved.fileName || "resume.pdf",
+          fileBytes: resolved.bytes,
+          contentType: contentType ?? resolved.contentType,
+          overrideFields,
+        });
       }),
   );
 

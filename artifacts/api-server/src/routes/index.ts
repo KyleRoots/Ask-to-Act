@@ -10,6 +10,7 @@ import supportRouter from "./support";
 import portalRouter from "./portal";
 import v1Router from "./v1";
 import openapiRouter from "./openapi";
+import filesApiRouter from "./files";
 import { bearerAuth, requireBullhornFirm, attachFirmContext } from "../middlewares/bearer-auth.js";
 
 const router: IRouter = Router();
@@ -23,6 +24,7 @@ router.use(usersRouter);
 router.use(firmsRouter);
 router.use(supportRouter);
 router.use(portalRouter);
+router.use(filesApiRouter);
 router.use(mcpRouter);
 router.use("/v1", bearerAuth, requireBullhornFirm, attachFirmContext, v1Router);
 

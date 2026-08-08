@@ -92,13 +92,34 @@ the tool call. Community reports of base64 truncation tend to be multi-MB when
 the **model must emit** the string as tokens — a different path than chat-file
 injection.
 **Why:** speculative refusal burns the UX before we learn whether the host can
-send the bytes. Staged upload (temp fileRef) is the right fallback only after a
-**real** tool/host error (truncation, 413, empty arg) at sizes we care about —
-not as a first fix for invented limits.
+send the bytes. High-effort thrashing (tiktoken, chunking, shell path probes)
+makes this worse: the model searches for excuses (`"File content is empty"` is
+our empty-base64 validation) instead of calling the tool or using staged upload.
 **How to apply:** keep tool + server `instructions` anti-refusal forceful (ALWAYS
 attempt unless a prior tool error failed; multi-MB expected; never invent size
-limits). If a real host error appears, capture the exact error text before
-building staged upload.
+limits). Prefer **fileRef** when the host cannot inject bytes.
+
+## Staged upload (fileRef) — production path for hosts that cannot send base64
+When ChatGPT/Cursor will not (or cannot) put chat-attachment bytes into
+`fileContentBase64`, use short-lived Postgres staging (`staged_file_uploads`):
+
+1. Call MCP `create_file_upload_link` → `{ fileRef, uploadUrl, expiresAt }`
+   (also `POST /api/files/uploads` with the user API key).
+2. User opens `uploadUrl` once (`GET /upload/:token`), drops the exact file
+   (browser `PUT` raw bytes; no API key in the URL).
+3. Call `upload_file_to_record` / `create_candidate_from_resume` with **fileRef**
+   (omit `fileContentBase64`). Server loads bytes, uploads to Bullhorn Files,
+   consumes/clears the row.
+4. Optional host one-shot: `POST /api/files/uploads/content` with
+   `Authorization: Bearer <userApiKey>`, raw body, `X-File-Name` → `{ fileRef }`.
+
+Guarantees: **1h TTL**, **25MB** cap (aligned with MCP), **firm+user scoped**
+(no cross-tenant fileRef), empty content rejected, fileRef single-use after
+attach. Never invent size/corruption excuses instead of this flow.
+
+**ChatGPT Plus UX after deploy:** attach PDF in chat → if the model cannot send
+base64, it should return the upload link → open link → drop PDF → say “uploaded”
+→ model attaches with `fileRef`. Soft walls for reports are unchanged.
 
 ## REST rate limit bites during probing
 Bullhorn REST is **120 requests / 60s** (`RateLimit-Limit: 120; w=60`). Bursty probing

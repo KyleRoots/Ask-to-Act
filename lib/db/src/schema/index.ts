@@ -25,6 +25,7 @@ export * from "./note-action-snapshot";
 export * from "./ops-alert-state";
 export * from "./oauth-states";
 export * from "./report-jobs";
+export * from "./staged-file-uploads";
 export * from "./user-mailboxes";
 export * from "./users";
 export * from "./seat-activity";

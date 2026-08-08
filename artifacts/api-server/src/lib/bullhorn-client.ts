@@ -4775,8 +4775,8 @@ async function fileFetch(
 
 /**
  * Uploads a file (e.g. a résumé) and attaches it to an existing Bullhorn record
- * via the multipart Files API (PUT file/{Entity}/{id}). `fileContentBase64` is
- * the file bytes base64-encoded.
+ * via the multipart Files API (PUT file/{Entity}/{id}). Provide either
+ * `fileContentBase64` or pre-decoded `fileBytes` (from staged fileRef).
  */
 export async function uploadFileToRecord(
   session: BullhornWriteSession,
@@ -4784,14 +4784,25 @@ export async function uploadFileToRecord(
     entityType: string;
     entityId: number;
     fileName: string;
-    fileContentBase64: string;
+    fileContentBase64?: string;
+    fileBytes?: Buffer;
     contentType?: string;
     fileType?: string;
     description?: string;
   },
 ): Promise<{ fileId: number; entityType: string; entityId: number }> {
   const entry = resolveEntity(args.entityType);
-  const bytes = decodeFileBase64(args.fileContentBase64, "File");
+  const bytes = args.fileBytes
+    ? args.fileBytes
+    : decodeFileBase64(
+        args.fileContentBase64 ?? "",
+        "File",
+      );
+  if (bytes.length === 0) {
+    throw new BullhornFieldValidationError(
+      "File content is empty — provide base64-encoded file bytes or a staged fileRef with content.",
+    );
+  }
   const blob = new Blob([new Uint8Array(bytes)], {
     type: args.contentType ?? "application/octet-stream",
   });
@@ -4824,13 +4835,21 @@ export async function createCandidateFromResume(
   session: BullhornWriteSession,
   args: {
     fileName: string;
-    fileContentBase64: string;
+    fileContentBase64?: string;
+    fileBytes?: Buffer;
     contentType?: string;
     overrideFields?: Record<string, unknown>;
   },
 ): Promise<{ candidateId: number; fileId?: number; parsedName?: string }> {
   const format = resumeFormatFromName(args.fileName);
-  const bytes = decodeFileBase64(args.fileContentBase64, "Résumé");
+  const bytes = args.fileBytes
+    ? args.fileBytes
+    : decodeFileBase64(args.fileContentBase64 ?? "", "Résumé");
+  if (bytes.length === 0) {
+    throw new BullhornFieldValidationError(
+      "Résumé content is empty — provide base64-encoded file bytes or a staged fileRef with content.",
+    );
+  }
 
   // 1. Parse (non-persisting). Returns { candidate, skillList, ... }.
   // Bullhorn's parseToCandidate endpoint requires multipart/form-data — sending
@@ -4886,7 +4905,7 @@ export async function createCandidateFromResume(
       entityType: "Candidate",
       entityId: candidateId,
       fileName: args.fileName,
-      fileContentBase64: args.fileContentBase64,
+      fileBytes: bytes,
       contentType: args.contentType,
       fileType: "Resume",
       description: "Résumé (auto-attached on creation)",

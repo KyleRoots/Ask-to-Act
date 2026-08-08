@@ -14,6 +14,15 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import legalRouter from "./routes/legal";
+import {
+  uploadBrowserRouter,
+  handleAuthenticatedBinaryStage,
+} from "./routes/files.js";
+import {
+  bearerAuth,
+  requireBullhornFirm,
+  attachFirmContext,
+} from "./middlewares/bearer-auth.js";
 import { logger } from "./lib/logger";
 import { mountFrontends } from "./lib/serve-frontends";
 import { isSentryEnabled, Sentry } from "./lib/sentry.js";
@@ -199,21 +208,35 @@ app.use(
   }),
 );
 
-// The MCP endpoint is the ONLY route that receives file uploads: file-upload
-// tools (résumé parse, file attachments) send the file as a base64 string
-// inside the JSON body, and base64 inflates bytes by ~33%. Express's 100kb
-// default silently 413s any real document (a 161KB .docx → ~215KB base64), so
-// allow a generous 25mb — but ONLY here, to limit DoS attack surface. This
-// parser sets req._body, so the global parser below skips already-parsed
-// requests. Matches /api/mcp and /api/mcp/:token.
-// Per-token rate limit, registered BEFORE the 25mb parser so abusive requests
-// are rejected before any large body is read/allocated (DoS protection). Keyed
-// by bearer token, not the shared AI-vendor IP (see mcp-rate-limit.ts).
-app.use("/api/mcp", mcpLimiter);
+// The MCP endpoint carries file uploads as base64 inside JSON (25mb). Staged
+// fileRef uploads use raw binary on /upload/:token and
+// /api/files/uploads/content (also 25mb) — see parsers registered below.app.use("/api/mcp", mcpLimiter);
 app.use("/api/mcp", express.json({ limit: "25mb" }));
 
+// Staged file uploads (fileRef path): raw bytes up to 25mb, registered BEFORE
+// the global 1mb JSON parser. Browser one-time PUT /upload/:token and
+// authenticated POST /api/files/uploads/content.
+app.use("/upload", (req, res, next) => {
+  if (req.method === "PUT") {
+    return express.raw({ type: () => true, limit: "25mb" })(req, res, next);
+  }
+  next();
+});
+app.use(uploadBrowserRouter);
+
+app.post(
+  "/api/files/uploads/content",
+  express.raw({ type: () => true, limit: "25mb" }),
+  bearerAuth,
+  requireBullhornFirm,
+  attachFirmContext,
+  (req, res) => {
+    void handleAuthenticatedBinaryStage(req, res);
+  },
+);
+
 // Global body parsers for every other route. Kept small (1mb) since no other
-// endpoint accepts file payloads.
+// endpoint accepts file payloads (MCP and staged-file raw paths are above).
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
