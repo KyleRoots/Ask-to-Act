@@ -4,6 +4,7 @@ import {
   STAGED_FILE_MAX_BYTES,
   StagedFileError,
   createStagedFileSession,
+  getStagedBatchById,
   getStagedFileMetaByUploadToken,
   putStagedFileByUploadToken,
   stageFileBytes,
@@ -55,10 +56,17 @@ filesApiRouter.post(
     if (!scope) return;
 
     try {
-      const body = (req.body ?? {}) as { fileName?: unknown; contentType?: unknown };
+      const body = (req.body ?? {}) as {
+        fileName?: unknown;
+        fileNames?: unknown;
+        contentType?: unknown;
+      };
       const fileName = typeof body.fileName === "string" ? body.fileName : undefined;
+      const fileNames = Array.isArray(body.fileNames)
+        ? body.fileNames.filter((n): n is string => typeof n === "string")
+        : undefined;
       const contentType = typeof body.contentType === "string" ? body.contentType : undefined;
-      const session = await createStagedFileSession(scope, { fileName, contentType });
+      const session = await createStagedFileSession(scope, { fileName, fileNames, contentType });
       res.status(201).json(session);
     } catch (err) {
       if (err instanceof StagedFileError) {
@@ -116,8 +124,51 @@ export default filesApiRouter;
 /** Browser drop page + raw PUT /upload/:token — mount before global JSON parser. */
 export const uploadBrowserRouter: IRouter = Router();
 
+uploadBrowserRouter.get("/upload/batch/:batchId", async (req: Request, res: Response) => {
+  const batchId = String(req.params["batchId"] ?? "");
+  const batch = batchId ? await getStagedBatchById(batchId) : null;
+  if (!batch) {
+    res.status(404).type("html").send(uploadPageHtml({ state: "missing" }));
+    return;
+  }
+  if (batch.slots.every((s) => s.consumed)) {
+    res.status(410).type("html").send(uploadPageHtml({ state: "consumed" }));
+    return;
+  }
+  if (batch.expired) {
+    res.status(410).type("html").send(uploadPageHtml({ state: "expired" }));
+    return;
+  }
+  const pending = batch.slots.filter((s) => !s.consumed);
+  const allReady = pending.every((s) => s.hasContent);
+  if (allReady) {
+    res.status(200).type("html").send(
+      uploadPageHtml({
+        state: "ready",
+        fileName: pending.map((s) => s.fileName).filter(Boolean).join(", ") || null,
+      }),
+    );
+    return;
+  }
+  res.status(200).type("html").send(
+    uploadPageHtml({
+      state: "awaiting",
+      maxBytes: STAGED_FILE_MAX_BYTES,
+      slots: pending.map((s) => ({
+        uploadToken: s.uploadToken,
+        fileName: s.fileName,
+        hasContent: s.hasContent,
+      })),
+    }),
+  );
+});
+
 uploadBrowserRouter.get("/upload/:token", async (req: Request, res: Response) => {
   const token = String(req.params["token"] ?? "");
+  if (token === "batch") {
+    res.status(404).type("html").send(uploadPageHtml({ state: "missing" }));
+    return;
+  }
   const meta = token ? await getStagedFileMetaByUploadToken(token) : null;
   if (!meta) {
     res.status(404).type("html").send(uploadPageHtml({ state: "missing" }));
@@ -146,6 +197,7 @@ uploadBrowserRouter.get("/upload/:token", async (req: Request, res: Response) =>
       state: "awaiting",
       fileName: meta.fileName,
       maxBytes: STAGED_FILE_MAX_BYTES,
+      slots: [{ uploadToken: token, fileName: meta.fileName, hasContent: false }],
     }),
   );
 });
@@ -186,36 +238,65 @@ function uploadPageHtml(opts: {
   fileName?: string | null;
   fileRef?: string;
   maxBytes?: number;
+  slots?: Array<{ uploadToken: string; fileName: string | null; hasContent: boolean }>;
 }): string {
+  const multi = (opts.slots?.length ?? 0) > 1;
   const title =
     opts.state === "awaiting"
-      ? "Upload file for AskToAct"
+      ? multi
+        ? "Upload files for AskToAct"
+        : "Upload file for AskToAct"
       : opts.state === "ready"
-        ? "File ready"
+        ? multi
+          ? "Files ready"
+          : "File ready"
         : "Upload unavailable";
   const maxLabel = opts.maxBytes
     ? `${Math.round(opts.maxBytes / (1024 * 1024))} MB`
     : "25 MB";
   const hint =
     opts.state === "awaiting"
-      ? `Drop the exact PDF or document here (max ${maxLabel}). Do not compress or convert it. Then return to ChatGPT/Cursor.`
+      ? multi
+        ? `Drop all ${opts.slots!.length} files here in one go (max ${maxLabel} each). Chat attachments are not the Bullhorn upload — this page is. Do not compress or convert. Then return to ChatGPT/Cursor.`
+        : `Drop the exact PDF or document here (max ${maxLabel}). Chat attachments are for matching only — this one drop is the real Bullhorn upload. Do not compress or convert. Then return to ChatGPT/Cursor.`
       : opts.state === "ready"
-        ? `Saved${opts.fileName ? ` as ${escapeHtml(opts.fileName)}` : ""}. Return to chat — the assistant will attach it with fileRef.`
+        ? `Saved${opts.fileName ? ` as ${escapeHtml(opts.fileName)}` : ""}. Return to chat — the assistant will attach with fileRef.`
         : opts.state === "expired"
           ? "This link expired. Ask the assistant for a new upload link."
           : opts.state === "consumed"
             ? "This file was already attached. Ask the assistant for a new link if you need to upload again."
             : "This upload link is invalid. Ask the assistant for a new one.";
 
+  const slotList =
+    opts.state === "awaiting" && opts.slots?.length
+      ? `<ul class="slots">${opts.slots
+          .map(
+            (s) =>
+              `<li data-token="${escapeHtml(s.uploadToken)}" data-ready="${s.hasContent ? "1" : "0"}">${
+                s.hasContent ? "✓ " : ""
+              }${escapeHtml(s.fileName || "file")}</li>`,
+          )
+          .join("")}</ul>`
+      : "";
+
   const dropUi =
     opts.state === "awaiting"
       ? `<label class="drop" id="drop">
-  <input type="file" id="file" hidden />
-  <strong>Drop file here</strong>
+  <input type="file" id="file" hidden ${multi ? "multiple" : ""} />
+  <strong>${multi ? "Drop all files here" : "Drop file here"}</strong>
   <span>or click to choose</span>
 </label>
+${slotList}
 <p class="status" id="status" role="status"></p>`
       : "";
+
+  const slotsJson = JSON.stringify(
+    (opts.slots ?? []).map((s) => ({
+      token: s.uploadToken,
+      fileName: s.fileName,
+      hasContent: s.hasContent,
+    })),
+  );
 
   const script =
     opts.state === "awaiting"
@@ -223,22 +304,48 @@ function uploadPageHtml(opts: {
 const drop = document.getElementById("drop");
 const input = document.getElementById("file");
 const status = document.getElementById("status");
+const slots = ${slotsJson};
 function setStatus(t, ok){ status.textContent = t; status.dataset.ok = ok ? "1" : "0"; }
-async function send(file){
-  setStatus("Uploading " + file.name + "…", true);
+function markSlot(token){
+  const li = document.querySelector('li[data-token="'+token+'"]');
+  if (li){ li.dataset.ready = "1"; if (!li.textContent.startsWith("✓")) li.textContent = "✓ " + li.textContent; }
+}
+function pickSlot(fileName){
+  const pending = slots.filter(s => !s.hasContent);
+  const exact = pending.find(s => s.fileName && s.fileName.toLowerCase() === String(fileName||"").toLowerCase());
+  return exact || pending[0] || null;
+}
+async function sendOne(file, slot){
+  const res = await fetch("/upload/" + encodeURIComponent(slot.token), {
+    method: "PUT",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("Upload failed (" + res.status + ")"));
+  slot.hasContent = true;
+  markSlot(slot.token);
+}
+async function sendMany(fileList){
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  setStatus("Uploading " + files.length + " file(s)…", true);
   try {
-    const res = await fetch(location.pathname, {
-      method: "PUT",
-      headers: {
-        "Content-Type": file.type || "application/octet-stream",
-        "X-File-Name": encodeURIComponent(file.name),
-      },
-      body: file,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || ("Upload failed (" + res.status + ")"));
-    setStatus("Uploaded. Return to chat and tell the assistant it is ready.", true);
-    drop.classList.add("done");
+    for (const file of files) {
+      const slot = pickSlot(file.name);
+      if (!slot) throw new Error("No empty upload slot left — ask for a new link.");
+      await sendOne(file, slot);
+    }
+    const left = slots.filter(s => !s.hasContent).length;
+    if (left === 0) {
+      setStatus("Uploaded. Return to chat and tell the assistant the files are ready.", true);
+      drop.classList.add("done");
+    } else {
+      setStatus("Uploaded some files — drop the remaining " + left + ".", true);
+    }
   } catch (e) {
     setStatus(e && e.message ? e.message : "Upload failed", false);
   }
@@ -248,10 +355,9 @@ drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.ad
 drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => {
   e.preventDefault(); drop.classList.remove("over");
-  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) send(f);
+  if (e.dataTransfer && e.dataTransfer.files) sendMany(e.dataTransfer.files);
 });
-input.addEventListener("change", () => { if (input.files && input.files[0]) send(input.files[0]); });
+input.addEventListener("change", () => { if (input.files) sendMany(input.files); });
 </script>`
       : "";
 
@@ -274,6 +380,9 @@ input.addEventListener("change", () => { if (input.files && input.files[0]) send
     .drop span{color:#64748b;font-size:13px}
     .drop.over{border-color:#38BDF8;background:#0f172a}
     .drop.done{border-color:#34d399;opacity:.85;pointer-events:none}
+    .slots{list-style:none;margin:14px 0 0;padding:0;font-size:13px;color:#94a3b8}
+    .slots li{padding:4px 0;border-bottom:1px solid #1e293b}
+    .slots li[data-ready="1"]{color:#34d399}
     .status{margin-top:14px;font-size:13px;color:#94a3b8}
     .status[data-ok="0"]{color:#f87171}
     .status[data-ok="1"]{color:#34d399}

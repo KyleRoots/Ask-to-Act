@@ -21,6 +21,9 @@ export type StagedFileSession = {
   expiresAt: string;
   maxBytes: number;
   instructions: string;
+  /** Present when multiple files share one drop page. */
+  fileRefs?: string[];
+  files?: Array<{ fileRef: string; fileName: string | null; uploadToken?: string }>;
 };
 
 function newId(prefix: string): string {
@@ -31,41 +34,89 @@ function uploadUrlForToken(uploadToken: string): string {
   return `${getBaseUrl()}/upload/${uploadToken}`;
 }
 
+function uploadUrlForBatch(batchId: string): string {
+  return `${getBaseUrl()}/upload/batch/${batchId}`;
+}
+
+const SINGLE_FILE_INSTRUCTIONS =
+  "Chat attachments are for matching/context only — ChatGPT usually cannot inject PDF bytes into tools. Open uploadUrl once in a browser and drop the exact file there (do not compress or convert). That one drop is the real upload. Then call upload_file_to_record or create_candidate_from_resume with this fileRef (omit fileContentBase64).";
+
+const MULTI_FILE_INSTRUCTIONS =
+  "Chat attachments are for matching/context only — ChatGPT usually cannot inject PDF bytes into tools. Open uploadUrl once and drop ALL files on that single page (one browser visit). Then call upload_file_to_record / create_candidate_from_resume once per fileRef (omit fileContentBase64).";
+
 /**
- * Creates an empty staging slot and returns a one-time browser upload URL.
- * The caller later passes `fileRef` to upload_file_to_record /
- * create_candidate_from_resume after the user (or host) puts bytes.
+ * Creates empty staging slot(s) and returns a one-time browser upload URL.
+ * Pass `fileNames` (2+) for one multi-drop page; otherwise a single-file URL.
+ * The caller later passes each `fileRef` to upload_file_to_record /
+ * create_candidate_from_resume after the user puts bytes.
  */
 export async function createStagedFileSession(
   scope: StagedFileScope,
-  opts?: { fileName?: string; contentType?: string },
+  opts?: {
+    fileName?: string;
+    fileNames?: string[];
+    contentType?: string;
+  },
 ): Promise<StagedFileSession> {
-  const fileRef = newId("fref");
-  const uploadToken = newId("uptk");
+  const names = (opts?.fileNames?.length
+    ? opts.fileNames
+    : opts?.fileName
+      ? [opts.fileName]
+      : [undefined]
+  ).map((n) => (typeof n === "string" && n.trim() ? n.trim() : null));
+
   const expiresAt = new Date(Date.now() + STAGED_FILE_TTL_MS);
+  const multi = names.length > 1;
+  const batchId = multi ? newId("ubatch") : null;
 
-  await db.insert(stagedFileUploadsTable).values({
-    id: fileRef,
-    firmId: scope.firmId,
-    userId: scope.userId,
-    uploadToken,
-    fileName: opts?.fileName ?? null,
-    contentType: opts?.contentType ?? null,
-    expiresAt,
-  });
+  const created: Array<{
+    fileRef: string;
+    uploadToken: string;
+    fileName: string | null;
+  }> = [];
 
-  // Best-effort cleanup of expired rows (keeps the table small).
+  for (const fileName of names) {
+    const fileRef = newId("fref");
+    const uploadToken = newId("uptk");
+    await db.insert(stagedFileUploadsTable).values({
+      id: fileRef,
+      firmId: scope.firmId,
+      userId: scope.userId,
+      uploadToken,
+      batchId,
+      fileName,
+      contentType: opts?.contentType ?? null,
+      expiresAt,
+    });
+    created.push({ fileRef, uploadToken, fileName });
+  }
+
   void purgeExpiredStagedFiles().catch((err) => {
     logger.warn({ err }, "staged-file: purge expired failed");
   });
 
+  const primary = created[0]!;
+  if (multi && batchId) {
+    return {
+      fileRef: primary.fileRef,
+      fileRefs: created.map((c) => c.fileRef),
+      files: created.map((c) => ({
+        fileRef: c.fileRef,
+        fileName: c.fileName,
+      })),
+      uploadUrl: uploadUrlForBatch(batchId),
+      expiresAt: expiresAt.toISOString(),
+      maxBytes: STAGED_FILE_MAX_BYTES,
+      instructions: MULTI_FILE_INSTRUCTIONS,
+    };
+  }
+
   return {
-    fileRef,
-    uploadUrl: uploadUrlForToken(uploadToken),
+    fileRef: primary.fileRef,
+    uploadUrl: uploadUrlForToken(primary.uploadToken),
     expiresAt: expiresAt.toISOString(),
     maxBytes: STAGED_FILE_MAX_BYTES,
-    instructions:
-      "Open uploadUrl in a browser, drop the exact file (do not compress or convert), then call upload_file_to_record or create_candidate_from_resume with this fileRef (omit fileContentBase64). Prefer fileRef when the host cannot inject chat-attachment bytes as base64.",
+    instructions: SINGLE_FILE_INSTRUCTIONS,
   };
 }
 
@@ -187,7 +238,8 @@ export type ResolvedUploadBytes = {
 
 /**
  * Resolves exact file bytes from either inline base64 or a firm/user-scoped
- * fileRef. Consumes (and clears) the staging row when fileRef is used.
+ * fileRef. By default consumes (and clears) the staging row when fileRef is
+ * used — pass `consume: false` to peek so a failed Bullhorn upload can retry.
  */
 export async function resolveUploadBytes(
   scope: StagedFileScope,
@@ -195,11 +247,14 @@ export async function resolveUploadBytes(
     fileContentBase64?: string | null;
     fileRef?: string | null;
     label?: string;
+    /** When false, load fileRef bytes without marking consumed (default true). */
+    consume?: boolean;
   },
 ): Promise<ResolvedUploadBytes> {
   const label = args.label ?? "File";
   const b64 = typeof args.fileContentBase64 === "string" ? args.fileContentBase64.trim() : "";
   const ref = typeof args.fileRef === "string" ? args.fileRef.trim() : "";
+  const consume = args.consume !== false;
 
   if (b64 && ref) {
     throw new StagedFileValidationError(
@@ -216,18 +271,20 @@ export async function resolveUploadBytes(
     return { bytes: decodeFileBase64Public(b64, label) };
   }
 
-  return consumeStagedFile(scope, ref, label);
+  return consumeStagedFile(scope, ref, label, { consume });
 }
 
 /**
- * Loads staged bytes for the calling firm/user, marks the row consumed, and
- * clears content so the fileRef cannot be replayed.
+ * Loads staged bytes for the calling firm/user. When `consume` is true (default),
+ * marks the row consumed and clears content so the fileRef cannot be replayed.
  */
 export async function consumeStagedFile(
   scope: StagedFileScope,
   fileRef: string,
   label = "File",
+  opts?: { consume?: boolean },
 ): Promise<ResolvedUploadBytes> {
+  const shouldConsume = opts?.consume !== false;
   const [row] = await db
     .select({
       id: stagedFileUploadsTable.id,
@@ -265,23 +322,54 @@ export async function consumeStagedFile(
     );
   }
 
-  const bytes = Buffer.isBuffer(row.content) ? row.content : Buffer.from(row.content);
+  const bytes = normalizeStagedBytes(row.content);
   assertNonEmptyBytes(bytes, label);
 
-  await db
-    .update(stagedFileUploadsTable)
-    .set({
-      consumedAt: new Date(),
-      content: null,
-      sizeBytes: bytes.length,
-    })
-    .where(eq(stagedFileUploadsTable.id, row.id));
+  if (shouldConsume) {
+    await markStagedFileConsumed(scope, row.id, bytes.length);
+  }
 
   return {
     bytes,
     fileName: row.fileName ?? undefined,
     contentType: row.contentType ?? undefined,
   };
+}
+
+/** Marks a previously peeked fileRef as consumed and clears stored bytes. */
+export async function markStagedFileConsumed(
+  scope: StagedFileScope,
+  fileRef: string,
+  sizeBytes?: number,
+): Promise<void> {
+  await db
+    .update(stagedFileUploadsTable)
+    .set({
+      consumedAt: new Date(),
+      content: null,
+      ...(typeof sizeBytes === "number" ? { sizeBytes } : {}),
+    })
+    .where(
+      and(
+        eq(stagedFileUploadsTable.id, fileRef),
+        eq(stagedFileUploadsTable.firmId, scope.firmId),
+        eq(stagedFileUploadsTable.userId, scope.userId),
+        isNull(stagedFileUploadsTable.consumedAt),
+      ),
+    );
+}
+
+/** Coerce pg/drizzle bytea (Buffer | Uint8Array | number[]) to Buffer. */
+function normalizeStagedBytes(content: unknown): Buffer {
+  if (Buffer.isBuffer(content)) return content;
+  if (content instanceof Uint8Array) return Buffer.from(content);
+  if (Array.isArray(content)) return Buffer.from(content);
+  if (typeof content === "string") {
+    // node-pg sometimes returns hex-encoded bytea as \x...
+    if (content.startsWith("\\x")) return Buffer.from(content.slice(2), "hex");
+    return Buffer.from(content, "binary");
+  }
+  return Buffer.from(content as ArrayBuffer);
 }
 
 export async function getStagedFileMetaByUploadToken(uploadToken: string): Promise<{
@@ -312,6 +400,51 @@ export async function getStagedFileMetaByUploadToken(uploadToken: string): Promi
     expiresAt: row.expiresAt,
     expired: row.expiresAt.getTime() <= Date.now(),
     consumed: row.consumedAt != null,
+  };
+}
+
+export type StagedBatchSlot = {
+  fileRef: string;
+  uploadToken: string;
+  fileName: string | null;
+  hasContent: boolean;
+  consumed: boolean;
+};
+
+export async function getStagedBatchById(batchId: string): Promise<{
+  batchId: string;
+  expiresAt: Date;
+  expired: boolean;
+  slots: StagedBatchSlot[];
+} | null> {
+  const rows = await db
+    .select({
+      id: stagedFileUploadsTable.id,
+      uploadToken: stagedFileUploadsTable.uploadToken,
+      fileName: stagedFileUploadsTable.fileName,
+      sizeBytes: stagedFileUploadsTable.sizeBytes,
+      expiresAt: stagedFileUploadsTable.expiresAt,
+      consumedAt: stagedFileUploadsTable.consumedAt,
+    })
+    .from(stagedFileUploadsTable)
+    .where(eq(stagedFileUploadsTable.batchId, batchId));
+
+  if (!rows.length) return null;
+  const expiresAt = rows.reduce(
+    (min, r) => (r.expiresAt.getTime() < min.getTime() ? r.expiresAt : min),
+    rows[0]!.expiresAt,
+  );
+  return {
+    batchId,
+    expiresAt,
+    expired: expiresAt.getTime() <= Date.now(),
+    slots: rows.map((r) => ({
+      fileRef: r.id,
+      uploadToken: r.uploadToken,
+      fileName: r.fileName,
+      hasContent: (r.sizeBytes ?? 0) > 0,
+      consumed: r.consumedAt != null,
+    })),
   };
 }
 

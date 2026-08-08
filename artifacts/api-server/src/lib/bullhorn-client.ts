@@ -4775,8 +4775,14 @@ async function fileFetch(
 
 /**
  * Uploads a file (e.g. a résumé) and attaches it to an existing Bullhorn record
- * via the multipart Files API (PUT file/{Entity}/{id}). Provide either
+ * via the multipart Files API (PUT file/{Entity}/{id}/raw). Provide either
  * `fileContentBase64` or pre-decoded `fileBytes` (from staged fileRef).
+ *
+ * Bullhorn has two PUT /file doors:
+ * - JSON + base64 body → `file/{Entity}/{id}` (params in JSON body)
+ * - multipart binary → `file/{Entity}/{id}/raw` (params in query string)
+ * Hitting the JSON door with multipart FormData yields 400
+ * "An internal error has occurred" (confirmed in production logs).
  */
 export async function uploadFileToRecord(
   session: BullhornWriteSession,
@@ -4787,6 +4793,7 @@ export async function uploadFileToRecord(
     fileContentBase64?: string;
     fileBytes?: Buffer;
     contentType?: string;
+    /** Bullhorn category/purpose (e.g. Resume, Cover). Sent as query `type`. */
     fileType?: string;
     description?: string;
   },
@@ -4803,26 +4810,57 @@ export async function uploadFileToRecord(
       "File content is empty — provide base64-encoded file bytes or a staged fileRef with content.",
     );
   }
-  const blob = new Blob([new Uint8Array(bytes)], {
-    type: args.contentType ?? "application/octet-stream",
-  });
+  const contentType = args.contentType?.trim() || guessContentType(args.fileName);
+  const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
   const form = new FormData();
   form.append("file", blob, args.fileName);
 
-  const path = `file/${entry.canonical}/${args.entityId}`;
-  const url = new URL(path, session.restUrl);
-  url.searchParams.set("externalID", `asktoact-${Date.now()}`);
-  url.searchParams.set("fileType", args.fileType ?? "SAMPLE");
-  if (args.description) url.searchParams.set("description", args.description);
+  // Multipart MUST use the /raw suffix. Query fileType is always "SAMPLE" per
+  // Bullhorn docs; optional category goes in `type` (e.g. Resume).
+  const path = `file/${entry.canonical}/${args.entityId}/raw`;
+  const qs = new URLSearchParams();
+  qs.set("externalID", `asktoact-${Date.now()}`);
+  qs.set("fileType", "SAMPLE");
+  qs.set("name", args.fileName);
+  if (contentType) qs.set("contentType", contentType);
+  const category = args.fileType?.trim();
+  if (category && category.toUpperCase() !== "SAMPLE") {
+    qs.set("type", category);
+  }
+  if (args.description) qs.set("description", args.description);
 
   // FormData sets its own multipart boundary; do NOT set Content-Type.
   const data = (await fileFetch(
     session,
     "PUT",
-    `${path}${url.search}`,
+    `${path}?${qs.toString()}`,
     { body: form },
   )) as { fileId?: number };
   return { fileId: data.fileId ?? 0, entityType: entry.canonical, entityId: args.entityId };
+}
+
+/** Best-effort MIME from filename when the caller/staging row has none. */
+function guessContentType(fileName: string): string {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "pdf":
+      return "application/pdf";
+    case "doc":
+      return "application/msword";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "rtf":
+      return "application/rtf";
+    case "txt":
+      return "text/plain";
+    case "html":
+    case "htm":
+      return "text/html";
+    case "odt":
+      return "application/vnd.oasis.opendocument.text";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 /**

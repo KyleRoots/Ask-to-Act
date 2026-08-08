@@ -34,6 +34,8 @@ export const stagedFileUploadsTable = pgTable(
       .references(() => usersTable.id, { onDelete: "cascade" }),
     /** Opaque token embedded in the one-time browser upload URL. */
     uploadToken: text("upload_token").notNull().unique(),
+    /** Shared id when multiple slots share one multi-drop upload page. */
+    batchId: text("batch_id"),
     fileName: text("file_name"),
     contentType: text("content_type"),
     content: bytea("content"),
@@ -45,6 +47,7 @@ export const stagedFileUploadsTable = pgTable(
   (t) => [
     index("staged_file_uploads_firm_user_idx").on(t.firmId, t.userId),
     index("staged_file_uploads_expires_at_idx").on(t.expiresAt),
+    index("staged_file_uploads_batch_id_idx").on(t.batchId),
   ],
 );
 

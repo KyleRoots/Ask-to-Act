@@ -16,7 +16,7 @@ All new write fns live in `bullhorn-client.ts` (after `findUsers`) and are regis
 ## Bullhorn write-API gotchas
 - **Write dates are epoch milliseconds**, not ISO. Convert with the existing `toEpochMillis(value,label)` before putting in a write body (dateBegin/dateEnd etc).
 - **Tearsheet membership** = to-many association endpoint with NO body: `POST|DELETE entity/Tearsheet/{id}/candidates/{comma,ids}`. `writeFetch(...,undefined)` sends no body — correct.
-- **File upload is a SEPARATE door** from JSON `entity/`: multipart `PUT file/{Entity}/{id}` (FormData + Blob, Node 24 has both globals). Built a dedicated `fileFetch` that mirrors writeFetch's 403/429/error contract but does NOT force `Content-Type: application/json` (FormData sets its own boundary). Query params carry `externalID`, `fileType` (default `SAMPLE`), `description`.
+- **File upload is a SEPARATE door** from JSON `entity/`: multipart `PUT file/{Entity}/{id}/raw` (FormData + Blob, Node 24 has both globals). Built a dedicated `fileFetch` that mirrors writeFetch's 403/429/error contract but does NOT force `Content-Type: application/json` (FormData sets its own boundary). Query params carry `externalID`, `fileType=SAMPLE` (always), optional `type` (category), `name`, `contentType`, `description`. Hitting `file/{Entity}/{id}` (no `/raw`) with multipart returns Bullhorn 400 "An internal error has occurred".
 - **`resume/parseToCandidate` does NOT persist** — it returns `{candidate, skillList, ...}`. Flow = parse → take whitelisted scalar fields → merge overrideFields (overrides win) → `validateWriteFields` → `PUT entity/Candidate` → best-effort attach original file via `uploadFileToRecord`.
 
 ## Parity expansion (candidate/lead/opportunity/task/appointment edits)

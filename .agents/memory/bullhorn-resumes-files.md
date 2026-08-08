@@ -104,22 +104,38 @@ When ChatGPT/Cursor will not (or cannot) put chat-attachment bytes into
 `fileContentBase64`, use short-lived Postgres staging (`staged_file_uploads`):
 
 1. Call MCP `create_file_upload_link` → `{ fileRef, uploadUrl, expiresAt }`
-   (also `POST /api/files/uploads` with the user API key).
-2. User opens `uploadUrl` once (`GET /upload/:token`), drops the exact file
-   (browser `PUT` raw bytes; no API key in the URL).
+   (also `POST /api/files/uploads` with the user API key). For **multiple**
+   files, pass `fileNames: [...]` once → one `/upload/batch/{id}` page.
+2. User opens `uploadUrl` once (`GET /upload/:token` or `/upload/batch/:id`),
+   drops the exact file(s) (browser `PUT` raw bytes; no API key in the URL).
 3. Call `upload_file_to_record` / `create_candidate_from_resume` with **fileRef**
-   (omit `fileContentBase64`). Server loads bytes, uploads to Bullhorn Files,
-   consumes/clears the row.
+   (omit `fileContentBase64`). Server peeks bytes, uploads to Bullhorn Files
+   via multipart `PUT file/{Entity}/{id}/raw`, then consumes/clears the row.
 4. Optional host one-shot: `POST /api/files/uploads/content` with
    `Authorization: Bearer <userApiKey>`, raw body, `X-File-Name` → `{ fileRef }`.
 
 Guarantees: **1h TTL**, **25MB** cap (aligned with MCP), **firm+user scoped**
-(no cross-tenant fileRef), empty content rejected, fileRef single-use after
-attach. Never invent size/corruption excuses instead of this flow.
+(no cross-tenant fileRef), empty content rejected, fileRef single-use **after
+successful Bullhorn attach** (peek-then-consume so a Bullhorn 400 can retry).
 
-**ChatGPT Plus UX after deploy:** attach PDF in chat → if the model cannot send
-base64, it should return the upload link → open link → drop PDF → say “uploaded”
-→ model attaches with `fileRef`. Soft walls for reports are unchanged.
+**Honest double-drop UX:** Chat attachments are for matching/context. Until the
+host can inject bytes into the tool call, **one browser drop on uploadUrl is
+required** — the chat drop is not the Bullhorn upload. Prefer one multi-file
+batch link over N separate links.
+
+**ChatGPT Plus UX after deploy:** attach PDF in chat → model returns one
+upload link (multi-file when needed) → open link → drop PDF(s) → say
+“uploaded” → model attaches with `fileRef`. Soft walls for reports are unchanged.
+
+## PUT file multipart MUST use `/raw` (production 400)
+Symptom: staged bytes present, `upload_file_to_record` fails with Bullhorn
+**400 "An internal error has occurred"** (via `formatBullhornError` / `fileFetch`).
+Bullhorn has two PUT doors: JSON+base64 on `file/{Entity}/{id}` (params in body)
+vs multipart binary on `file/{Entity}/{id}/raw` (params in query). Sending
+FormData to the JSON door yields that internal-error 400. Query `fileType` must
+be **SAMPLE**; optional category (Resume, etc.) goes in query `type`.
+**How to apply:** always multipart → `/raw`; never put fileType=Resume in the
+fileType query param.
 
 ## REST rate limit bites during probing
 Bullhorn REST is **120 requests / 60s** (`RateLimit-Limit: 120; w=60`). Bursty probing

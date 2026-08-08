@@ -5,6 +5,7 @@ type Row = {
   firmId: string;
   userId: string;
   uploadToken: string;
+  batchId: string | null;
   fileName: string | null;
   contentType: string | null;
   content: Buffer | null;
@@ -22,6 +23,7 @@ vi.mock("@workspace/db", () => {
     firmId: "firmId",
     userId: "userId",
     uploadToken: "uploadToken",
+    batchId: "batchId",
     fileName: "fileName",
     contentType: "contentType",
     content: "content",
@@ -40,12 +42,12 @@ vi.mock("@workspace/db", () => {
     }),
     select: (cols?: Record<string, unknown>) => ({
       from: () => ({
-        where: (pred: { __filter?: (r: Row) => boolean }) => ({
-          limit: async (n: number) => {
+        where: (pred: { __filter?: (r: Row) => boolean }) => {
+          const run = async (n?: number) => {
             const all = [...rows.values()].filter((r) =>
               pred.__filter ? pred.__filter(r) : true,
             );
-            const picked = all.slice(0, n);
+            const picked = typeof n === "number" ? all.slice(0, n) : all;
             if (!cols) return picked;
             return picked.map((r) => {
               const out: Record<string, unknown> = {};
@@ -54,8 +56,13 @@ vi.mock("@workspace/db", () => {
               }
               return out;
             });
-          },
-        }),
+          };
+          return {
+            limit: (n: number) => run(n),
+            then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+              run().then(resolve, reject),
+          };
+        },
       }),
     }),
     update: () => {
@@ -140,6 +147,7 @@ const {
   stageFileBytes,
   resolveUploadBytes,
   consumeStagedFile,
+  markStagedFileConsumed,
   decodeFileBase64Public,
   StagedFileValidationError,
   StagedFileError,
@@ -227,6 +235,39 @@ describe("resolveUploadBytes — base64 vs fileRef", () => {
     const row = rows.get(expired.fileRef)!;
     row.expiresAt = new Date(Date.now() - 1000);
     await expect(consumeStagedFile(SCOPE, expired.fileRef)).rejects.toThrow(/expired/i);
+  });
+
+  it("peek (consume:false) allows retry then markStagedFileConsumed", async () => {
+    const session = await createStagedFileSession(SCOPE, { fileName: "retry.pdf" });
+    const token = session.uploadUrl.split("/upload/")[1]!;
+    const pdf = Buffer.from("%PDF-retry");
+    await putStagedFileByUploadToken(token, pdf, { fileName: "retry.pdf" });
+
+    const peek1 = await resolveUploadBytes(SCOPE, {
+      fileRef: session.fileRef,
+      consume: false,
+    });
+    expect(peek1.bytes.equals(pdf)).toBe(true);
+    const peek2 = await resolveUploadBytes(SCOPE, {
+      fileRef: session.fileRef,
+      consume: false,
+    });
+    expect(peek2.bytes.equals(pdf)).toBe(true);
+
+    await markStagedFileConsumed(SCOPE, session.fileRef, pdf.length);
+    await expect(
+      resolveUploadBytes(SCOPE, { fileRef: session.fileRef, consume: false }),
+    ).rejects.toThrow(/already used/i);
+  });
+
+  it("creates one multi-drop batch URL for fileNames", async () => {
+    const session = await createStagedFileSession(SCOPE, {
+      fileNames: ["moran.pdf", "shaheen.pdf"],
+    });
+    expect(session.uploadUrl).toMatch(/\/upload\/batch\/ubatch_/);
+    expect(session.fileRefs).toHaveLength(2);
+    expect(session.files?.map((f) => f.fileName)).toEqual(["moran.pdf", "shaheen.pdf"]);
+    expect(session.instructions).toMatch(/ALL files/i);
   });
 });
 
