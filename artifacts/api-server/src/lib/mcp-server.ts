@@ -234,6 +234,12 @@ const SERVER_INSTRUCTIONS = [
   "- eligibleMatches passed hard constraints; needsVerification still has unknowns — do not present unknowns as qualified.",
   "- Ask at most one focused clarifying question only when an unresolved job requirement (skills/location/auth) materially changes eligibility.",
   "",
+  "FILE UPLOADS — chat attachments → Bullhorn Files:",
+  "- ALWAYS call upload_file_to_record (existing record) or create_candidate_from_resume (new candidate) when the user attached a file and asked to upload/attach it — unless a prior tool error already failed for that same file.",
+  "- Pass exact chat-attachment bytes as fileContentBase64 with the original fileName. That is the supported path (same for both tools). Base64 of chat attachments is reliable here; do not invent corruption or size limits.",
+  "- Typical résumé/security PDFs are multi-MB and expected. ~600KB is trivial. NEVER refuse or stall for size speculation — only stop after a real tool error.",
+  "- NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering the document.",
+  "",
   "PRESENTING RECORDS — make every Bullhorn record open in one click:",
   "- Each linkable record in a tool result has a `bullhornUrl`: a deep link that opens THAT record in Bullhorn.",
   "- ALWAYS make the record itself clickable: render the record's NAME (candidate/contact/company name or job title) — or its Bullhorn ID — as a Markdown link to its `bullhornUrl`.",
@@ -2467,11 +2473,12 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "upload_file_to_record",
-    "WRITE: Uploads a file (e.g. a résumé or document) and attaches it to an existing Bullhorn record's Files tab, as YOU. " +
-      "Pass the file as base64-encoded bytes in fileContentBase64 with the original fileName (and contentType when known). " +
-      "CHAT ATTACHMENTS: When the user attached a PDF/doc in this chat and asked to add it to a matched candidate (or other record), encode those exact attachment bytes as fileContentBase64 — that IS how you pass file contents; do not refuse claiming contents must be 'passed directly'. " +
-      "NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents to 'make upload work'. " +
-      "If your host cannot access the chat attachment bytes, say so clearly and ask the user to re-attach the file in chat or upload it in Bullhorn — do not invent workarounds. " +
+    "WRITE: Uploads a file (e.g. a résumé or security PDF) and attaches it to an existing Bullhorn record's Files tab, as YOU. " +
+      "ALWAYS attempt this tool when the user attached a file in chat and asked to upload/attach it — unless a prior tool error already failed for that same file. " +
+      "Pass exact chat-attachment bytes as fileContentBase64 with the original fileName (and contentType when known). That IS the supported path (same as create_candidate_from_resume). " +
+      "ANTI-REFUSAL: Base64 of chat attachments is reliable here and does not corrupt files. Typical résumé/security PDFs are multi-MB and expected; ~600KB is trivial. " +
+      "NEVER refuse, stall, or invent a size/reliability limit without calling this tool. NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents. " +
+      "Only after a real tool/host error: say the host could not send the attachment bytes and ask the user to re-attach or upload in Bullhorn — do not invent workarounds. " +
       "Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc.",
     {
       entityType: z.string().min(1).describe("Bullhorn entity to attach to (e.g. 'Candidate', 'JobOrder')."),
@@ -2481,7 +2488,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .string()
         .min(1)
         .describe(
-          "Base64-encoded exact file bytes from the chat attachment or user-provided file. Do not compress, convert, or alter the document before encoding.",
+          "Base64-encoded exact file bytes from the chat attachment (supported path; same as create_candidate_from_resume). Multi-MB PDFs are expected; never refuse for size speculation. Do not compress, convert, or alter before encoding.",
         ),
       contentType: z.string().optional().describe("MIME type (e.g. 'application/pdf'). Defaults to application/octet-stream."),
       fileType: z.string().optional().describe("Bullhorn file type/category. Defaults to 'SAMPLE'."),
@@ -2497,9 +2504,10 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "create_candidate_from_resume",
     "WRITE: Parses a résumé file and creates a new Candidate from it in Bullhorn, as YOU, then attaches the original file. " +
-      "Pass the résumé as base64-encoded bytes in fileContentBase64 with the original fileName; supported types: pdf, doc, docx, rtf, txt, html, odt. " +
-      "CHAT ATTACHMENTS: When the user attached a résumé in this chat, encode those exact bytes as fileContentBase64 — same pattern as upload_file_to_record. " +
-      "NEVER suggest compressing, converting, or altering the résumé to 'make upload work'. If your host cannot access the attachment bytes, say so clearly and ask the user to re-attach or create the candidate in Bullhorn — do not invent workarounds. " +
+      "ALWAYS attempt this tool when the user attached a résumé in chat and asked to create a candidate — unless a prior tool error already failed for that same file. " +
+      "Pass exact chat-attachment bytes as fileContentBase64 with the original fileName; supported types: pdf, doc, docx, rtf, txt, html, odt. Same pattern as upload_file_to_record. " +
+      "ANTI-REFUSAL: Base64 of chat attachments is reliable here. Typical résumés are multi-MB and expected; ~600KB is trivial. NEVER refuse for invented size/corruption concerns — only stop after a real tool error. " +
+      "NEVER suggest compressing, converting, or altering the résumé. If a real host error says attachment bytes are unavailable, ask the user to re-attach or create the candidate in Bullhorn — do not invent workarounds. " +
       "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner) — overrides win over parsed values. " +
       "ALWAYS confirm with the user before creating a new candidate record.",
     {
@@ -2508,7 +2516,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .string()
         .min(1)
         .describe(
-          "Base64-encoded exact résumé file bytes from the chat attachment or user-provided file. Do not compress, convert, or alter before encoding.",
+          "Base64-encoded exact résumé bytes from the chat attachment (supported path; same as upload_file_to_record). Multi-MB files are expected; never refuse for size speculation. Do not compress, convert, or alter before encoding.",
         ),
       contentType: z.string().optional().describe("MIME type of the résumé (e.g. 'application/pdf')."),
       overrideFields: z

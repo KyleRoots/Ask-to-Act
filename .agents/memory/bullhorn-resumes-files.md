@@ -82,6 +82,24 @@ allocation (DoS). A blanket 25mb global limit ahead of rate limiting is a DoS
 amplification risk — don't. If résumé/file upload "fails" for big files but works
 for tiny ones, suspect the body cap first.
 
+## ChatGPT invents size/base64 corruption limits without calling the tool
+Symptom: model refuses `upload_file_to_record` / `create_candidate_from_resume` for
+chat PDFs (~600KB–few MB), claiming base64 is unreliable or over a size limit —
+**without ever calling the tool**. Our `/api/mcp` door accepts **25mb** JSON; a
+~614KB PDF (~820KB base64) is trivial server-side. No production evidence of a
+ChatGPT host hard-fail at that size when the host injects attachment bytes into
+the tool call. Community reports of base64 truncation tend to be multi-MB when
+the **model must emit** the string as tokens — a different path than chat-file
+injection.
+**Why:** speculative refusal burns the UX before we learn whether the host can
+send the bytes. Staged upload (temp fileRef) is the right fallback only after a
+**real** tool/host error (truncation, 413, empty arg) at sizes we care about —
+not as a first fix for invented limits.
+**How to apply:** keep tool + server `instructions` anti-refusal forceful (ALWAYS
+attempt unless a prior tool error failed; multi-MB expected; never invent size
+limits). If a real host error appears, capture the exact error text before
+building staged upload.
+
 ## REST rate limit bites during probing
 Bullhorn REST is **120 requests / 60s** (`RateLimit-Limit: 120; w=60`). Bursty probing
 exhausts it and the MCP endpoint then returns an **empty body with no SSE `data:` line**
