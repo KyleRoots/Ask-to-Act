@@ -237,15 +237,7 @@ const memoDerivedUiBase = new Map<string, string | null>();
  * cls45.bullhornstaffing.com). Returns null when it cannot be determined, in
  * which case deep links are simply omitted.
  */
-async function resolveUiBaseUrl(): Promise<string | null> {
-  const configured = process.env.BULLHORN_UI_BASE_URL?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
-  let restUrl: string;
-  try {
-    restUrl = (await getSession()).restUrl;
-  } catch {
-    return null;
-  }
+function deriveUiBaseFromRestUrl(restUrl: string): string | null {
   const memo = memoDerivedUiBase.get(restUrl);
   if (memo !== undefined) return memo;
   let base: string | null = null;
@@ -258,6 +250,41 @@ async function resolveUiBaseUrl(): Promise<string | null> {
   }
   memoDerivedUiBase.set(restUrl, base);
   return base;
+}
+
+async function resolveUiBaseUrl(): Promise<string | null> {
+  const configured = process.env.BULLHORN_UI_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  let restUrl: string;
+  try {
+    restUrl = (await getSession()).restUrl;
+  } catch {
+    return null;
+  }
+  return deriveUiBaseFromRestUrl(restUrl);
+}
+
+/**
+ * Deep link for a linkable Bullhorn record, or null when the entity is not
+ * UI-linkable / the swimlane UI host cannot be derived. Prefer passing the
+ * caller's write-session restUrl so links work without the shared read session.
+ */
+function bullhornUrlForEntity(
+  entity: string,
+  id: number,
+  restUrl?: string,
+): string | null {
+  if (!UI_LINKABLE_ENTITIES.has(entity) || !Number.isFinite(id) || id <= 0) {
+    return null;
+  }
+  const configured = process.env.BULLHORN_UI_BASE_URL?.trim();
+  const base = configured
+    ? configured.replace(/\/+$/, "")
+    : restUrl
+      ? deriveUiBaseFromRestUrl(restUrl)
+      : null;
+  if (!base) return null;
+  return `${base}/BullhornStaffing/OpenWindow.cfm?Entity=${entity}&id=${id}`;
 }
 
 /**
@@ -4797,7 +4824,12 @@ export async function uploadFileToRecord(
     fileType?: string;
     description?: string;
   },
-): Promise<{ fileId: number; entityType: string; entityId: number }> {
+): Promise<{
+  fileId: number;
+  entityType: string;
+  entityId: number;
+  bullhornUrl: string | null;
+}> {
   const entry = resolveEntity(args.entityType);
   const bytes = args.fileBytes
     ? args.fileBytes
@@ -4836,7 +4868,16 @@ export async function uploadFileToRecord(
     `${path}?${qs.toString()}`,
     { body: form },
   )) as { fileId?: number };
-  return { fileId: data.fileId ?? 0, entityType: entry.canonical, entityId: args.entityId };
+  return {
+    fileId: data.fileId ?? 0,
+    entityType: entry.canonical,
+    entityId: args.entityId,
+    bullhornUrl: bullhornUrlForEntity(
+      entry.canonical,
+      args.entityId,
+      session.restUrl,
+    ),
+  };
 }
 
 /** Best-effort MIME from filename when the caller/staging row has none. */
@@ -4878,7 +4919,12 @@ export async function createCandidateFromResume(
     contentType?: string;
     overrideFields?: Record<string, unknown>;
   },
-): Promise<{ candidateId: number; fileId?: number; parsedName?: string }> {
+): Promise<{
+  candidateId: number;
+  fileId?: number;
+  parsedName?: string;
+  bullhornUrl: string | null;
+}> {
   const format = resumeFormatFromName(args.fileName);
   const bytes = args.fileBytes
     ? args.fileBytes
@@ -4960,5 +5006,6 @@ export async function createCandidateFromResume(
     candidateId,
     fileId,
     parsedName: typeof body.name === "string" ? body.name : undefined,
+    bullhornUrl: bullhornUrlForEntity("Candidate", candidateId, session.restUrl),
   };
 }

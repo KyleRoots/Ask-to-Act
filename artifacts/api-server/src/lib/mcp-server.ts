@@ -249,6 +249,7 @@ const SERVER_INSTRUCTIONS = [
   "- Base64 of chat attachments is reliable here when the host injects bytes; do not invent corruption or size limits. Typical résumé/security PDFs are multi-MB and expected. ~600KB is trivial.",
   "- NEVER invent size/corruption excuses instead of create_file_upload_link. NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering the document.",
   "- Honest UX: until the host can pass bytes, one browser drop on uploadUrl is required (chat drop does not replace it).",
+  "- After upload_file_to_record / create_candidate_from_resume success: render the target record NAME (or ID) as a Markdown link to its bullhornUrl; for multiple files, link each.",
   "",
   "PRESENTING RECORDS — make every Bullhorn record open in one click:",
   "- Each linkable record in a tool result has a `bullhornUrl`: a deep link that opens THAT record in Bullhorn.",
@@ -2516,7 +2517,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "create_file_upload_link",
-    "WRITE helper: Creates a short-lived staged upload (fileRef + one-time uploadUrl) so ChatGPT/Cursor can attach chat PDFs without inline base64. " +
+    "WRITE helper: Creates a short-lived staged upload (fileRef + one-time uploadUrl) so hosts can attach chat PDFs without inline base64. " +
       "Chat attachments are for matching/context only — hosts usually cannot inject bytes; the uploadUrl browser drop is the real upload. " +
       "For multiple files, pass fileNames once so the user gets a SINGLE multi-drop page (not one link per file). " +
       "After the user uploads via uploadUrl, call upload_file_to_record or create_candidate_from_resume with each returned fileRef (omit fileContentBase64). " +
@@ -2554,7 +2555,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "If the host cannot inject bytes: create_file_upload_link → user drops ONCE on uploadUrl → this tool with fileRef. Chat attachment alone is not the Bullhorn upload. " +
       "ANTI-REFUSAL: Base64 of chat attachments is reliable when the host injects bytes; multi-MB PDFs are expected; ~600KB is trivial. " +
       "NEVER refuse, stall, or invent a size/reliability/corruption limit without calling this tool (or create_file_upload_link first). NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents. " +
-      "Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc.",
+      "Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc. " +
+      "DISPLAY RULE (REQUIRED): success includes bullhornUrl — render the target record NAME (or entityId) as a Markdown link to it; for batch/multi, link each.",
     {
       entityType: z.string().min(1).describe("Bullhorn entity to attach to (e.g. 'Candidate', 'JobOrder')."),
       entityId: z.number().int().positive().describe("ID of the record to attach the file to."),
@@ -2612,7 +2614,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "ANTI-REFUSAL: Base64 of chat attachments is reliable when the host injects bytes. Typical résumés are multi-MB and expected; ~600KB is trivial. NEVER refuse for invented size/corruption concerns — only stop after a real tool error (then use create_file_upload_link). " +
       "NEVER suggest compressing, converting, or altering the résumé. " +
       "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner) — overrides win over parsed values. " +
-      "ALWAYS confirm with the user before creating a new candidate record.",
+      "ALWAYS confirm with the user before creating a new candidate record. " +
+      "DISPLAY RULE (REQUIRED): success includes bullhornUrl — render parsedName (or candidateId) as a Markdown link to it.",
     {
       fileName: z.string().min(1).describe("Original résumé file name including extension (drives the parse format) — keep the user's name; do not rename to force a format change."),
       fileContentBase64: z

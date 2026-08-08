@@ -257,8 +257,8 @@ function uploadPageHtml(opts: {
   const hint =
     opts.state === "awaiting"
       ? multi
-        ? `Drop all ${opts.slots!.length} files here in one go (max ${maxLabel} each). Chat attachments are not the Bullhorn upload — this page is. Do not compress or convert. Then return to ChatGPT/Cursor.`
-        : `Drop the exact PDF or document here (max ${maxLabel}). Chat attachments are for matching only — this one drop is the real Bullhorn upload. Do not compress or convert. Then return to ChatGPT/Cursor.`
+        ? `Drop all ${opts.slots!.length} files here in one go (max ${maxLabel} each). Chat attachments are not the Bullhorn upload — this page is. Do not compress or convert. Then return to your AI tool.`
+        : `Drop the exact PDF or document here (max ${maxLabel}). Chat attachments are for matching only — this one drop is the real Bullhorn upload. Do not compress or convert. Then return to your AI tool.`
       : opts.state === "ready"
         ? `Saved${opts.fileName ? ` as ${escapeHtml(opts.fileName)}` : ""}. Return to chat — the assistant will attach with fileRef.`
         : opts.state === "expired"
