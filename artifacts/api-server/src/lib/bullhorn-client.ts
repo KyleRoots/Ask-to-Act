@@ -8,6 +8,10 @@ import {
   TRANSIENT_HTTP_MAX_RETRIES,
   transientHttpBackoffMs,
 } from "./bullhorn-transient.js";
+import {
+  DEFAULT_CANDIDATE_FILE_TYPES,
+  resolveBullhornFileType,
+} from "./resolve-file-type.js";
 // pdf-parse and mammoth are loaded via dynamic import inside the extraction
 // helper — avoids CJS/ESM default-export interop issues at module startup.
 
@@ -4801,6 +4805,85 @@ async function fileFetch(
 }
 
 /**
+ * Best-effort discovery of this firm's Candidate Files-tab File Type labels.
+ * File types are admin settings, not entity meta picklists — try a few known
+ * options/settings doors and fail open to the Myticas-like default allowlist.
+ * Cached per restUrl host for the process lifetime.
+ */
+const fileTypeOptionsByRestHost = new Map<string, string[] | null>();
+
+async function discoverCandidateFileTypes(
+  session: BullhornWriteSession,
+): Promise<readonly string[] | null> {
+  let host: string;
+  try {
+    host = new URL(session.restUrl).host;
+  } catch {
+    return null;
+  }
+  if (fileTypeOptionsByRestHost.has(host)) {
+    return fileTypeOptionsByRestHost.get(host) ?? null;
+  }
+
+  const tryPaths = [
+    "options/FileType",
+    "options/CandidateFileType",
+    "settings/fileTypes",
+  ];
+  for (const path of tryPaths) {
+    try {
+      const url = new URL(path, session.restUrl);
+      url.searchParams.set("BhRestToken", session.BhRestToken);
+      url.searchParams.set("count", "100");
+      const res = await fetch(url.toString());
+      if (!res.ok) continue;
+      const json = (await res.json()) as unknown;
+      const labels = extractFileTypeLabels(json);
+      if (labels.length > 0) {
+        fileTypeOptionsByRestHost.set(host, labels);
+        return labels;
+      }
+    } catch {
+      // fail open
+    }
+  }
+  fileTypeOptionsByRestHost.set(host, null);
+  return null;
+}
+
+function extractFileTypeLabels(json: unknown): string[] {
+  if (!json || typeof json !== "object") return [];
+  const root = json as Record<string, unknown>;
+  const candidates: unknown[] = [];
+  if (Array.isArray(root.data)) candidates.push(...root.data);
+  if (Array.isArray(root.options)) candidates.push(...root.options);
+  if (Array.isArray(root.fileTypes)) candidates.push(...root.fileTypes);
+  if (Array.isArray(json)) candidates.push(...json);
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of candidates) {
+    let label: string | null = null;
+    if (typeof item === "string") label = item.trim();
+    else if (item && typeof item === "object") {
+      const o = item as Record<string, unknown>;
+      for (const key of ["label", "value", "name", "type", "fileType"]) {
+        if (typeof o[key] === "string" && (o[key] as string).trim()) {
+          label = (o[key] as string).trim();
+          break;
+        }
+      }
+    }
+    if (!label || label.toUpperCase() === "SAMPLE") continue;
+    const k = label.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(label);
+  }
+  return out;
+}
+
+/**
  * Uploads a file (e.g. a résumé) and attaches it to an existing Bullhorn record
  * via the multipart Files API (PUT file/{Entity}/{id}/raw). Provide either
  * `fileContentBase64` or pre-decoded `fileBytes` (from staged fileRef).
@@ -4820,7 +4903,7 @@ export async function uploadFileToRecord(
     fileContentBase64?: string;
     fileBytes?: Buffer;
     contentType?: string;
-    /** Bullhorn category/purpose (e.g. Resume, Cover). Sent as query `type`. */
+    /** Bullhorn category/purpose (e.g. Resume, Screening). Sent as query `type`. */
     fileType?: string;
     description?: string;
   },
@@ -4829,6 +4912,8 @@ export async function uploadFileToRecord(
   entityType: string;
   entityId: number;
   bullhornUrl: string | null;
+  /** Category written to Bullhorn Files tab (`type=`), after auto-map / explicit. */
+  fileType: string | null;
 }> {
   const entry = resolveEntity(args.entityType);
   const bytes = args.fileBytes
@@ -4847,17 +4932,25 @@ export async function uploadFileToRecord(
   const form = new FormData();
   form.append("file", blob, args.fileName);
 
+  const discovered = await discoverCandidateFileTypes(session);
+  const availableTypes = discovered ?? DEFAULT_CANDIDATE_FILE_TYPES;
+  const resolvedType = resolveBullhornFileType({
+    fileName: args.fileName,
+    description: args.description,
+    fileType: args.fileType,
+    availableTypes,
+  });
+
   // Multipart MUST use the /raw suffix. Query fileType is always "SAMPLE" per
-  // Bullhorn docs; optional category goes in `type` (e.g. Resume).
+  // Bullhorn docs; optional category goes in `type` (e.g. Resume, Screening).
   const path = `file/${entry.canonical}/${args.entityId}/raw`;
   const qs = new URLSearchParams();
   qs.set("externalID", `asktoact-${Date.now()}`);
   qs.set("fileType", "SAMPLE");
   qs.set("name", args.fileName);
   if (contentType) qs.set("contentType", contentType);
-  const category = args.fileType?.trim();
-  if (category && category.toUpperCase() !== "SAMPLE") {
-    qs.set("type", category);
+  if (resolvedType && resolvedType.toUpperCase() !== "SAMPLE") {
+    qs.set("type", resolvedType);
   }
   if (args.description) qs.set("description", args.description);
 
@@ -4877,6 +4970,7 @@ export async function uploadFileToRecord(
       args.entityId,
       session.restUrl,
     ),
+    fileType: resolvedType,
   };
 }
 

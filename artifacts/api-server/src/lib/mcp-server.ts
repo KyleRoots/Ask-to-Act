@@ -2555,6 +2555,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "If the host cannot inject bytes: create_file_upload_link → user drops ONCE on uploadUrl → this tool with fileRef. Chat attachment alone is not the Bullhorn upload. " +
       "ANTI-REFUSAL: Base64 of chat attachments is reliable when the host injects bytes; multi-MB PDFs are expected; ~600KB is trivial. " +
       "NEVER refuse, stall, or invent a size/reliability/corruption limit without calling this tool (or create_file_upload_link first). NEVER suggest compressing, converting, re-exporting, OCR-ing, or otherwise altering PDFs or signed documents. " +
+      "FILE TYPE: map closest Files-tab type from fileName/description (security→Screening, resume→Resume); explicit fileType wins. " +
       "Supported targets: Candidate, ClientContact, ClientCorporation, JobOrder, Placement, etc. " +
       "DISPLAY RULE (REQUIRED): success includes bullhornUrl — render the target record NAME (or entityId) as a Markdown link to it; for batch/multi, link each.",
     {
@@ -2578,7 +2579,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .string()
         .optional()
         .describe(
-          "Bullhorn file category/purpose (e.g. 'Resume', 'Cover'). Sent as type=; fileType query is always SAMPLE per Bullhorn.",
+          "Optional Files-tab category (e.g. Resume, Screening). Explicit wins; else auto-mapped. Sent as type=; fileType query is SAMPLE.",
         ),
       description: z.string().optional().describe("Optional file description."),
     },
