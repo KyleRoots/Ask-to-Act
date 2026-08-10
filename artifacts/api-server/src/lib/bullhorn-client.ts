@@ -4304,7 +4304,8 @@ export async function notifyUsers(
   const taskId = await createEntityRecord(session, "Task", body);
 
   // Additional recipients become secondaryOwners via the to-many association
-  // endpoint (bodyless POST), so the task appears on every named user's list.
+  // endpoint (bodyless PUT — Bullhorn ASSOCIATE verb), so the task appears on
+  // every named user's list.
   // Non-atomic: the Task already exists, so on association failure we return a
   // partial result (with taskId + a warning) rather than throwing and hiding
   // the fact that the task was created.
@@ -4314,7 +4315,7 @@ export async function notifyUsers(
     try {
       await writeFetch(
         session,
-        "POST",
+        "PUT",
         `entity/Task/${taskId}/secondaryOwners/${secondaryIds.join(",")}`,
         undefined,
       );
@@ -4403,7 +4404,9 @@ export async function createTearsheet(
 
 /**
  * Adds candidates to a tearsheet via the to-many association endpoint
- * (POST entity/Tearsheet/{id}/candidates/{ids}). Association writes carry no body.
+ * (PUT entity/Tearsheet/{id}/candidates/{ids}). Bullhorn uses PUT to ASSOCIATE
+ * and DELETE to disassociate; POST on this path is an entity-update verb and
+ * is rejected. Association writes carry no body.
  */
 export async function addCandidatesToTearsheet(
   session: BullhornWriteSession,
@@ -4415,7 +4418,7 @@ export async function addCandidatesToTearsheet(
   }
   await writeFetch(
     session,
-    "POST",
+    "PUT",
     `entity/Tearsheet/${tearsheetId}/candidates/${candidateIds.join(",")}`,
     undefined,
   );
