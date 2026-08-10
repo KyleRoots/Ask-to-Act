@@ -53,8 +53,11 @@ import {
   createAppointment,
   updateAppointment,
   createTearsheet,
+  addRecordsToTearsheet,
+  removeRecordsFromTearsheet,
   addCandidatesToTearsheet,
   removeCandidatesFromTearsheet,
+  TEARSHEET_MEMBER_ENTITIES,
   createPlacement,
   createSendout,
   updatePlacement,
@@ -393,6 +396,8 @@ export const MCP_TOOL_PRIORITY: readonly string[] = [
   "create_tearsheet",
   "add_candidates_to_tearsheet",
   "remove_candidates_from_tearsheet",
+  "add_records_to_tearsheet",
+  "remove_records_from_tearsheet",
   "create_support_ticket",
   // Destructive last
   "delete_entity",
@@ -2390,8 +2395,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "create_tearsheet",
-    "WRITE: Creates a Tearsheet (a saved shortlist of candidates) in Bullhorn, owned by YOU. " +
-      "Blocks if you already own a tearsheet with the same name. After creating, use add_candidates_to_tearsheet to populate it.",
+    "WRITE: Creates a Tearsheet, owned by YOU. Duplicate name blocked. Then add_candidates_to_tearsheet/add_records_to_tearsheet.",
     {
       name: z.string().min(1).describe("Tearsheet name."),
       description: z.string().optional().describe("Optional description."),
@@ -2406,8 +2410,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "add_candidates_to_tearsheet",
-    "WRITE: Adds one or more candidates to an existing Tearsheet, as YOU. " +
-      "Resolve candidate IDs via search first. Max 50 candidate IDs per call.",
+    "WRITE: Adds candidates to a Tearsheet, as YOU. Max 50.",
     {
       tearsheetId: z.number().int().positive().describe("Bullhorn Tearsheet ID."),
       candidateIds: z.array(z.number().int().positive()).min(1).max(50).describe("Candidate IDs to add (max 50)."),
@@ -2421,7 +2424,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "remove_candidates_from_tearsheet",
-    "WRITE: Removes one or more candidates from a Tearsheet, as YOU. Max 50 candidate IDs per call.",
+    "WRITE: Removes candidates from a Tearsheet, as YOU. Max 50.",
     {
       tearsheetId: z.number().int().positive().describe("Bullhorn Tearsheet ID."),
       candidateIds: z.array(z.number().int().positive()).min(1).max(50).describe("Candidate IDs to remove (max 50)."),
@@ -2431,6 +2434,60 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         const session = await resolveWriteSession();
         return removeCandidatesFromTearsheet(session, tearsheetId, candidateIds);
       }),
+  );
+
+  const tearsheetMemberEnum = z.enum(
+    TEARSHEET_MEMBER_ENTITIES as unknown as [string, ...string[]],
+  );
+
+  writeTool(
+    "add_records_to_tearsheet",
+    "WRITE: Adds Tearsheet members (PUT). entityType: Candidate|ClientContact|JobOrder|Lead|Opportunity. Max 50",
+    {
+      tearsheetId: z.number().int().positive().describe("Bullhorn Tearsheet ID."),
+      entityType: tearsheetMemberEnum.describe(
+        "Member type: Candidate, ClientContact, JobOrder, Lead, or Opportunity.",
+      ),
+      ids: z
+        .array(z.number().int().positive())
+        .min(1)
+        .max(50)
+        .describe("Record IDs to add (max 50)."),
+    },
+    async ({ tearsheetId, entityType, ids }) =>
+      runWriteTool(
+        "add_records_to_tearsheet",
+        { tearsheetId, entityType, count: ids.length },
+        async () => {
+          const session = await resolveWriteSession();
+          return addRecordsToTearsheet(session, tearsheetId, entityType, ids);
+        },
+      ),
+  );
+
+  writeTool(
+    "remove_records_from_tearsheet",
+    "WRITE: Removes Tearsheet members (DELETE). Same entityType as add_records_to_tearsheet. Max 50",
+    {
+      tearsheetId: z.number().int().positive().describe("Bullhorn Tearsheet ID."),
+      entityType: tearsheetMemberEnum.describe(
+        "Member type to disassociate.",
+      ),
+      ids: z
+        .array(z.number().int().positive())
+        .min(1)
+        .max(50)
+        .describe("Record IDs to remove (max 50)."),
+    },
+    async ({ tearsheetId, entityType, ids }) =>
+      runWriteTool(
+        "remove_records_from_tearsheet",
+        { tearsheetId, entityType, count: ids.length },
+        async () => {
+          const session = await resolveWriteSession();
+          return removeRecordsFromTearsheet(session, tearsheetId, entityType, ids);
+        },
+      ),
   );
 
   writeTool(

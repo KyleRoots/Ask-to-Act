@@ -4379,6 +4379,48 @@ export async function createAppointment(
 
 // ── Tearsheet create + membership ─────────────────────────────────────────
 
+/**
+ * Tearsheet TO_MANY membership associations exposed by Bullhorn meta (Myticas
+ * cls45 / describe_entity Tearsheet). Path segment is the association field
+ * name on Tearsheet (e.g. clientContacts), not the entity canonical name.
+ * Excludes `users` (sheet sharing) and `recipients` (TearsheetRecipient).
+ */
+export const TEARSHEET_MEMBER_ENTITIES = [
+  "Candidate",
+  "ClientContact",
+  "JobOrder",
+  "Lead",
+  "Opportunity",
+] as const;
+
+export type TearsheetMemberEntity = (typeof TEARSHEET_MEMBER_ENTITIES)[number];
+
+const TEARSHEET_MEMBER_ASSOC: Record<TearsheetMemberEntity, string> = {
+  Candidate: "candidates",
+  ClientContact: "clientContacts",
+  JobOrder: "jobOrders",
+  Lead: "leads",
+  Opportunity: "opportunities",
+};
+
+const TEARSHEET_MEMBER_SET = new Set<string>(TEARSHEET_MEMBER_ENTITIES);
+
+function resolveTearsheetMemberAssoc(entityType: string): {
+  entity: TearsheetMemberEntity;
+  assoc: string;
+} {
+  const entry = resolveEntity(entityType);
+  if (!TEARSHEET_MEMBER_SET.has(entry.canonical)) {
+    throw new BullhornFieldValidationError(
+      `Tearsheet membership is not supported for ${entry.canonical}. ` +
+        `Supported entity types: ${TEARSHEET_MEMBER_ENTITIES.join(", ")}. ` +
+        "Note: Tearsheet `users` (sharing) and `recipients` are not shortlist membership.",
+    );
+  }
+  const entity = entry.canonical as TearsheetMemberEntity;
+  return { entity, assoc: TEARSHEET_MEMBER_ASSOC[entity] };
+}
+
 export async function createTearsheet(
   session: BullhornWriteSession,
   args: { name: string; description?: string; additionalFields?: Record<string, unknown> },
@@ -4403,26 +4445,67 @@ export async function createTearsheet(
 }
 
 /**
- * Adds candidates to a tearsheet via the to-many association endpoint
- * (PUT entity/Tearsheet/{id}/candidates/{ids}). Bullhorn uses PUT to ASSOCIATE
+ * Adds records to a tearsheet via the to-many association endpoint
+ * (PUT entity/Tearsheet/{id}/{assoc}/{ids}). Bullhorn uses PUT to ASSOCIATE
  * and DELETE to disassociate; POST on this path is an entity-update verb and
  * is rejected. Association writes carry no body.
  */
+export async function addRecordsToTearsheet(
+  session: BullhornWriteSession,
+  tearsheetId: number,
+  entityType: string,
+  ids: number[],
+): Promise<{
+  tearsheetId: number;
+  entityType: TearsheetMemberEntity;
+  association: string;
+  added: number[];
+}> {
+  if (ids.length === 0) {
+    throw new BullhornFieldValidationError("No ids provided to add to the tearsheet.");
+  }
+  const { entity, assoc } = resolveTearsheetMemberAssoc(entityType);
+  await writeFetch(
+    session,
+    "PUT",
+    `entity/Tearsheet/${tearsheetId}/${assoc}/${ids.join(",")}`,
+    undefined,
+  );
+  return { tearsheetId, entityType: entity, association: assoc, added: ids };
+}
+
+export async function removeRecordsFromTearsheet(
+  session: BullhornWriteSession,
+  tearsheetId: number,
+  entityType: string,
+  ids: number[],
+): Promise<{
+  tearsheetId: number;
+  entityType: TearsheetMemberEntity;
+  association: string;
+  removed: number[];
+}> {
+  if (ids.length === 0) {
+    throw new BullhornFieldValidationError("No ids provided to remove from the tearsheet.");
+  }
+  const { entity, assoc } = resolveTearsheetMemberAssoc(entityType);
+  await writeFetch(
+    session,
+    "DELETE",
+    `entity/Tearsheet/${tearsheetId}/${assoc}/${ids.join(",")}`,
+    undefined,
+  );
+  return { tearsheetId, entityType: entity, association: assoc, removed: ids };
+}
+
+/** Candidate-specific wrapper — same PUT associate path as addRecordsToTearsheet. */
 export async function addCandidatesToTearsheet(
   session: BullhornWriteSession,
   tearsheetId: number,
   candidateIds: number[],
 ): Promise<{ tearsheetId: number; added: number[] }> {
-  if (candidateIds.length === 0) {
-    throw new BullhornFieldValidationError("No candidateIds provided to add to the tearsheet.");
-  }
-  await writeFetch(
-    session,
-    "PUT",
-    `entity/Tearsheet/${tearsheetId}/candidates/${candidateIds.join(",")}`,
-    undefined,
-  );
-  return { tearsheetId, added: candidateIds };
+  const result = await addRecordsToTearsheet(session, tearsheetId, "Candidate", candidateIds);
+  return { tearsheetId: result.tearsheetId, added: result.added };
 }
 
 export async function removeCandidatesFromTearsheet(
@@ -4430,16 +4513,13 @@ export async function removeCandidatesFromTearsheet(
   tearsheetId: number,
   candidateIds: number[],
 ): Promise<{ tearsheetId: number; removed: number[] }> {
-  if (candidateIds.length === 0) {
-    throw new BullhornFieldValidationError("No candidateIds provided to remove from the tearsheet.");
-  }
-  await writeFetch(
+  const result = await removeRecordsFromTearsheet(
     session,
-    "DELETE",
-    `entity/Tearsheet/${tearsheetId}/candidates/${candidateIds.join(",")}`,
-    undefined,
+    tearsheetId,
+    "Candidate",
+    candidateIds,
   );
-  return { tearsheetId, removed: candidateIds };
+  return { tearsheetId: result.tearsheetId, removed: result.removed };
 }
 
 // ── Placement create / update (sensitive) ─────────────────────────────────

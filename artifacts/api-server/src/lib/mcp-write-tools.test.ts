@@ -23,6 +23,8 @@ const NEW_WRITE_TOOLS = [
   "create_tearsheet",
   "add_candidates_to_tearsheet",
   "remove_candidates_from_tearsheet",
+  "add_records_to_tearsheet",
+  "remove_records_from_tearsheet",
   "create_placement",
   "update_placement",
   "upload_file_to_record",
