@@ -135,6 +135,17 @@ keeps coverage well inside that window.
 **502/503/504** with bounded backoff (see `bullhorn-transient.ts`) so a single
 gateway timeout does not mark a department `failed`.
 
+**Network-layer failures:** when `fetch` *rejects* instead of answering there is
+no status or body to classify, so the status rules above never see it. Those
+rejections (`fetch failed` with `ECONNRESET` / `EAI_AGAIN` / socket timeout on
+`cause`) retry on their own bounded budget via `fetchWithTransientRetry`, since
+the request never reached Bullhorn's application tier — same class as a 502. On
+exhaustion the cause is folded into `Error.message`, because sync persists only
+the message into `error_summary` and a bare `fetch failed` is not diagnosable.
+`AbortError` is excluded so wall-clock cancellation still wins. Auth **token
+exchanges are deliberately not retried**: Bullhorn rotates refresh tokens, so
+retrying after a lost response risks burning the token.
+
 Bullhorn also answers **500** when its own REST tier cannot reach an internal
 backend (`Could not access HTTP invoker remote service at
 [http://localhost:8083/data-services-4.0/sr/SelectBuilder]; nested exception is
