@@ -22,9 +22,10 @@ equivalent (a Task on the user's list) and say so plainly in the tool copy.
 - `Task` has `owner` (TO_ONE CorporateUser), `secondaryOwners` (TO_MANY
   CorporateUser), `childTaskOwners` (TO_MANY), and `notificationMinutes`
   (Integer). Multi-user alerts = owner + secondaryOwners.
-- TO_MANY associations are set AFTER create via a **bodyless** POST
-  `entity/Task/{id}/secondaryOwners/{csvIds}` (same pattern as tearsheet
-  membership). They are not reliably accepted inside the create body.
+- TO_MANY associations are set AFTER create via a **bodyless** PUT
+  `entity/Task/{id}/secondaryOwners/{csvIds}` (Bullhorn ASSOCIATE verb; same
+  pattern as tearsheet membership). They are not reliably accepted inside the
+  create body.
 - The create-then-associate sequence is non-atomic: if the association fails the
   Task already exists, so return a partial result (taskId + warning), don't throw
   and hide the created task.
