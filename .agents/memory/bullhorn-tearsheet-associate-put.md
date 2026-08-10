@@ -1,6 +1,6 @@
 ---
-name: Tearsheet candidate add needs PUT
-description: add_candidates_to_tearsheet failed in prod because we used POST (entity update) instead of PUT (ASSOCIATE) on the to-many path.
+name: Tearsheet membership = PUT associate (multi-entity)
+description: Tearsheet add/remove uses PUT associate / DELETE disassociate on TO_MANY paths; supports candidates, contacts, jobs, leads, opportunities from Tearsheet meta.
 ---
 
 # Tearsheet membership = PUT associate, not POST
@@ -28,3 +28,28 @@ Memory previously documented the wrong verb (`POST|DELETE`).
 
 **Fix:** switch add to PUT (also Task `secondaryOwners` association — same verb).
 After deploy, Runa (or anyone) can re-run `add_candidates_to_tearsheet` on 1650.
+
+## Multi-entity membership (verified via describe_entity Tearsheet, Myticas cls45)
+
+Tearsheet TO_MANY shortlist associations (path segment → entity):
+
+| Association field | Entity | Count scalar |
+|---|---|---|
+| `candidates` | Candidate | `candidateCount` |
+| `clientContacts` | ClientContact | `clientContactCount` |
+| `jobOrders` | JobOrder | `jobOrderCount` |
+| `leads` | Lead | `leadCount` |
+| `opportunities` | Opportunity | `opportunityCount` |
+
+Also on meta but **not** treated as shortlist membership tools:
+
+- `users` → CorporateUser (sheet sharing / collaborators)
+- `recipients` → TearsheetRecipient (delivery recipients)
+
+MCP tools:
+
+- `add_candidates_to_tearsheet` / `remove_candidates_from_tearsheet` — candidate convenience wrappers
+- `add_records_to_tearsheet` / `remove_records_from_tearsheet` — `entityType` + `ids` (max 50) for all five member types above
+
+Client helpers: `addRecordsToTearsheet` / `removeRecordsFromTearsheet` with allowlist
+`TEARSHEET_MEMBER_ENTITIES`. Always PUT for add, DELETE for remove; no body.
