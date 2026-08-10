@@ -4,6 +4,7 @@ import { logger } from "./logger.js";
 import { cacheGet, cacheSet } from "./cache.js";
 import { classifySubmissionStage } from "./submission-status.js";
 import {
+  fetchWithTransientRetry,
   isTransientBullhornResponse,
   TRANSIENT_HTTP_MAX_RETRIES,
   transientHttpBackoffMs,
@@ -25,6 +26,21 @@ function sleep(ms: number): Promise<void> {
 /** Returns the number of ms to wait before retry attempt n (1-indexed, exponential). */
 function backoffMs(attempt: number): number {
   return Math.min(1000 * Math.pow(2, attempt - 1), 8000); // 1s, 2s, 4s, 8s cap
+}
+
+/**
+ * GETs a Bullhorn read URL with the shared transient-network retry policy, so a
+ * rejected `fetch` (DNS blip, connection reset, socket timeout) does not fail a
+ * long note-snapshot walk the way a gateway 502 already doesn't.
+ */
+function fetchBullhornRead(url: string): Promise<Response> {
+  return fetchWithTransientRetry(() => fetch(url, { redirect: "follow" }), {
+    onRetry: ({ attempt, delayMs, reason }) =>
+      logger.warn(
+        { attempt, delay: delayMs, reason },
+        "Bullhorn: network error before response — backing off",
+      ),
+  });
 }
 
 /**
@@ -94,7 +110,7 @@ async function bullhornFetch(
     url.searchParams.set(k, String(v));
   }
 
-  const res = await fetch(url.toString(), { redirect: "follow" });
+  const res = await fetchBullhornRead(url.toString());
 
   if (res.status === 401 && retries > 0) {
     logger.warn("Bullhorn: 401 received, re-authenticating");
@@ -528,7 +544,7 @@ async function searchEntity(
       url.searchParams.set("count", String(count));
       url.searchParams.set("start", String(start));
 
-      const res = await fetch(url.toString(), { redirect: "follow" });
+      const res = await fetchBullhornRead(url.toString());
 
       if (res.status === 401 && authRetries > 0) {
         logger.warn("Bullhorn: 401 on search, re-authenticating");
