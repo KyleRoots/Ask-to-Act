@@ -39,8 +39,37 @@ function postAdvanceSlide(): void {
   window.parent.postMessage({ type: "advanceSlide" }, targetOrigin);
 }
 
+function getActiveSlideEl(): HTMLElement | null {
+  const host = document.querySelector<HTMLElement>(".pd-slide-host[data-active='true']");
+  return host?.querySelector<HTMLElement>(".pd-slide") ?? null;
+}
+
+/** Prefer within-slide scroll; only change slides when already at the edge. */
+function handleVerticalNavKey(key: "ArrowUp" | "ArrowDown"): "navigate" | "scrolled" | "noop" {
+  const slide = getActiveSlideEl();
+  if (!slide) return "navigate";
+
+  const maxScroll = slide.scrollHeight - slide.clientHeight;
+  if (maxScroll <= 2) return "navigate";
+
+  const atTop = slide.scrollTop <= 2;
+  const atBottom = slide.scrollTop >= maxScroll - 2;
+  const step = Math.max(120, Math.floor(slide.clientHeight * 0.75));
+
+  if (key === "ArrowDown") {
+    if (atBottom) return "navigate";
+    slide.scrollBy({ top: step, behavior: "smooth" });
+    return "scrolled";
+  }
+
+  if (atTop) return "navigate";
+  slide.scrollBy({ top: -step, behavior: "smooth" });
+  return "scrolled";
+}
+
 function useSlideScrollMode() {
   useEffect(() => {
+    // Mobile/portrait: body-level scroll as a fallback. Desktop: within-slide overflow-y.
     const mq = window.matchMedia("(max-width: 767px), (orientation: portrait)");
     const apply = () => {
       document.body.classList.toggle("pd-scrollable", mq.matches);
@@ -68,12 +97,28 @@ function SlideEditor() {
 
   useEffect(() => {
     if (currentIndex === -1) return;
+    const slide = getActiveSlideEl();
+    if (slide) slide.scrollTop = 0;
+  }, [currentIndex]);
+
+  useEffect(() => {
+    if (currentIndex === -1) return;
 
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (navigationDisabledRef.current) return;
       if (event.key === " ") {
         event.preventDefault();
       }
+
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        const result = handleVerticalNavKey(event.key);
+        if (result === "scrolled") {
+          event.preventDefault();
+          return;
+        }
+        if (result === "noop") return;
+      }
+
       if ((event.key === "ArrowLeft" || event.key === "ArrowUp") && currentIndex > 0) {
         navigate(`/slide${slides[currentIndex - 1].position}`);
       }
@@ -156,11 +201,12 @@ function SlideEditor() {
   }, [currentIndex, navigate]);
 
   return (
-    <div className="select-none min-h-[100dvh]">
+    <div className="select-none h-[100dvh] max-h-[100dvh] overflow-hidden">
       {slides.map((slide, index) => (
         <div
           key={slide.id}
-          className="min-h-[100dvh]"
+          className="pd-slide-host h-[100dvh] max-h-[100dvh]"
+          data-active={index === currentIndex ? "true" : "false"}
           style={{ display: index === currentIndex ? "block" : "none" }}
         >
           <slide.Component />
@@ -222,7 +268,15 @@ function SlideViewer() {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== " ") return;
+      if (
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowDown" &&
+        event.key !== " "
+      ) {
+        return;
+      }
       if (event.key === " ") event.preventDefault();
       iframeRef.current?.contentWindow?.dispatchEvent(
         new KeyboardEvent("keydown", { key: event.key, code: event.code, bubbles: true }),
