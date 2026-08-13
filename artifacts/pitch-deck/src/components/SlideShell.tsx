@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LogoWordmark } from "./Logo";
 
 type Accent = "accent" | "gold";
@@ -27,9 +27,36 @@ export function SlideShell({
   className = "",
 }: SlideShellProps) {
   const dot = accent === "gold" ? "bg-gold" : "bg-accent";
+  const slideRef = useRef<HTMLDivElement>(null);
+  const [canScrollMore, setCanScrollMore] = useState(false);
+
+  useEffect(() => {
+    const el = slideRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const overflow = el.scrollHeight > el.clientHeight + 2;
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      setCanScrollMore(overflow && !nearBottom);
+    };
+
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener("resize", update);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   return (
-    <div className={`pd-slide relative bg-bg text-text w-full min-h-[100dvh] flex flex-col overflow-x-hidden ${className}`}>
+    <div
+      ref={slideRef}
+      className={`pd-slide relative bg-bg text-text w-full h-[100dvh] max-h-[100dvh] flex flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain ${className}`}
+    >
       {glow ? (
         <div className="absolute inset-0 pointer-events-none" aria-hidden style={{ background: glow }} />
       ) : null}
@@ -46,7 +73,7 @@ export function SlideShell({
         ) : null}
       </header>
 
-      <main className="relative z-10 pd-slide-x pd-slide-pb flex flex-col gap-[clamp(0.75rem,2vh,1.75rem)]">
+      <main className="relative z-10 pd-slide-x pd-slide-pb flex flex-col gap-[clamp(0.75rem,2vh,1.75rem)] grow">
         {title ? <div className="shrink-0">{title}</div> : null}
         {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
         {children}
@@ -56,6 +83,13 @@ export function SlideShell({
         <footer className="relative z-10 shrink-0 pd-slide-x pd-slide-pb pt-3 mt-auto border-t border-line/50">
           {footer}
         </footer>
+      ) : null}
+
+      {canScrollMore ? (
+        <div className="pd-scroll-hint" aria-hidden>
+          <span>Scroll for more</span>
+          <span className="pd-scroll-hint-chevron">↓</span>
+        </div>
       ) : null}
     </div>
   );

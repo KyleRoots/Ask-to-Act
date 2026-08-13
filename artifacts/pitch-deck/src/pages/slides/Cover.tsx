@@ -2,7 +2,7 @@ import { LogoWordmark } from "@/components/Logo";
 
 export default function Cover() {
   return (
-    <div className="pd-slide relative bg-bg text-text w-full min-h-[100dvh] flex flex-col overflow-x-hidden">
+    <div className="pd-slide relative bg-bg text-text w-full h-[100dvh] max-h-[100dvh] flex flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(79,70,229,0.22),_transparent_55%)] pointer-events-none" aria-hidden />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_rgba(56,189,248,0.14),_transparent_50%)] pointer-events-none" aria-hidden />
 

@@ -51,7 +51,7 @@ body.pd-scrollable #root {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Viewer shell at `/` keeps a fixed viewport. */
+/* Viewer shell at `/` keeps a fixed viewport; within-slide overflow handles dense content. */
 body:not(.pd-scrollable) {
   height: 100%;
   overflow: hidden;
@@ -61,10 +61,56 @@ body:not(.pd-scrollable) #root {
   height: 100%;
 }
 
+.pd-slide {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.pd-scroll-hint {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.65rem 1rem calc(0.65rem + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(11, 26, 46, 0.96) 35%, rgba(11, 26, 46, 0));
+  font-family: var(--font-display-family);
+  font-size: clamp(0.65rem, 1.1vw, 0.8rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--slide-muted);
+}
+
+.pd-scroll-hint-chevron {
+  color: var(--slide-accent);
+  animation: pd-scroll-bounce 1.4s ease-in-out infinite;
+}
+
+@keyframes pd-scroll-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
+
 .slide {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+/* /allslides export canvas: bind slide height to the 1920×1080 frame and allow inner scroll */
+.slide .pd-slide {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow-y: auto;
 }
 
 .slide-viewer {
@@ -219,7 +265,11 @@ body:not(.pd-scrollable) #root {
   }
 }
 
-/* Slide 3 (business model): tighter mobile layout, extra scroll room at bottom */
+/* Business model (dense): tighter layout + scroll room when content exceeds viewport */
+.pd-dense main {
+  padding-bottom: max(clamp(1.5rem, 4vh, 3rem), env(safe-area-inset-bottom, 0px));
+}
+
 @media (max-width: 767px) {
   .pd-dense main {
     gap: 0.65rem;
@@ -250,4 +300,90 @@ body:not(.pd-scrollable) #root {
   .pd-dense .pd-margin-row-optional {
     display: none;
   }
+}
+
+/* Laptop / 16:9 viewer heights: compress dense slide so more fits before scrolling */
+@media (max-height: 900px) {
+  .pd-dense main {
+    gap: 0.55rem;
+  }
+
+  .pd-dense .pd-h1 {
+    font-size: clamp(1.25rem, 3.8vw, 2.35rem);
+  }
+
+  .pd-dense .pd-body {
+    font-size: clamp(0.8rem, 1.35vw, 1.05rem);
+  }
+
+  .pd-dense .pd-small,
+  .pd-dense .pd-eyebrow {
+    font-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  }
+
+  .pd-dense .pd-grid-2 {
+    gap: 0.75rem;
+  }
+
+  .pd-dense .pd-pricing-col {
+    gap: 0.55rem;
+  }
+
+  .pd-dense .pd-pricing-box {
+    padding: 0.55rem 0.75rem;
+  }
+
+  .pd-dense .pd-margin-panel {
+    padding: 0.75rem 0.9rem;
+  }
+
+  .pd-dense .pd-margin-row {
+    margin-top: 0.45rem;
+    padding-bottom: 0.45rem;
+  }
+}
+
+@media (max-height: 780px) {
+  .pd-dense .pd-margin-row-optional {
+    display: none;
+  }
+
+  .pd-dense .pd-pricing-highlight-grid {
+    gap: 0.5rem;
+  }
+}
+
+/* Fixed 1920×1080 export canvas: keep dense slide readable without relying on browser height MQ */
+.slide .pd-dense main {
+  gap: 0.55rem;
+}
+
+.slide .pd-dense .pd-h1 {
+  font-size: 2.15rem;
+}
+
+.slide .pd-dense .pd-body {
+  font-size: 1.05rem;
+}
+
+.slide .pd-dense .pd-small,
+.slide .pd-dense .pd-eyebrow {
+  font-size: 0.88rem;
+}
+
+.slide .pd-dense .pd-grid-2 {
+  gap: 0.85rem;
+}
+
+.slide .pd-dense .pd-pricing-col {
+  gap: 0.55rem;
+}
+
+.slide .pd-dense .pd-margin-row-optional {
+  display: none;
+}
+
+.slide .pd-dense .pd-margin-row {
+  margin-top: 0.45rem;
+  padding-bottom: 0.45rem;
 }
