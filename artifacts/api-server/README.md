@@ -218,8 +218,9 @@ Test the MCP endpoint (should return 401 without token):
 curl -X POST http://localhost:5000/api/mcp
 # → {"error":"Missing or invalid Authorization header"}
 
+# Set MCP_BEARER_TOKEN in your shell (portal API key or service bearer) — never commit real values.
 curl -X POST http://localhost:5000/api/mcp \
-  -H "Authorization: Bearer your-token-here" \
+  -H "Authorization: Bearer ${MCP_BEARER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
