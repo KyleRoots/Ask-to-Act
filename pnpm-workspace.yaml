@@ -4,7 +4,6 @@ packages:
   - lib/integrations/*
   - scripts
 
-
 autoInstallPeers: false
 
 catalog:
@@ -98,8 +97,15 @@ overrides:
   esbuild>@esbuild/win32-arm64: '-'
   esbuild>@esbuild/win32-ia32: '-'
   esbuild>@esbuild/win32-x64: '-'
-  hono: '>=4.12.25'
-  js-yaml: '>=4.2.0'
+  '@hono/node-server': '>=1.19.15'
+  brace-expansion: '>=5.0.9'
+  fast-uri: '>=4.1.2'
+  hono: '>=4.12.34'
+  ip-address: '>=10.3.1'
+  js-yaml: '>=5.2.2'
+  linkify-it: '>=5.0.2'
+  nanoid: '>=3.3.18'
+  postcss: '>=8.5.23'
   lightningcss>lightningcss-android-arm64: '-'
   lightningcss>lightningcss-darwin-arm64: '-'
   lightningcss>lightningcss-darwin-x64: '-'
