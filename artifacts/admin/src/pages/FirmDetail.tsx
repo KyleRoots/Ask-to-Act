@@ -31,6 +31,19 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function userDisplayName(u: Pick<UserRow, "name" | "email" | "id">): string {
+  return u.name ?? u.email ?? u.id;
+}
+
+function confirmUserBullhornReconnect(u: Pick<UserRow, "name" | "email" | "id">): boolean {
+  const label = userDisplayName(u);
+  return window.confirm(
+    `Refresh Bullhorn for ${label} only?\n\n` +
+      "This clears their Bullhorn session and sends them a reconnect link. " +
+      "Other recruiters on this firm are not affected. Their ChatGPT connector URL stays the same.",
+  );
+}
+
 function UsageChart({ data }: { data: UsageMonth[] }) {
   if (!data.length) {
     return (
@@ -391,6 +404,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
   const [tab, setTab] = useState<"overview" | "users" | "usage">("overview");
   const [showAddUsers, setShowAddUsers] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [highlightUserId, setHighlightUserId] = useState<string | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -424,6 +438,12 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
       return next.size === prev.size ? prev : next;
     });
   }, [users]);
+
+  useEffect(() => {
+    if (!highlightUserId) return;
+    const t = window.setTimeout(() => setHighlightUserId(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [highlightUserId]);
 
   const { data: usage, isLoading: usageLoading } = useQuery({
     queryKey: ["firm-usage", firmId],
@@ -513,15 +533,21 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
   });
 
   const resendAccessLinkMutation = useMutation({
-    mutationFn: (userId: string) => api.resendAccessLink(userId),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["firm-users", firmId] });
+    mutationFn: (user: UserRow) => api.resendAccessLink(user.id),
+    onSuccess: (data, user) => {
+      queryClient.setQueryData<UserRow[]>(["firm-users", firmId], (old) =>
+        old?.map((row) =>
+          row.id === user.id
+            ? { ...row, enrolled: false, enrollUrl: data.enrollUrl }
+            : row,
+        ),
+      );
+      setHighlightUserId(user.id);
       navigator.clipboard?.writeText(data.enrollUrl).catch(() => {});
       toast({
-        title: "Bullhorn reconnect link ready ✓",
-        description: data.reconnect
-          ? "Reconnect email sent (if the user has an email). Link copied — open it to refresh Bullhorn. Their AI connector URL stays the same."
-          : "Access link regenerated and copied. Open it to connect Bullhorn.",
+        title: `Bullhorn reconnect link issued for ${userDisplayName(user)} only`,
+        description:
+          "Other users on this firm were not changed. Reconnect email sent if they have an address. Link copied — their AI connector URL stays the same.",
       });
     },
     onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
@@ -662,9 +688,10 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
             style={{ color: "#818CF8", border: "1px solid rgba(129,140,248,.3)" }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "#A5B4FC"; e.currentTarget.style.borderColor = "rgba(129,140,248,.55)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = "#818CF8"; e.currentTarget.style.borderColor = "rgba(129,140,248,.3)"; }}
+            title="Firm-wide Bullhorn OAuth setup wizard. Does not reset individual recruiter sessions."
           >
-            <span className="hidden sm:inline">Reconnect Bullhorn</span>
-            <span className="sm:hidden">Reconnect</span>
+            <span className="hidden sm:inline">Firm Bullhorn setup</span>
+            <span className="sm:hidden">Firm setup</span>
           </button>
           <button
             onClick={() => { clearToken(); navigate("/login"); }}
@@ -696,7 +723,7 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                   Bullhorn re-authorization required
                 </p>
                 <p className="text-xs mt-1" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
-                  Recruiters (e.g. ChatGPT connector users) cannot access Bullhorn until you reconnect.
+                  Firm-level Bullhorn OAuth needs re-authorization. Use the firm setup wizard — this is separate from per-user reconnect links in the Users tab.
                   {bullhornStatus.lastAuthErrorAt && (
                     <> Last failure: {new Date(bullhornStatus.lastAuthErrorAt).toLocaleString()}.</>
                   )}
@@ -707,8 +734,9 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                 onClick={() => navigate(`/firms/${firmId}/setup?mode=reconnect`)}
                 className="text-sm px-4 py-2 rounded-lg shrink-0 font-medium transition-colors"
                 style={{ background: "rgba(248,113,113,.15)", color: "#FECACA", border: "1px solid rgba(248,113,113,.35)" }}
+                title="Open firm-wide Bullhorn OAuth reconnect wizard"
               >
-                Reconnect Bullhorn →
+                Open firm setup →
               </button>
             </div>
           )}
@@ -1061,6 +1089,11 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                 </button>
               </div>
 
+              <p className="text-xs px-1" style={{ color: "#6B7A99", lineHeight: 1.6 }}>
+                Row actions affect <strong className="font-medium" style={{ color: "#94A3B8" }}>that recruiter only</strong>.
+                Use <strong className="font-medium" style={{ color: "#94A3B8" }}>Firm Bullhorn setup</strong> in the header for organization-wide OAuth.
+              </p>
+
               {/* Selection toolbar — appears when one or more users are selected */}
               {selectedIds.size > 0 && (
                 <div
@@ -1113,7 +1146,18 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                     {/* Mobile: card list */}
                     <div className="sm:hidden divide-y" style={{ borderColor: BORDER }}>
                       {users.map((u: UserRow) => (
-                        <div key={u.id} className="p-4" style={{ background: SURFACE }}>
+                        <div
+                          key={u.id}
+                          className="p-4"
+                          style={{
+                            background:
+                              highlightUserId === u.id ? "rgba(56,189,248,.06)" : SURFACE,
+                            boxShadow:
+                              highlightUserId === u.id
+                                ? "inset 0 0 0 1px rgba(56,189,248,.35)"
+                                : undefined,
+                          }}
+                        >
                           <div className="flex items-center gap-3 mb-2">
                             {!u.enrolled && (
                               <input
@@ -1180,13 +1224,17 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                             )}
                             {u.enrolled && (
                               <button
-                                onClick={() => resendAccessLinkMutation.mutate(u.id)}
+                                onClick={() => {
+                                  if (confirmUserBullhornReconnect(u)) {
+                                    resendAccessLinkMutation.mutate(u);
+                                  }
+                                }}
                                 disabled={resendAccessLinkMutation.isPending}
                                 className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60"
                                 style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
-                                title="Issue a Bullhorn reconnect link. Clears the stale session so they can sign in again — connector URL unchanged."
+                                title="This user only: clear their stale Bullhorn session and send a reconnect link. Other recruiters unchanged."
                               >
-                                ↺ Reconnect Bullhorn
+                                ↺ Refresh session
                               </button>
                             )}
                             <button
@@ -1273,8 +1321,13 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                             <tr
                               key={u.id}
                               style={{
-                                background: SURFACE,
+                                background:
+                                  highlightUserId === u.id ? "rgba(56,189,248,.06)" : SURFACE,
                                 borderBottom: i < users.length - 1 ? `1px solid ${BORDER}` : "none",
+                                boxShadow:
+                                  highlightUserId === u.id
+                                    ? "inset 0 0 0 1px rgba(56,189,248,.35)"
+                                    : undefined,
                               }}
                             >
                               <td className="px-5 py-4 w-10">
@@ -1349,15 +1402,19 @@ export default function FirmDetail({ firmId }: { firmId: string }) {
                                   )}
                                   {u.enrolled && (
                                     <button
-                                      onClick={() => resendAccessLinkMutation.mutate(u.id)}
+                                      onClick={() => {
+                                        if (confirmUserBullhornReconnect(u)) {
+                                          resendAccessLinkMutation.mutate(u);
+                                        }
+                                      }}
                                       disabled={resendAccessLinkMutation.isPending}
                                       className="text-xs px-2.5 py-1 rounded-lg transition-all disabled:opacity-60 whitespace-nowrap"
                                       style={{ background: "rgba(56,189,248,.08)", color: "#38bdf8", border: "1px solid rgba(56,189,248,.2)" }}
                                       onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.16)"; }}
                                       onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(56,189,248,.08)"; }}
-                                      title="Issue a Bullhorn reconnect link. Clears the stale session so they can sign in again — connector URL unchanged."
+                                      title="This user only: clear their stale Bullhorn session and send a reconnect link. Other recruiters unchanged."
                                     >
-                                      ↺ Reconnect Bullhorn
+                                      ↺ Refresh session
                                     </button>
                                   )}
                                   <button
