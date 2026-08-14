@@ -3,7 +3,11 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    // Each src file is a standalone tsx entrypoint with no imports, so TS
+    // would treat them as global scripts and report every shared helper name
+    // as a duplicate declaration across files.
+    "moduleDetection": "force"
   },
   "include": ["src"]
 }

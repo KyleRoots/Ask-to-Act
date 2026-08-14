@@ -35,7 +35,23 @@ Base URL: `ASKTOACT_MCP_BASE_URL` (default `https://connect.asktoact.ai`).
 `ops-health` returns `403 Forbidden: invalid ops credentials`. Fix: set
 `OPS_HEALTH_SECRET` to the dedicated ops secret (or to `MCP_BEARER_TOKEN`), or
 use the service bearer as `ASKTOACT_MCP_API_KEY` for ops-only agent secrets.
-See [asktoact-mcp-api-key.md](./asktoact-mcp-api-key.md).
+See [asktoact-mcp-api-key.md](./asktoact-mcp-api-key.md). The gate itself is
+correct and is covered by `ops-internal-auth.test.ts` — never widen it to admit
+user keys; ops endpoints expose cross-firm operational state.
+
+### CLI exit codes
+
+| Exit | Meaning                                                                                              |
+| ---- | ---------------------------------------------------------------------------------------------------- |
+| 0    | `status: ok`                                                                                         |
+| 1    | `status: warn`                                                                                       |
+| 2    | `status: critical` (includes the route's own 500, which self-reports critical)                       |
+| 3    | **Status could not be determined** — auth (401/403), unreachable host, non-JSON or unrecognized body |
+
+Exit 3 is deliberately not 2: a check that could not run is a _blind_ check, not
+a production incident. Under `--json` that case still prints a single document
+carrying `status: "unknown"` plus `httpStatus`, `error` and an actionable `hint`,
+so consumers can always branch on `status`.
 
 ### Checks
 
@@ -123,6 +139,8 @@ Repo: KyleRoots/Ask-to-Act, branch main. Model preference: Opus 5 High (or curre
    (portal user keys 403). Base: ASKTOACT_MCP_BASE_URL (default https://connect.asktoact.ai).
 
 2. If status is ok: stop. Do not send notify emails.
+
+2b. If status is unknown (exit 3): the check could not run, so production health is UNDETERMINED — it is NOT critical. Do not investigate a production incident, do not open a PR for the credential, and never widen ops auth to make the check pass. On 401/403 the notify endpoint shares the same auth, so email is impossible: report in your final reply that ASKTOACT_MCP_API_KEY must hold the service bearer (MCP_BEARER_TOKEN) or that OPS_HEALTH_SECRET must be set.
 
 3. If status is warn or critical AND the ONLY issue is report_jobs.failed_recent for an aged U+0000/jsonb persist failure, and the worker is otherwise healthy (no stale/poison/queued backlog, note-snapshot healthy):
    pnpm --filter @workspace/scripts ops-agent-notify -- --phase completed --summary "aged known-fixed failed_recent; no-op" --fingerprint "<health fingerprint from JSON>"
