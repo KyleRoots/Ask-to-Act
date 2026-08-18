@@ -86,6 +86,26 @@ describe("rankCandidates", () => {
     expect(ranked[1].signals.structuredSkillHits).toEqual([]);
   });
 
+  it("ranks current relevant occupation above the same skills with no recent role", () => {
+    const pool = [
+      cand(1, { skillSet: "Python, Selenium", occupation: "Account Executive" }),
+      cand(2, { skillSet: "Python, Selenium", occupation: "Python Test Developer" }),
+    ];
+    const ranked = rankCandidates(pool, {
+      mustTerms: ["Python", "Selenium"],
+      mustConcepts: [
+        { canonical: "Python", terms: ["Python"] },
+        { canonical: "Selenium", terms: ["Selenium"] },
+      ],
+      jobCity: undefined,
+      jobState: undefined,
+      now: NOW,
+    });
+    expect(ranked[0].id).toBe(2);
+    expect(ranked[0].signals.relevantRecency).toBe("current");
+    expect(ranked[1].signals.relevantRecency).toBe("unknown");
+  });
+
   it("surfaces human-readable reasons", () => {
     const r = scoreCandidate(
       cand(1, { skillSet: "Python, Selenium", city: "Ottawa", state: "ON", modifiedDaysAgo: 5, availableInDays: 0 }),

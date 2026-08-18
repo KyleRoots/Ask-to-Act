@@ -73,6 +73,7 @@ function candidate(
   opts: {
     city?: string;
     state?: string;
+    occupation?: string;
     skillSet?: string;
     workAuthorized?: boolean;
     willRelocate?: boolean;
@@ -82,7 +83,7 @@ function candidate(
     id,
     name,
     status,
-    occupation: "Engineer",
+    occupation: opts.occupation ?? "Engineer",
     skillSet: opts.skillSet ?? "Python, Pytest",
     address: { city: opts.city ?? "Toronto", state: opts.state ?? "ON" },
     workAuthorized: opts.workAuthorized ?? true,
@@ -294,5 +295,21 @@ describe("matchCandidatesForJob", () => {
     expect(r.matches).toEqual([]);
     expect(r.eligibleMatches).toEqual([]);
     expect(r.presentationGuidance?.join(" ")).toMatch(/does not currently have a strong match|Do not invent/i);
+  });
+
+  it("ranks a current relevant occupation above the same skills with no recent role", async () => {
+    mockState.pool = [
+      candidate(1, "Older Skills", "Online Applicant", {
+        city: "Ottawa",
+        occupation: "Account Executive",
+      }),
+      candidate(2, "Doing It Now", "Online Applicant", {
+        city: "Ottawa",
+        occupation: "Python Test Developer",
+      }),
+    ];
+    const r = (await matchCandidatesForJob({ jobId: 35233 })) as Result;
+    expect(r.matches.map((m) => m.candidateId)).toEqual([2, 1]);
+    expect(r.presentationGuidance?.join(" ")).toMatch(/current\/recent relevant/i);
   });
 });
