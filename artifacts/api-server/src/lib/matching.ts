@@ -19,6 +19,7 @@ import {
 import { asArray, entityOf, mapLimit, num, str } from "./record-utils.js";
 import { toConcepts } from "./search-taxonomy.js";
 import { rankCandidates } from "./search-ranking.js";
+import { overlayWorkHistory } from "./relevant-recency.js";
 import { verifyConcepts } from "./search-verify.js";
 import { deriveExperience } from "./candidate-experience.js";
 import {
@@ -352,14 +353,14 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   const verifyPool = firstPass.slice(0, verifyCount);
   const verifyIds = verifyPool.map((r) => r.id).filter((id) => id >= 0);
 
-  const [verified, experiences] = await Promise.all([
+  const [verified, fullCandidates] = await Promise.all([
     verifyConcepts(verifyIds, mustConcepts, {
       concurrency: RESUME_CONCURRENCY,
       probeTerms: RESUME_EXPERIENCE_PROBE_TERMS,
     }),
     mapLimit(verifyPool, EXPERIENCE_CONCURRENCY, async (r) => {
       try {
-        return deriveExperience(entityOf(await getCandidate({ id: r.id })), now);
+        return entityOf(await getCandidate({ id: r.id }));
       } catch {
         return null;
       }
@@ -368,13 +369,17 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
 
   const verifiedTermsById = new Map<number, string[]>();
   for (const [id, v] of verified) verifiedTermsById.set(id, v.matchedConcepts);
-  const experienceById = new Map<number, (typeof experiences)[number]>();
+  const experienceById = new Map<number, ReturnType<typeof deriveExperience> | null>();
+  const fullById = new Map<number, Record<string, unknown>>();
   for (let i = 0; i < verifyPool.length; i++) {
-    experienceById.set(verifyPool[i].id, experiences[i] ?? null);
+    const id = verifyPool[i].id;
+    const full = fullCandidates[i];
+    if (full) fullById.set(id, full);
+    experienceById.set(id, full ? deriveExperience(full, now) : null);
   }
 
   const reRanked = rankCandidates(
-    verifyPool.map((r) => r.candidate),
+    verifyPool.map((r) => overlayWorkHistory(r.candidate, fullById.get(r.id))),
     {
       mustTerms: requirements.mustHaveSkills,
       mustConcepts,
@@ -411,6 +416,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       experienceAgreement: ReconciledExperience["agreement"];
       resumeExperienceQuote: string | null;
     } | null;
+    relevantRecency: string;
     matchScore: number;
     reasons: string[];
     criteria: ReturnType<typeof evaluateCandidate>["criteria"];
@@ -492,6 +498,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
             resumeExperienceQuote: reconciledExperience.evidence,
           }
         : null,
+      relevantRecency: ranked.signals.relevantRecency,
       matchScore: ranked.score,
       reasons: ranked.reasons,
       criteria: evaluation.criteria,
@@ -577,6 +584,7 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
         : onsiteOrHybrid
           ? "Present eligibleMatches only as the ranked shortlist. Do not mix unknown or out-of-area people into the top N for an onsite/hybrid role."
           : "Eligible matches passed hard constraints with verified evidence where required.",
+    "Rank current/recent relevant roles above older skill-list matches; do not call older relevant people unqualified.",
     "Never claim a skill without resumeEvidence. Treat clearance as UNVERIFIED until résumé-confirmed.",
     "Link each candidate NAME to bullhornUrl. Leave emails/phones as plain text.",
     ...(stoppedForWallTime

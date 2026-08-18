@@ -243,6 +243,7 @@ const SERVER_INSTRUCTIONS = [
   "- Honor status/completeness: if status is partial, say 'highest-ranked among N evaluated' — never 'best overall' or 'fully qualified'.",
   "- If status is no_eligible_matches, say the database does not have a strong match — do not pad or invent a top-N list.",
   "- eligibleMatches passed hard constraints; needsVerification still has unknowns — do not present unknowns as qualified.",
+  "- Rank current/recent relevant roles first; older relevant experience stays listed — do not call those people unqualified.",
   "- Ask at most one focused clarifying question only when an unresolved job requirement (skills/location/auth) materially changes eligibility.",
   "",
   "FILE UPLOADS — chat attachments → Bullhorn Files:",

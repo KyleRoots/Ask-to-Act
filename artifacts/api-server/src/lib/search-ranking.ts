@@ -11,6 +11,12 @@
 
 import { asArray, num, recordOf, str } from "./record-utils.js";
 import type { Concept } from "./search-taxonomy.js";
+import { toConcepts } from "./search-taxonomy.js";
+import {
+  assessRelevantRecency,
+  relevantRecencyPoints,
+  relevantRecencyReason,
+} from "./relevant-recency.js";
 
 export interface RankContext {
   /** Required concept labels (used when `mustConcepts` is not supplied). */
@@ -48,6 +54,7 @@ export interface RankedCandidate {
     recencyDays: number | null;
     availableSoon: boolean;
     workableStatus: boolean;
+    relevantRecency: string;
   };
 }
 
@@ -58,7 +65,7 @@ const W = {
   local: 8,
   availability: 5,
   workableStatus: 3,
-  recencyRecent: 5, // <=30d
+  recencyRecent: 5, // <=30d CRM activity — weaker than relevant-role recency
   recencyWarm: 3, // <=90d
   recencyMild: 1, // <=180d
 };
@@ -209,6 +216,15 @@ export function scoreCandidate(
     }
   }
 
+  const concepts = ctx.mustConcepts ?? (ctx.mustTerms.length ? toConcepts(ctx.mustTerms) : []);
+  const relevantFit = assessRelevantRecency(cand, concepts, now);
+  const relevantPts = relevantRecencyPoints(relevantFit.band);
+  if (relevantPts > 0) {
+    score += relevantPts;
+    const why = relevantRecencyReason(relevantFit);
+    if (why) reasons.push(why);
+  }
+
   // Tiny decaying credit for Bullhorn's own relevance order, as a soft tiebreak
   // that never overrides a real recruiter signal.
   score += Math.max(0, 2 - relevanceRank * 0.05);
@@ -226,6 +242,7 @@ export function scoreCandidate(
       recencyDays: rDays,
       availableSoon: availSoon,
       workableStatus: workable,
+      relevantRecency: relevantFit.band,
     },
   };
 }

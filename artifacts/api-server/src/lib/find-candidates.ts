@@ -19,6 +19,7 @@ import { searchCandidates, getCandidate } from "./bullhorn-client.js";
 import { asArray, entityOf, mapLimit, num, str } from "./record-utils.js";
 import { toConcepts } from "./search-taxonomy.js";
 import { rankCandidates } from "./search-ranking.js";
+import { overlayWorkHistory } from "./relevant-recency.js";
 import { verifyConcepts, confirmedConceptIds } from "./search-verify.js";
 import { deriveExperience } from "./candidate-experience.js";
 
@@ -133,13 +134,27 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
 
   // 4. PRECISION — confirm required CONCEPTS (any synonym counts) against the actual
   //    résumé for that top slice.
-  const verified = await verifyConcepts(verifyIds, concepts, { concurrency: VERIFY_CONCURRENCY });
+  const [verified, fullCandidates] = await Promise.all([
+    verifyConcepts(verifyIds, concepts, { concurrency: VERIFY_CONCURRENCY }),
+    mapLimit(verifyPool, EXPERIENCE_CONCURRENCY, async (r) => {
+      try {
+        return entityOf(await getCandidate({ id: r.id }));
+      } catch {
+        return null;
+      }
+    }),
+  ]);
   const verifiedTermsById = new Map<number, string[]>();
   for (const [id, v] of verified) verifiedTermsById.set(id, v.matchedConcepts);
+  const fullById = new Map<number, Record<string, unknown>>();
+  for (let i = 0; i < verifyPool.length; i++) {
+    const full = fullCandidates[i];
+    if (full) fullById.set(verifyPool[i].id, full);
+  }
 
-  // 5. Final rank WITH résumé-confirmation as an added signal.
+  // 5. Final rank WITH résumé-confirmation and dated relevant-role recency.
   let reRanked = rankCandidates(
-    verifyPool.map((r) => r.candidate),
+    verifyPool.map((r) => overlayWorkHistory(r.candidate, fullById.get(r.id))),
     { ...rankCtx, verifiedTermsById },
   );
   let droppedUnconfirmed = 0;
@@ -151,21 +166,11 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
   }
   const shortlist = reRanked.slice(0, limit);
 
-  // 6. EXPERIENCE — work-history math needs the full candidate (search truncates it),
-  //    so fetch only the shortlist at bounded concurrency.
-  const experiences = await mapLimit(shortlist, EXPERIENCE_CONCURRENCY, async (r) => {
-    try {
-      const full = entityOf(await getCandidate({ id: r.id }));
-      return deriveExperience(full, now);
-    } catch {
-      return null;
-    }
-  });
-
   const matches = shortlist.map((r, i) => {
     const c = r.candidate;
     const v = verified.get(r.id);
-    const exp = experiences[i];
+    const full = fullById.get(r.id);
+    const exp = full ? deriveExperience(full, now) : null;
     return {
       rank: i + 1,
       candidateId: r.id,
@@ -210,7 +215,7 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
     },
     matches,
     notes: [
-      "Ranking is deterministic and server-side: structured skill hits, résumé-confirmed skills, local match, recency, and availability — not just Bullhorn text relevance.",
+      "Ranking is deterministic and server-side: structured skill hits, résumé-confirmed skills, current/recent relevant roles, local match, and availability — not just Bullhorn text relevance. Older relevant experience stays in the list; it is not treated as unqualified.",
       "matchedSkills come from structured fields; resumeConfirmed/resumeEvidence are the citable proof from the résumé. Do not claim a skill that is neither in matchedSkills nor resumeConfirmed.",
       "Security clearance is NOT a structured field in Bullhorn; it lives in résumé text. Treat any clearance as UNVERIFIED until confirmed via resumeEvidence, and remember clearances can lapse.",
       "experience is derived from work-history dates (Bullhorn's structured experience field is usually empty); treat it as an estimate.",
