@@ -46,5 +46,6 @@ pipeline state is unusable, so this is the single most important correctness pro
 - **Lean payload + evidence:** small shortlist, short résumé VERIFY-mode excerpts, and a
   server-injected `bullhornUrl` per candidate. Clearance lives in résumé text — treat as
   UNVERIFIED until confirmed and back every skill claim with an evidence quote.
-- **Skill derivation fallback:** if skills/skillList are empty, requirements fall back
-  to title tokens (noisier → `status=partial`). Prefer explicit `mustHaveSkills`.
+- **Skill derivation fallback:** if skills/skillList are empty, requirements come from the JD **Required Skills** section (bounded must-haves + nice-to-haves), then title tokens only if the description has no usable phrases. Title fallback is noisier → `status=partial`.
+- **Years:** use JobOrder `yearsRequired` when > 0; otherwise parse “N+ years” from the description when present.
+- **Onsite/hybrid shortlist:** ranked `matches` are people who passed location (local, desired location, or `willRelocate=true`). Unknown or out-of-area people stay in `needsVerification` and are **not** padded into the top N. Other unknowns (years, skills) may still appear in the ranked list with `needsVerification: true` on the row. If nobody passed location, `status=no_eligible_matches` — GPT must say there is no strong match, not invent a list of 10.

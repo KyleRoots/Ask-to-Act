@@ -422,6 +422,8 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   const eligibleMatches: BuiltMatch[] = [];
   const needsVerificationMatches: BuiltMatch[] = [];
   const allBuilt: BuiltMatch[] = [];
+  const onsiteOrHybrid =
+    requirements.workArrangement === "onsite" || requirements.workArrangement === "hybrid";
 
   for (let i = 0; i < reRanked.length; i++) {
     const ranked = reRanked[i];
@@ -498,14 +500,30 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       bullhornUrl: typeof c.bullhornUrl === "string" ? c.bullhornUrl : null,
     };
     allBuilt.push(built);
-    if (evaluation.needsVerification) needsVerificationMatches.push(built);
-    else eligibleMatches.push(built);
+    const locationUnverified =
+      evaluation.locationFit === "out_of_area" || evaluation.locationFit === "unknown";
+    // Onsite/hybrid: keep relocatable/local people in the ranked shortlist even if
+    // years/skills are unknown. Do not pad with unknown or out-of-area location.
+    if (onsiteOrHybrid ? locationUnverified : evaluation.needsVerification) {
+      needsVerificationMatches.push(built);
+    } else {
+      eligibleMatches.push(built);
+    }
   }
 
   const takeEligible = eligibleMatches.slice(0, limit);
+  const verificationFollowUps = needsVerificationMatches.filter((m) => {
+    if (!onsiteOrHybrid) return true;
+    return m.locationFit !== "out_of_area" && m.locationFit !== "unknown";
+  });
   const remainingSlots = Math.max(0, limit - takeEligible.length);
-  const takeNeeds = needsVerificationMatches.slice(0, remainingSlots);
+  const takeNeeds = onsiteOrHybrid
+    ? []
+    : verificationFollowUps.slice(0, remainingSlots);
   const matches = [...takeEligible, ...takeNeeds].map((m, i) => ({ ...m, rank: i + 1 }));
+  const listedVerification = onsiteOrHybrid
+    ? needsVerificationMatches.slice(0, limit)
+    : takeNeeds;
 
   const poolCapped = pool.length >= poolSize || (locationQuery != null && asArray(locationSearch).length >= 40);
   const verificationIncomplete = verifyCount < kept.length;
@@ -513,13 +531,14 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   if (stoppedForWallTime) {
     // Soft wall — never claim a confirmed empty set.
     status = "partial";
-  } else if (matches.length === 0) {
+  } else if (takeEligible.length === 0) {
     status = "no_eligible_matches";
   } else if (
     poolCapped ||
     verificationIncomplete ||
     pipeline.truncated ||
-    requirements.skillDerivation === "title_fallback"
+    requirements.skillDerivation === "title_fallback" ||
+    requirements.skillDerivation === "description"
   ) {
     status = "partial";
   }
@@ -533,6 +552,9 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
   }
   if (requirements.skillDerivation === "title_fallback") {
     stopReasons.push("skills_derived_from_title_tokens");
+  }
+  if (requirements.skillDerivation === "description") {
+    stopReasons.push("skills_derived_from_job_description");
   }
 
   // Top-level stopReason for the universal asyncContinuation contract.
@@ -549,8 +571,12 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
     status === "partial"
       ? `Say "highest-ranked among ${kept.length} evaluated" — do NOT say best overall, fully qualified, or no better matches exist.`
       : status === "no_eligible_matches"
-        ? "No eligible matches after hard constraints. Do not invent candidates; offer to relax constraints or clarify must-have skills."
-        : "Eligible matches passed hard constraints with verified evidence where required.",
+        ? listedVerification.length > 0
+          ? "No candidates passed hard constraints. Do NOT invent or pad a top-N list. Say the database does not currently have a strong match. Mention needsVerification only as unverified follow-ups if the recruiter asks to relax location or skills."
+          : "No eligible matches after hard constraints. Do not invent candidates; offer to relax constraints or clarify must-have skills."
+        : onsiteOrHybrid
+          ? "Present eligibleMatches only as the ranked shortlist. Do not mix unknown or out-of-area people into the top N for an onsite/hybrid role."
+          : "Eligible matches passed hard constraints with verified evidence where required.",
     "Never claim a skill without resumeEvidence. Treat clearance as UNVERIFIED until résumé-confirmed.",
     "Link each candidate NAME to bullhornUrl. Leave emails/phones as plain text.",
     ...(stoppedForWallTime
@@ -613,7 +639,10 @@ export async function matchCandidatesForJob(args: MatchCandidatesArgs): Promise<
       stopReasons,
     },
     eligibleMatches: takeEligible.map((m, i) => ({ ...m, rank: i + 1 })),
-    needsVerification: takeNeeds.map((m, i) => ({ ...m, rank: takeEligible.length + i + 1 })),
+    needsVerification: listedVerification.map((m, i) => ({
+      ...m,
+      rank: takeEligible.length + i + 1,
+    })),
     // Backward-compatible flat list (eligible first, then needs-verification).
     matches,
     presentationGuidance,

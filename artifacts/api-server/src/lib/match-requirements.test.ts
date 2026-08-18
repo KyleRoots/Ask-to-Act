@@ -130,7 +130,40 @@ describe("extractJobRequirements", () => {
     expect(req.mustHaveSkills.length).toBeLessThanOrEqual(6);
   });
 
-  it("still prefers structured skills over the title", () => {
+  it("extracts required skills and years from the JD when Bullhorn skillList is empty", () => {
+    const req = extractJobRequirements({
+      job: {
+        title: "Senior Cybersecurity Test Architect",
+        skills: "",
+        skillList: "",
+        yearsRequired: 0,
+        onSite: ["On-Site"],
+        address: { city: "Ottawa", state: "Ontario" },
+        publicDescription: `
+Required Skills & Experience
+8+ years of experience in cybersecurity architecture, security engineering, security testing, or a related discipline.
+Hands-on experience with threat modeling methodologies, including STRIDE and MITRE ATT&CK.
+Strong knowledge of cloud security architecture across AWS, Azure, and/or GCP.
+Experience with API security, identity architecture, IAM, authentication, and authorization.
+Experience defining and implementing manual and automated security testing approaches.
+
+Preferred Qualifications
+Experience integrating security testing into CI/CD and DevSecOps environments.
+`,
+      },
+    });
+    expect(req.skillDerivation).toBe("description");
+    expect(req.yearsRequired).toBe(8);
+    expect(req.mustHaveSkills.map((s) => s.toLowerCase())).toEqual(
+      expect.arrayContaining(["security testing", "threat modeling"]),
+    );
+    expect(req.mustHaveSkills.length).toBeLessThanOrEqual(4);
+    expect(req.niceToHaveSkills.map((s) => s.toLowerCase())).toEqual(
+      expect.arrayContaining(["devsecops"]),
+    );
+  });
+
+  it("prefers skillList over title tokens", () => {
     const req = extractJobRequirements({
       job: { title: "SAP Defence - PERM (Ottawa)", skillList: "SAP FICO, ABAP" },
     });

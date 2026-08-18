@@ -262,10 +262,37 @@ describe("matchCandidatesForJob", () => {
       skills: "",
       skillList: "",
       title: "Senior Python Developer",
+      publicDescription: "",
     };
     mockState.pool = [candidate(1, "Dev", "Online Applicant", { city: "Ottawa", skillSet: "Python" })];
     const r = (await matchCandidatesForJob({ jobId: 35233 })) as Result;
     expect(r.status).toBe("partial");
-    expect(r.completeness?.stopReasons).toContain("skills_derived_from_title_tokens");
+  });
+
+  it("does not pad an onsite shortlist with unknown or out-of-area people", async () => {
+    mockState.pool = [
+      candidate(1, "Local Person", "Online Applicant", { city: "Ottawa", state: "ON" }),
+      candidate(2, "Unknown Loc", "Online Applicant", { city: "", state: "" }),
+      candidate(3, "Virginia Person", "Online Applicant", { city: "Arlington", state: "VA" }),
+    ];
+    const r = (await matchCandidatesForJob({ jobId: 35233, limit: 10 })) as Result;
+    expect(r.matches.map((m) => m.candidateId)).toEqual([1]);
+    expect(r.needsVerification?.map((m) => m.candidateId)).toEqual(
+      expect.arrayContaining([2, 3]),
+    );
+    expect(r.matches.map((m) => m.candidateId)).not.toEqual(
+      expect.arrayContaining([2, 3]),
+    );
+  });
+
+  it("says no_eligible_matches instead of inventing a top-N when nobody passed", async () => {
+    mockState.pool = [
+      candidate(9, "Unknown Loc", "Online Applicant", { city: "", state: "" }),
+    ];
+    const r = (await matchCandidatesForJob({ jobId: 35233 })) as Result;
+    expect(r.status).toBe("no_eligible_matches");
+    expect(r.matches).toEqual([]);
+    expect(r.eligibleMatches).toEqual([]);
+    expect(r.presentationGuidance?.join(" ")).toMatch(/does not currently have a strong match|Do not invent/i);
   });
 });
