@@ -19,3 +19,9 @@ NOT the cause: server crashes or lost MCP sessions. Logs showed every request 20
 
 **Why:** a dev workflow is not a production host for an external 24/7 consumer like ChatGPT; treat the connector like any external API client and give it a deployed endpoint.
 **How to apply:** when a user reports the connector "keeps asking to reconnect / never finishes," check logs first (if all 200s, it's not us), then steer them to deploy + repoint the connector + Always allow.
+
+## ChatGPT Voice does not run MCP connectors
+
+AskToAct is a ChatGPT **connector / plugin** (remote MCP). OpenAI’s Voice / Advanced Voice UI does not expose MCP tools. When AskToAct is attached, the voice orb often shows a slashed mic or hides the Voice entry point — that is a **host limitation**, not something we can enable in connector code.
+
+Workaround: use AskToAct in a **text** chat (`+` → More → AskToAct, or `@AskToAct`). The composer microphone (dictation into the text box) can still work; the back-and-forth Voice conversation cannot call our tools. Track OpenAI’s Voice + MCP feature requests; do not promise Voice integration until they ship it.

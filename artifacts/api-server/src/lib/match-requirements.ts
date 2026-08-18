@@ -53,7 +53,104 @@ export interface JobRequirements {
   willSponsor: boolean | null;
   compensation: JobCompensation;
   parsedRequirements: ParsedRequirement[];
-  skillDerivation: "skills" | "skillList" | "user" | "title_fallback";
+  skillDerivation: "skills" | "skillList" | "user" | "description" | "title_fallback";
+}
+
+/** Distinctive recruiting phrases — only used when they appear in the JD text. */
+const DESCRIPTION_SKILL_HINTS = [
+  "security testing",
+  "threat modeling",
+  "penetration testing",
+  "application security",
+  "cloud security",
+  "devsecops",
+  "sast",
+  "dast",
+  "iam",
+  "identity and access management",
+  "api security",
+  "owasp",
+  "mitre att&ck",
+  "stride",
+  "ci/cd",
+  "kubernetes",
+  "test automation",
+  "selenium",
+  "pytest",
+  "python",
+  "java",
+  "react",
+  "typescript",
+  "salesforce",
+  "sap",
+  "aws",
+  "azure",
+  "gcp",
+];
+
+const MAX_DESCRIPTION_MUST_HAVES = 4;
+const MAX_DESCRIPTION_NICE_TO_HAVES = 6;
+
+export function isolateDescriptionSkillSections(description: string): {
+  required: string;
+  preferred: string;
+} {
+  const text = description.trim();
+  if (!text) return { required: "", preferred: "" };
+  const reqMatch = text.search(
+    /required skills(?:\s*&\s*experience)?|required experience|minimum qualifications|must[- ]have/i,
+  );
+  const prefMatch = text.search(
+    /preferred qualifications|nice[- ]to[- ]have|assets? would be|bonus/i,
+  );
+  const start = reqMatch >= 0 ? reqMatch : 0;
+  const prefAt = prefMatch > start ? prefMatch : -1;
+  const required = (prefAt >= 0 ? text.slice(start, prefAt) : text.slice(start)).trim();
+  const preferred = prefAt >= 0 ? text.slice(prefAt).trim() : "";
+  return { required, preferred };
+}
+
+export function parseYearsFromDescription(description: string): number | null {
+  const { required } = isolateDescriptionSkillSections(description);
+  const haystack = required || description;
+  const m = haystack.match(/\b(\d{1,2})\s*\+?\s*(?:years?|yrs)\b/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 1 || n > 40) return null;
+  return n;
+}
+
+function collectHintSkills(text: string): string[] {
+  const lower = text.toLowerCase();
+  const found: string[] = [];
+  for (const hint of DESCRIPTION_SKILL_HINTS) {
+    if (!lower.includes(hint)) continue;
+    if (found.some((f) => f.toLowerCase() === hint)) continue;
+    found.push(hint);
+  }
+  return found;
+}
+
+/**
+ * When Bullhorn skills/skillList are empty, pull a bounded must-have set from the
+ * JD "Required" section instead of title tokens (which are too broad).
+ */
+export function extractSkillsFromDescription(description: string): {
+  mustHave: string[];
+  niceToHave: string[];
+} {
+  const { required, preferred } = isolateDescriptionSkillSections(description);
+  const fromRequired = collectHintSkills(required || description);
+  const fromPreferred = collectHintSkills(preferred);
+  const mustHave = fromRequired.slice(0, MAX_DESCRIPTION_MUST_HAVES);
+  const inMust = (s: string) => mustHave.some((m) => m.toLowerCase() === s.toLowerCase());
+  const niceToHave = [
+    ...fromPreferred.filter((s) => !inMust(s)),
+    ...fromRequired.slice(MAX_DESCRIPTION_MUST_HAVES).filter((s) => !inMust(s)),
+  ]
+    .filter((s, i, arr) => arr.findIndex((x) => x.toLowerCase() === s.toLowerCase()) === i)
+    .slice(0, MAX_DESCRIPTION_NICE_TO_HAVES);
+  return { mustHave, niceToHave };
 }
 
 function splitSkills(raw: string): string[] {
@@ -269,8 +366,10 @@ export function extractJobRequirements(args: ExtractJobRequirementsArgs): JobReq
     },
   ];
 
+  const description = str(job.publicDescription) || str(job.description);
   let mustHave: string[];
   let skillDerivation: JobRequirements["skillDerivation"];
+  let descriptionNice: string[] = [];
   if (args.mustHaveSkills && args.mustHaveSkills.length > 0) {
     mustHave = args.mustHaveSkills.map((s) => s.trim()).filter(Boolean);
     skillDerivation = "user";
@@ -280,15 +379,25 @@ export function extractJobRequirements(args: ExtractJobRequirementsArgs): JobReq
       mustHave = extracted.skills;
       skillDerivation = extracted.source === "skillList" ? "skillList" : "skills";
     } else {
-      mustHave = titleFallbackSkills(title, [
-        jobCity,
-        jobState,
-        str(recordOf(job.address).countryName),
-      ]);
-      skillDerivation = "title_fallback";
+      const fromJd = extractSkillsFromDescription(description);
+      if (fromJd.mustHave.length > 0) {
+        mustHave = fromJd.mustHave;
+        descriptionNice = fromJd.niceToHave;
+        skillDerivation = "description";
+      } else {
+        mustHave = titleFallbackSkills(title, [
+          jobCity,
+          jobState,
+          str(recordOf(job.address).countryName),
+        ]);
+        skillDerivation = "title_fallback";
+      }
     }
   }
-  const niceToHave = (args.niceToHaveSkills ?? []).map((s) => s.trim()).filter(Boolean);
+  const niceToHave = [
+    ...((args.niceToHaveSkills ?? []).map((s) => s.trim()).filter(Boolean)),
+    ...(args.niceToHaveSkills && args.niceToHaveSkills.length > 0 ? [] : descriptionNice),
+  ];
 
   parsed.push({
     key: "mustHaveSkills",
@@ -299,8 +408,15 @@ export function extractJobRequirements(args: ExtractJobRequirementsArgs): JobReq
         ? "user"
         : skillDerivation === "title_fallback"
           ? "fallback"
-          : "structured",
-    confidence: skillDerivation === "title_fallback" ? "low" : "high",
+          : skillDerivation === "description"
+            ? "description"
+            : "structured",
+    confidence:
+      skillDerivation === "title_fallback"
+        ? "low"
+        : skillDerivation === "description"
+          ? "medium"
+          : "high",
     hard: true,
   });
   if (niceToHave.length > 0) {
@@ -308,20 +424,28 @@ export function extractJobRequirements(args: ExtractJobRequirementsArgs): JobReq
       key: "niceToHaveSkills",
       label: "Nice-to-have skills",
       value: niceToHave,
-      source: "user",
-      confidence: "high",
+      source: args.niceToHaveSkills && args.niceToHaveSkills.length > 0 ? "user" : "description",
+      confidence: args.niceToHaveSkills && args.niceToHaveSkills.length > 0 ? "high" : "medium",
       hard: false,
     });
   }
 
-  const yearsRequired = num(job.yearsRequired);
+  const structuredYears = num(job.yearsRequired);
+  const descriptionYears =
+    structuredYears !== null && structuredYears > 0
+      ? null
+      : parseYearsFromDescription(description);
+  const yearsRequired =
+    structuredYears !== null && structuredYears > 0
+      ? structuredYears
+      : descriptionYears;
   if (yearsRequired !== null && yearsRequired > 0) {
     parsed.push({
       key: "yearsRequired",
       label: "Minimum experience (years)",
       value: yearsRequired,
-      source: "structured",
-      confidence: "high",
+      source: structuredYears !== null && structuredYears > 0 ? "structured" : "description",
+      confidence: structuredYears !== null && structuredYears > 0 ? "high" : "medium",
       hard: true,
     });
   }
