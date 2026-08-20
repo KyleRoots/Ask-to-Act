@@ -85,6 +85,8 @@ import type { CallerIdentity } from "../middlewares/bearer-auth.js";
 import { trackSeatActivity, trackToolUsage } from "./seat-activity.js";
 import { logger } from "./logger.js";
 import { responseCache, stableKey } from "./cache.js";
+import { db, usersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import {
   staffingScorecard,
   placementsReport,
@@ -2007,11 +2009,11 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "create_job",
-    "WRITE: Creates a new JobOrder (open requisition) in Bullhorn, owned by YOU. " +
-      "Requires a title and the clientCorporationId (use search_entity(ClientCorporation) to resolve the company). " +
-      "Fields are validated against this instance's schema before submission. " +
-      "Use list_field_options(JobOrder, status) / (JobOrder, employmentType) for picklist values, and put any extra fields in additionalFields. " +
-      "ALWAYS confirm the job title, company, and key details with the user before creating — this is a live record visible to all recruiters.",
+    "WRITE: Creates a JobOrder owned by YOU (Sales Rep). Requires title + clientCorporationId. " +
+      "Defaults: company address; Internal Department (correlatedCustomText1) from your primary department; onSite=On-Site " +
+      "(override Remote/Hybrid via additionalFields.onSite — Remote keeps address). " +
+      "Pass description text with headings/bullets — server formats Bullhorn HTML. " +
+      "list_field_options for status/employmentType; extras in additionalFields. Confirm before creating.",
     {
       title: z.string().min(1).describe("Job title for the requisition."),
       clientCorporationId: z.number().int().positive().describe("Bullhorn ClientCorporation (company) ID this job belongs to."),
@@ -2021,7 +2023,22 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     async ({ title, clientCorporationId, clientContactId, additionalFields }) =>
       runWriteTool("create_job", { title, clientCorporationId }, async () => {
         const session = await resolveWriteSession();
-        return createJobOrder(session, { title, clientCorporationId, clientContactId, additionalFields });
+        let portalUserEmail: string | null = null;
+        if (caller?.kind === "user") {
+          const [row] = await db
+            .select({ email: usersTable.email })
+            .from(usersTable)
+            .where(eq(usersTable.id, caller.userId))
+            .limit(1);
+          portalUserEmail = row?.email ?? null;
+        }
+        return createJobOrder(session, {
+          title,
+          clientCorporationId,
+          clientContactId,
+          additionalFields,
+          portalUserEmail,
+        });
       }),
   );
 

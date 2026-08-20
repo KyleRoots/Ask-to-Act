@@ -34,5 +34,18 @@ All new write fns live in `bullhorn-client.ts` (after `findUsers`) and are regis
 - Permissions stay Bullhorn's job: a role without delete rights gets a 403 → `BullhornPermissionError` → `permission_denied` via `runWriteTool`, exactly like other writes.
 - Tests: `src/lib/bullhorn-soft-delete.test.ts` (guards, allowlist — all pre-network, no mocking needed) + destructive-annotation assertions in `src/lib/mcp-write-tools.test.ts`.
 
+## create_job / createJobOrder defaults (Adam / job 35708 feedback)
+Server-side in `createJobOrder` via `buildCreateJobOrderBody` (`create-job-order-defaults.ts`) so ChatGPT cannot omit them. Explicit `additionalFields` always win.
+
+| Default | Behavior |
+|---------|----------|
+| Sales Rep (`owner`) | Prefer AskToAct portal user email → exact CorporateUser email match; else Bullhorn session userId. |
+| Internal Department (`correlatedCustomText1`) | From owner's `primaryDepartment.name` when that value is in JobOrder picklist options (e.g. Adam → `MYT-Ottawa`). |
+| Address | If `address` omitted, copy from ClientCorporation (no invented country). **Remote/Hybrid do not clear address.** |
+| `onSite` | Default `On-Site`; normalize aliases (`remote`→`Remote`, `on-site`→`On-Site`). Remote also sets `isWorkFromHome` when unset. |
+| Description | `description` / `publicDescription` normalized to well-formed HTML (`job-description-html.ts`). If only one is set, mirror into the other. |
+
+MCP: `create_job` loads portal email from `usersTable` and passes `portalUserEmail`. Tool copy documents these defaults. Tests: `job-description-html.test.ts`, `create-job-order-defaults.test.ts`.
+
 ## Testing limit
 File/résumé upload + `create_candidate_from_resume` paths could not be live-tested (no live Bullhorn file creds in this env). Wiring/annotations/connector-only are covered by `src/lib/mcp-write-tools.test.ts` (introspects `server._registeredTools` for write annotations; asserts no write op leaks into `/api/openapi.json`).
