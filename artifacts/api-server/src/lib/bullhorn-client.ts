@@ -13,6 +13,7 @@ import {
   DEFAULT_CANDIDATE_FILE_TYPES,
   resolveBullhornFileType,
 } from "./resolve-file-type.js";
+import { buildCreateJobOrderBody } from "./create-job-order-defaults.js";
 // pdf-parse and mammoth are loaded via dynamic import inside the extraction
 // helper — avoids CJS/ESM default-export interop issues at module startup.
 
@@ -3877,6 +3878,34 @@ export async function updateSubmissionStatus(
 
 // ── JobOrder create / update ──────────────────────────────────────────────
 
+/** GET a single entity field set using the caller's write session. */
+async function writeSessionEntityGet(
+  session: BullhornWriteSession,
+  entity: string,
+  id: number,
+  fields: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const url = new URL(`entity/${entity}/${id}`, session.restUrl);
+    url.searchParams.set("BhRestToken", session.BhRestToken);
+    url.searchParams.set("fields", fields);
+    const res = await fetch(url.toString());
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: Record<string, unknown> };
+    return json.data ?? null;
+  } catch (err) {
+    logger.warn({ err, entity, id, fields }, "Bullhorn: write-session entity GET failed");
+    return null;
+  }
+}
+
+/**
+ * Creates a JobOrder with server-side defaults: Sales Rep from portal email
+ * (else session user), Internal Department from that user's primaryDepartment
+ * when it matches the picklist, company address when address is omitted,
+ * On-Site work location by default, and HTML-normalized descriptions.
+ * Explicit additionalFields always win. Remote/Hybrid do not clear address.
+ */
 export async function createJobOrder(
   session: BullhornWriteSession,
   args: {
@@ -3884,16 +3913,70 @@ export async function createJobOrder(
     clientCorporationId: number;
     clientContactId?: number;
     additionalFields?: Record<string, unknown>;
+    /** AskToAct portal user email — preferred Sales Rep when no owner override. */
+    portalUserEmail?: string | null;
   },
 ): Promise<{ jobOrderId: number; title: string }> {
-  const ownerId = await getSessionUserId(session);
-  const body = compact({
-    title: args.title,
-    clientCorporation: assoc(args.clientCorporationId),
-    clientContact: assoc(args.clientContactId),
-    owner: assoc(ownerId),
-    ...(args.additionalFields ?? {}),
-  });
+  const body = await buildCreateJobOrderBody(
+    {
+      title: args.title,
+      clientCorporationId: args.clientCorporationId,
+      clientContactId: args.clientContactId,
+      additionalFields: args.additionalFields,
+      portalUserEmail: args.portalUserEmail,
+    },
+    {
+      resolveSessionOwnerId: () => getSessionUserId(session),
+      findUserIdByExactEmail: async (email) => {
+        const found = await findUsers({ email, count: 50 });
+        const lower = email.toLowerCase();
+        const exact = found.data.find(
+          (u) => typeof u.email === "string" && u.email.toLowerCase() === lower,
+        );
+        return typeof exact?.id === "number" ? exact.id : null;
+      },
+      fetchCompanyAddress: async (companyId) => {
+        const data = await writeSessionEntityGet(
+          session,
+          "ClientCorporation",
+          companyId,
+          "id,address",
+        );
+        const addr = data?.address;
+        if (!addr || typeof addr !== "object" || Array.isArray(addr)) return null;
+        return addr as Record<string, unknown>;
+      },
+      fetchUserPrimaryDepartmentName: async (userId) => {
+        const data = await writeSessionEntityGet(
+          session,
+          "CorporateUser",
+          userId,
+          "id,primaryDepartment",
+        );
+        const dept = data?.primaryDepartment;
+        if (dept && typeof dept === "object" && !Array.isArray(dept)) {
+          const name = (dept as { name?: unknown }).name;
+          return typeof name === "string" ? name : null;
+        }
+        return typeof dept === "string" ? dept : null;
+      },
+      listInternalDepartmentOptions: async () => {
+        try {
+          const result = await listFieldOptions({
+            entityType: "JobOrder",
+            fieldName: "correlatedCustomText1",
+          });
+          return result.fields[0]?.options.map((o) => o.value).filter(Boolean) ?? [];
+        } catch (err) {
+          logger.warn(
+            { err },
+            "Bullhorn: could not load JobOrder correlatedCustomText1 options for create default",
+          );
+          return [];
+        }
+      },
+    },
+  );
   await validateWriteFields("JobOrder", body, { mode: "create" });
   const jobOrderId = await createEntityRecord(session, "JobOrder", body);
   return { jobOrderId, title: args.title };
