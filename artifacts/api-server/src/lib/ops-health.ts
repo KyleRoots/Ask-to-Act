@@ -1,5 +1,6 @@
 /**
- * Light ops health evaluation for note-snapshot coverage + report_jobs.
+ * Light ops health evaluation for Bullhorn connections, note-snapshot coverage
+ * and report_jobs.
  * Pure evaluate* helpers are unit-tested; DB gather lives in evaluateOpsHealthFromDb.
  */
 import { createHash } from "node:crypto";
@@ -16,6 +17,7 @@ import {
 } from "./note-snapshot-allowlist.js";
 import { REPORT_JOB_MAX_ATTEMPTS } from "./report-jobs.js";
 import { getReportJobWorkerStats } from "./report-job-worker.js";
+import { listFirmBullhornHealthStatuses } from "./bullhorn-auth.js";
 
 export type OpsSeverity = "ok" | "warn" | "critical";
 
@@ -35,6 +37,16 @@ export type NoteCoverageSnapshot = {
   lastAttemptAt: Date;
   errorSummary: string | null;
   applicantPoolSynced: string;
+};
+
+export type FirmBullhornSnapshot = {
+  firmId: string;
+  firmName: string | null;
+  connected: boolean;
+  healthy: boolean;
+  needsReauthorization: boolean;
+  lastAuthErrorAt: string | null;
+  lastAuthError: string | null;
 };
 
 export type ReportJobSnapshot = {
@@ -57,6 +69,12 @@ export type OpsHealthReport = {
   fingerprint: string;
   issues: OpsHealthIssue[];
   checks: {
+    bullhorn: {
+      firms: number;
+      connected: number;
+      unhealthy: number;
+      notConnected: number;
+    };
     noteSnapshot: {
       activeFirms: number;
       coverageRows: number;
@@ -136,6 +154,58 @@ export function shouldSendOpsAlert(opts: {
   if (!opts.lastSent) return true;
   if (opts.lastSent.fingerprint !== opts.fingerprint) return true;
   return opts.nowMs - opts.lastSent.lastSentAt.getTime() >= opts.cooldownMs;
+}
+
+/**
+ * Upper bound on the stored Bullhorn auth error echoed into an alert, so a
+ * provider response body cannot pour credential-shaped text into ops email.
+ */
+const BULLHORN_AUTH_ERROR_MAX_CHARS = 200;
+
+/**
+ * Bullhorn connection health, per active firm.
+ *
+ * An unhealthy token row is a full outage for that firm: requireBullhornFirm
+ * rejects every AI tool call with a 403 and only an administrator
+ * re-authorizing Bullhorn clears it, so no amount of waiting recovers it.
+ * A firm with no token row at all is mid-setup, which is expected during
+ * onboarding and must not page anyone.
+ */
+export function evaluateBullhornConnectionHealth(opts: {
+  firms: FirmBullhornSnapshot[];
+}): OpsHealthIssue[] {
+  const issues: OpsHealthIssue[] = [];
+
+  for (const firm of opts.firms) {
+    const label = firm.firmName ?? firm.firmId;
+
+    if (!firm.connected) {
+      issues.push({
+        code: `bullhorn.not_connected:${firm.firmId}`,
+        severity: "warn",
+        message: `Active firm ${label} has no Bullhorn connection: its users cannot use the AI tools yet`,
+        details: { firmId: firm.firmId },
+      });
+      continue;
+    }
+
+    if (!firm.healthy) {
+      issues.push({
+        code: `bullhorn.auth_unhealthy:${firm.firmId}`,
+        severity: "critical",
+        message: `Bullhorn connection for ${label} is unhealthy: every AI tool call from this firm returns 403 until an administrator reconnects Bullhorn`,
+        details: {
+          firmId: firm.firmId,
+          needsReauthorization: firm.needsReauthorization,
+          lastAuthErrorAt: firm.lastAuthErrorAt,
+          lastAuthError:
+            firm.lastAuthError?.slice(0, BULLHORN_AUTH_ERROR_MAX_CHARS) ?? null,
+        },
+      });
+    }
+  }
+
+  return issues;
 }
 
 export function evaluateNoteSnapshotHealth(opts: {
@@ -351,8 +421,10 @@ export function buildOpsHealthReport(opts: {
   workerActive: number;
   maxAttempts: number;
   failedLookbackMs?: number;
+  bullhornFirms?: FirmBullhornSnapshot[];
 }): OpsHealthReport {
   const failedLookbackMs = opts.failedLookbackMs ?? OPS_FAILED_LOOKBACK_MS;
+  const bullhornFirms = opts.bullhornFirms ?? [];
   let status: OpsSeverity = "ok";
   for (const issue of opts.issues) {
     status = maxSeverity(status, issue.severity);
@@ -379,11 +451,14 @@ export function buildOpsHealthReport(opts: {
   const staleOrFailed = opts.issues.filter((i) =>
     i.code.startsWith("note_snapshot."),
   ).length;
+  const bullhornConnected = bullhornFirms.filter((f) => f.connected);
+  const bullhornUnhealthy = bullhornConnected.filter((f) => !f.healthy);
+  const bullhornNotConnected = bullhornFirms.filter((f) => !f.connected);
 
   const fingerprint = opsAlertFingerprint(opts.issues);
   const summary =
     status === "ok"
-      ? "All ops checks passed (note-snapshot coverage + report_jobs)."
+      ? "All ops checks passed (Bullhorn connections + note-snapshot coverage + report_jobs)."
       : opts.issues.map((i) => `[${i.severity}] ${i.message}`).join(" · ");
 
   const agentBrief = [
@@ -403,10 +478,11 @@ export function buildOpsHealthReport(opts: {
         )),
     "",
     "Checks:",
+    `  bullhorn: firms=${bullhornFirms.length} connected=${bullhornConnected.length} unhealthy=${bullhornUnhealthy.length} notConnected=${bullhornNotConnected.length}`,
     `  noteSnapshot: activeFirms=${opts.activeFirmCount} coverageRows=${opts.coverageRows.length} staleOrFailed=${staleOrFailed}`,
     `  reportJobs: recentFailed=${recentFailed.length} staleQueued=${staleQueued.length} staleRunning=${staleRunning.length} poison=${poison.length} workerEnabled=${opts.workerEnabled} workerActive=${opts.workerActive}`,
     "",
-    "Hints: GET /api/internal/ops-health (service bearer); note-snapshot cron POST /api/firms/:id/note-snapshot/sync; report_jobs lease worker in api-server.",
+    "Hints: GET /api/internal/ops-health (service bearer); Bullhorn reconnect is an admin action (check GET /api/auth/bullhorn/status?firmId=<id>, re-authorize via GET /api/auth/bullhorn/login-url?firmId=<id>); no code fix can restore a revoked refresh token; note-snapshot cron POST /api/firms/:id/note-snapshot/sync; report_jobs lease worker in api-server.",
   ].join("\n");
 
   return {
@@ -417,6 +493,12 @@ export function buildOpsHealthReport(opts: {
     fingerprint,
     issues: opts.issues,
     checks: {
+      bullhorn: {
+        firms: bullhornFirms.length,
+        connected: bullhornConnected.length,
+        unhealthy: bullhornUnhealthy.length,
+        notConnected: bullhornNotConnected.length,
+      },
       noteSnapshot: {
         activeFirms: opts.activeFirmCount,
         coverageRows: opts.coverageRows.length,
@@ -449,6 +531,25 @@ export async function evaluateOpsHealthFromDb(
 
   const activeIds = activeFirms.map((f) => f.id);
   const firmNameById = new Map(activeFirms.map((f) => [f.id, f.name]));
+
+  let bullhornFirms: FirmBullhornSnapshot[] = [];
+  if (activeIds.length > 0) {
+    // One query for every firm's token row; a firm with no row is absent from
+    // the map and is reported as not connected.
+    const bullhornByFirmId = await listFirmBullhornHealthStatuses();
+    bullhornFirms = activeFirms.map((f) => {
+      const status = bullhornByFirmId.get(f.id);
+      return {
+        firmId: f.id,
+        firmName: f.name,
+        connected: status?.connected ?? false,
+        healthy: status?.healthy ?? false,
+        needsReauthorization: status?.needsReauthorization ?? false,
+        lastAuthErrorAt: status?.lastAuthErrorAt ?? null,
+        lastAuthError: status?.lastAuthError ?? null,
+      };
+    });
+  }
 
   let coverageRows: NoteCoverageSnapshot[] = [];
   if (activeIds.length > 0) {
@@ -495,6 +596,7 @@ export async function evaluateOpsHealthFromDb(
   }));
 
   const issues = [
+    ...evaluateBullhornConnectionHealth({ firms: bullhornFirms }),
     ...evaluateNoteSnapshotHealth({ coverageRows, nowMs, ttlMs }),
     ...evaluateReportJobsHealth({ jobs, nowMs, maxAttempts }),
   ];
@@ -519,6 +621,7 @@ export async function evaluateOpsHealthFromDb(
     workerEnabled,
     workerActive: workerStats.activeCount,
     maxAttempts,
+    bullhornFirms,
   });
 }
 

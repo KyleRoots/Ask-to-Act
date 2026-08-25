@@ -21,8 +21,13 @@ vi.mock("./logger.js", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
 
+vi.mock("./bullhorn-auth.js", () => ({
+  listFirmBullhornHealthStatuses: vi.fn(async () => new Map()),
+}));
+
 import {
   buildOpsHealthReport,
+  evaluateBullhornConnectionHealth,
   evaluateNoteSnapshotHealth,
   evaluateReportJobsHealth,
   maxSeverity,
@@ -32,6 +37,7 @@ import {
   shouldSendOpsAlert,
   OPS_QUEUED_WARN_MS,
   OPS_QUEUED_CRITICAL_MS,
+  type FirmBullhornSnapshot,
   type NoteCoverageSnapshot,
   type ReportJobSnapshot,
 } from "./ops-health.js";
@@ -69,6 +75,20 @@ function job(
   };
 }
 
+function bhFirm(
+  partial: Partial<FirmBullhornSnapshot> & Pick<FirmBullhornSnapshot, "firmId">,
+): FirmBullhornSnapshot {
+  return {
+    firmName: "Acme",
+    connected: true,
+    healthy: true,
+    needsReauthorization: false,
+    lastAuthErrorAt: null,
+    lastAuthError: null,
+    ...partial,
+  };
+}
+
 describe("ops health severity helpers", () => {
   it("ranks severities", () => {
     expect(maxSeverity("ok", "warn")).toBe("warn");
@@ -84,6 +104,120 @@ describe("ops health severity helpers", () => {
     expect(opsAlertCooldownMs({ OPS_ALERT_COOLDOWN_MINUTES: "60" })).toBe(
       60 * 60 * 1000,
     );
+  });
+});
+
+describe("evaluateBullhornConnectionHealth", () => {
+  // Regression: a firm whose refresh token went bad 403s every AI tool call
+  // (requireBullhornFirm), and before this check ops-health reported "ok"
+  // through the whole outage while users were told the team had been notified.
+  it("flags a connected-but-unhealthy firm as critical", () => {
+    const issues = evaluateBullhornConnectionHealth({
+      firms: [
+        bhFirm({
+          firmId: "f1",
+          firmName: "Acme Staffing",
+          healthy: false,
+          needsReauthorization: true,
+          lastAuthErrorAt: new Date(now - 60_000).toISOString(),
+          lastAuthError: "invalid_grant",
+        }),
+      ],
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe("bullhorn.auth_unhealthy:f1");
+    expect(issues[0]!.severity).toBe("critical");
+    expect(issues[0]!.message).toContain("Acme Staffing");
+    expect(issues[0]!.details).toMatchObject({
+      firmId: "f1",
+      needsReauthorization: true,
+      lastAuthError: "invalid_grant",
+    });
+  });
+
+  it("truncates a long stored auth error so alerts cannot echo a whole body", () => {
+    const issues = evaluateBullhornConnectionHealth({
+      firms: [
+        bhFirm({
+          firmId: "f1",
+          healthy: false,
+          lastAuthError: "x".repeat(5000),
+        }),
+      ],
+    });
+    expect((issues[0]!.details!["lastAuthError"] as string).length).toBe(200);
+  });
+
+  it("treats a firm with no connection as warn, not critical", () => {
+    const issues = evaluateBullhornConnectionHealth({
+      firms: [bhFirm({ firmId: "f2", connected: false, healthy: false })],
+    });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe("bullhorn.not_connected:f2");
+    expect(issues[0]!.severity).toBe("warn");
+  });
+
+  it("returns no issues when every firm is connected and healthy", () => {
+    expect(
+      evaluateBullhornConnectionHealth({
+        firms: [bhFirm({ firmId: "f1" }), bhFirm({ firmId: "f2" })],
+      }),
+    ).toEqual([]);
+  });
+
+  it("reports one issue per firm and drives report status and counts", () => {
+    const firms = [
+      bhFirm({ firmId: "f1" }),
+      bhFirm({ firmId: "f2", healthy: false }),
+      bhFirm({ firmId: "f3", connected: false, healthy: false }),
+    ];
+    const issues = evaluateBullhornConnectionHealth({ firms });
+    expect(issues.map((i) => i.code)).toEqual([
+      "bullhorn.auth_unhealthy:f2",
+      "bullhorn.not_connected:f3",
+    ]);
+
+    const report = buildOpsHealthReport({
+      issues,
+      nowMs: now,
+      coverageRows: [],
+      activeFirmCount: 3,
+      jobs: [],
+      workerEnabled: true,
+      workerActive: 0,
+      maxAttempts: 5,
+      bullhornFirms: firms,
+    });
+    expect(report.status).toBe("critical");
+    expect(report.checks.bullhorn).toEqual({
+      firms: 3,
+      connected: 2,
+      unhealthy: 1,
+      notConnected: 1,
+    });
+    expect(report.agentBrief).toMatch(
+      /bullhorn: firms=3 connected=2 unhealthy=1 notConnected=1/,
+    );
+  });
+
+  it("reports zeroed bullhorn counts when no firm snapshots are supplied", () => {
+    const report = buildOpsHealthReport({
+      issues: [],
+      nowMs: now,
+      coverageRows: [],
+      activeFirmCount: 0,
+      jobs: [],
+      workerEnabled: true,
+      workerActive: 0,
+      maxAttempts: 5,
+    });
+    expect(report.status).toBe("ok");
+    expect(report.checks.bullhorn).toEqual({
+      firms: 0,
+      connected: 0,
+      unhealthy: 0,
+      notConnected: 0,
+    });
   });
 });
 
