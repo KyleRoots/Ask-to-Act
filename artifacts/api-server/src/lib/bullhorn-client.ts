@@ -14,6 +14,10 @@ import {
   resolveBullhornFileType,
 } from "./resolve-file-type.js";
 import { buildCreateJobOrderBody } from "./create-job-order-defaults.js";
+import {
+  applyJobOrderAssignedUsers,
+  stripAssignedUsersFromFields,
+} from "./job-order-assigned-users.js";
 // pdf-parse and mammoth are loaded via dynamic import inside the extraction
 // helper — avoids CJS/ESM default-export interop issues at module startup.
 
@@ -3977,22 +3981,67 @@ export async function createJobOrder(
       },
     },
   );
-  await validateWriteFields("JobOrder", body, { mode: "create" });
-  const jobOrderId = await createEntityRecord(session, "JobOrder", body);
-  return { jobOrderId, title: args.title };
+  const { fields: createBody, assignedUsers } = stripAssignedUsersFromFields(body);
+  await validateWriteFields("JobOrder", createBody, { mode: "create" });
+  const jobOrderId = await createEntityRecord(session, "JobOrder", createBody);
+
+  let assignedUsersAdded: number[] | undefined;
+  if (assignedUsers) {
+    const assoc = await applyJobOrderAssignedUsers(
+      session,
+      jobOrderId,
+      assignedUsers,
+      writeFetch,
+    );
+    if (assoc.added.length > 0) assignedUsersAdded = assoc.added;
+  }
+
+  return {
+    jobOrderId,
+    title: args.title,
+    ...(assignedUsersAdded ? { assignedUsersAdded } : {}),
+  };
 }
 
 export async function updateJobOrder(
   session: BullhornWriteSession,
   jobOrderId: number,
   fields: Record<string, unknown>,
-): Promise<{ updated: true; jobOrderId: number }> {
-  if (Object.keys(fields).length === 0) {
+): Promise<{
+  updated: true;
+  jobOrderId: number;
+  assignedUsersAdded?: number[];
+  assignedUsersRemoved?: number[];
+}> {
+  const { fields: scalarFields, assignedUsers } = stripAssignedUsersFromFields(fields);
+  if (Object.keys(scalarFields).length === 0 && !assignedUsers) {
     throw new BullhornFieldValidationError("No fields provided to update on the job order.");
   }
-  await validateWriteFields("JobOrder", fields, { mode: "update" });
-  await updateEntityRecord(session, "JobOrder", jobOrderId, fields);
-  return { updated: true, jobOrderId };
+
+  if (Object.keys(scalarFields).length > 0) {
+    await validateWriteFields("JobOrder", scalarFields, { mode: "update" });
+    await updateEntityRecord(session, "JobOrder", jobOrderId, scalarFields);
+  }
+
+  let assignedUsersAdded: number[] | undefined;
+  let assignedUsersRemoved: number[] | undefined;
+  if (assignedUsers) {
+    const assoc = await applyJobOrderAssignedUsers(
+      session,
+      jobOrderId,
+      assignedUsers,
+      writeFetch,
+    );
+    if (assoc.added.length > 0) assignedUsersAdded = assoc.added;
+    if (assoc.removed.length > 0) assignedUsersRemoved = assoc.removed;
+  }
+
+  return {
+    updated: true,
+    jobOrderId,
+    ...(assignedUsersAdded ? { assignedUsersAdded } : {}),
+    ...(assignedUsersRemoved ? { assignedUsersRemoved } : {}),
+  };
 }
 
 // ── ClientCorporation (company) create / update ───────────────────────────

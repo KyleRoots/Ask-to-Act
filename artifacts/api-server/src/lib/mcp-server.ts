@@ -1959,8 +1959,20 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   // Value shape accepted for write `fields` / `additionalFields`: scalars plus
   // null (to clear a field) and Bullhorn association references — a single
   // { id } for TO_ONE (e.g. owner) or an array of { id } for TO_MANY (e.g.
-  // assignedTo / assignedUsers). Unknown field NAMES are still rejected by
-  // validateWriteFields before submission.
+  // assignedTo / assignedUsers). JobOrder assignedUsers is applied via Bullhorn's
+  // association endpoint server-side — array or { add, remove } both accepted.
+  // Unknown field NAMES are still rejected by validateWriteFields before submission.
+  const toManyAssociationPatchSchema = z
+    .object({
+      add: z
+        .array(z.union([z.number().int().positive(), z.object({ id: z.number().int().positive() }).passthrough()]))
+        .optional(),
+      remove: z
+        .array(z.union([z.number().int().positive(), z.object({ id: z.number().int().positive() }).passthrough()]))
+        .optional(),
+    })
+    .passthrough();
+
   const writeFieldValueSchema = z.union([
     z.string(),
     z.number(),
@@ -1971,6 +1983,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     // does not block composite (address) objects on the basis of this branch.
     z.object({ id: z.number().int().positive() }).passthrough(),
     z.array(z.object({ id: z.number().int().positive() }).passthrough()),
+    toManyAssociationPatchSchema,
     // Composite fields (Bullhorn ADDRESS type, e.g. `address`, `secondaryAddress`,
     // `billingAddress`) are nested objects of scalar sub-fields: address1, address2,
     // city, state, zip, and either countryID (numeric) or countryName (a name like
@@ -2009,8 +2022,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "create_job",
-    "WRITE: Creates a JobOrder owned by YOU (Sales Rep). Requires title + clientCorporationId. " +
-      "Defaults: company address; Internal Department (correlatedCustomText1) from your primary department; onSite=On-Site " +
+    "WRITE: Creates a JobOrder. Sales Rep (`owner`) defaults to YOU from portal email; Recruiter(s) (`assignedUsers`) is separate — pass in additionalFields as [{ id: userId }] or { add: [userId] }. Requires title + clientCorporationId. " +
+      "Defaults: company address; Internal Department (correlatedCustomText1) from Sales Rep primary department; onSite=On-Site " +
       "(override Remote/Hybrid via additionalFields.onSite — Remote keeps address). " +
       "Pass description text with headings/bullets — server formats Bullhorn HTML. " +
       "list_field_options for status/employmentType; extras in additionalFields. Confirm before creating.",
@@ -2045,7 +2058,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   writeTool(
     "update_job",
     "WRITE: Updates fields on an existing JobOrder in Bullhorn, as YOU. " +
-      "Use `fields` for scalar / association changes (status, title, numOpenings, owner, etc.) " +
+      "Sales Rep = `owner` (to-one). Recruiter(s) = `assignedUsers` — pass [{ id: userId }] or { add: [userId], remove: [userId] } in `fields`; server applies via Bullhorn association API. " +
+      "Use `fields` for other scalar / association changes (status, title, numOpenings, owner, etc.) " +
       "and the dedicated `address` parameter for location / country — do NOT put address inside `fields`. " +
       "ALWAYS confirm the change with the user first.",
     {
@@ -2054,7 +2068,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .record(z.string(), writeFieldValueSchema)
         .describe(
           "Scalar and association fields to change, keyed by exact Bullhorn field name " +
-            "(e.g. { status: 'Covered', numOpenings: 2 }). Do NOT put address here — use the `address` parameter.",
+            "(e.g. { status: 'Covered', numOpenings: 2, assignedUsers: [{ id: 65 }] }). Do NOT put address here — use the `address` parameter.",
         ),
       address: addressFieldSchema.describe(
         "Job location / address. Include only the sub-fields you want to change — all others are preserved. " +

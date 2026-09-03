@@ -15,7 +15,7 @@ All new write fns live in `bullhorn-client.ts` (after `findUsers`) and are regis
 
 ## Bullhorn write-API gotchas
 - **Write dates are epoch milliseconds**, not ISO. Convert with the existing `toEpochMillis(value,label)` before putting in a write body (dateBegin/dateEnd etc).
-- **Tearsheet membership** = to-many association endpoint with NO body: `PUT|DELETE entity/Tearsheet/{id}/{assoc}/{comma,ids}` where `{assoc}` is one of `candidates`, `clientContacts`, `jobOrders`, `leads`, `opportunities` (from Tearsheet meta). Bullhorn uses **PUT to ASSOCIATE** and DELETE to disassociate (POST on this path is entity-update and fails). `writeFetch(...,undefined)` sends no body — correct. MCP: candidate convenience tools plus generalized `add_records_to_tearsheet` / `remove_records_from_tearsheet` (`entityType` + `ids`, max 50). Not exposed as membership: `users`, `recipients`. Alternate bulk path exists (`POST massUpdate/Tearsheet` with `{candidates:{add:[…]},ids:[tearsheetId]}`) but is not required for the MCP tools.
+- **JobOrder Recruiter(s) (`assignedUsers`)** = to-many association endpoint only on write. Do NOT rely on inline `[{ id }]` in entity POST/PUT — Bullhorn returns success but the field stays empty. Strip from body and `PUT entity/JobOrder/{id}/assignedUsers/{ids}` after create/update (see `job-order-assigned-users.ts`). Sales Rep is `owner` (to-one) — different field.
 - **File upload is a SEPARATE door** from JSON `entity/`: multipart `PUT file/{Entity}/{id}/raw` (FormData + Blob, Node 24 has both globals). Built a dedicated `fileFetch` that mirrors writeFetch's 403/429/error contract but does NOT force `Content-Type: application/json` (FormData sets its own boundary). Query params carry `externalID`, `fileType=SAMPLE` (always), optional `type` (category), `name`, `contentType`, `description`. Hitting `file/{Entity}/{id}` (no `/raw`) with multipart returns Bullhorn 400 "An internal error has occurred".
 - **`resume/parseToCandidate` does NOT persist** — it returns `{candidate, skillList, ...}`. Flow = parse → take whitelisted scalar fields → merge overrideFields (overrides win) → `validateWriteFields` → `PUT entity/Candidate` → best-effort attach original file via `uploadFileToRecord`.
 
@@ -46,6 +46,15 @@ Server-side in `createJobOrder` via `buildCreateJobOrderBody` (`create-job-order
 | Description | `description` / `publicDescription` normalized to well-formed HTML (`job-description-html.ts`). If only one is set, mirror into the other. |
 
 MCP: `create_job` loads portal email from `usersTable` and passes `portalUserEmail`. Tool copy documents these defaults. Tests: `job-description-html.test.ts`, `create-job-order-defaults.test.ts`.
+
+## JobOrder Recruiter(s) — assignedUsers (Adam / job 35783)
+Bullhorn **Recruiter(s)** = `assignedUsers` (TO_MANY CorporateUser). **Sales Rep** = `owner` (TO_ONE). They are different fields.
+
+Standard entity POST/PUT **does not persist** `assignedUsers` — Bullhorn requires the association endpoint:
+- Add: `PUT entity/JobOrder/{id}/assignedUsers/{userIds}` (bodyless, comma-separated ids)
+- Remove: `DELETE entity/JobOrder/{id}/assignedUsers/{userIds}`
+
+`createJobOrder` / `updateJobOrder` strip `assignedUsers` from the generic write body and apply via `applyJobOrderAssignedUsers` (`job-order-assigned-users.ts`). MCP accepts `[{ id }]` arrays or `{ add: [ids], remove: [ids] }`. Tests: `job-order-assigned-users.test.ts`.
 
 ## Testing limit
 File/résumé upload + `create_candidate_from_resume` paths could not be live-tested (no live Bullhorn file creds in this env). Wiring/annotations/connector-only are covered by `src/lib/mcp-write-tools.test.ts` (introspects `server._registeredTools` for write annotations; asserts no write op leaks into `/api/openapi.json`).
