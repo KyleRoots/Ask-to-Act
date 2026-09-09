@@ -11,7 +11,8 @@ export async function ensureColumns(): Promise<void> {
     await client.query(`
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS enroll_token TEXT,
-        ADD COLUMN IF NOT EXISTS enroll_token_expires_at TIMESTAMP;
+        ADD COLUMN IF NOT EXISTS enroll_token_expires_at TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS reconnect_email_sent_at TIMESTAMP;
     `);
 
     await client.query(`

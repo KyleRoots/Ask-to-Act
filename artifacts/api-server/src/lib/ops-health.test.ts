@@ -6,6 +6,8 @@ vi.mock("@workspace/db", () => ({
   noteSnapshotCoverageTable: {},
   reportJobsTable: {},
   opsAlertStateTable: {},
+  bullhornTokensTable: {},
+  usersTable: {},
 }));
 
 vi.mock("./report-job-worker.js", () => ({
@@ -25,6 +27,7 @@ import {
   buildOpsHealthReport,
   evaluateNoteSnapshotHealth,
   evaluateReportJobsHealth,
+  evaluateBullhornAuthHealth,
   maxSeverity,
   opsAlertCooldownMs,
   opsAlertFingerprint,
@@ -327,5 +330,69 @@ describe("shouldSendOpsAlert dedupe", () => {
     expect(report.agentBrief).toMatch(/AskToAct ops alert/);
     expect(report.agentBrief).toMatch(/note_snapshot.no_coverage/);
     expect(report.fingerprint).toBe(fp1);
+  });
+});
+
+describe("evaluateBullhornAuthHealth", () => {
+  it("flags unhealthy firms as critical and awaiting users as warn", () => {
+    const issues = evaluateBullhornAuthHealth({
+      firms: [
+        {
+          firmId: "firm-ok",
+          firmName: "Healthy Co",
+          authMode: "oauth",
+          authHealthy: true,
+          lastAuthErrorAt: null,
+          lastAuthError: null,
+        },
+        {
+          firmId: "firm-bad",
+          firmName: "Broken Co",
+          authMode: "oauth",
+          authHealthy: false,
+          lastAuthErrorAt: new Date(now),
+          lastAuthError: "refresh failed",
+        },
+      ],
+      usersAwaitingReconnect: [
+        {
+          userId: "u1",
+          email: "josh@example.com",
+          firmId: "firm-ok",
+          reconnectEmailSentAt: new Date(now),
+        },
+      ],
+    });
+
+    expect(issues.some((i) => i.code === "bullhorn_auth.firm_unhealthy:firm-bad")).toBe(
+      true,
+    );
+    expect(
+      issues.find((i) => i.code === "bullhorn_auth.firm_unhealthy:firm-bad")?.severity,
+    ).toBe("critical");
+    expect(issues.some((i) => i.code === "bullhorn_auth.users_awaiting_reconnect")).toBe(
+      true,
+    );
+    expect(
+      issues.find((i) => i.code === "bullhorn_auth.users_awaiting_reconnect")?.severity,
+    ).toBe("warn");
+  });
+
+  it("returns no issues when auth is healthy", () => {
+    expect(
+      evaluateBullhornAuthHealth({
+        firms: [
+          {
+            firmId: "f1",
+            firmName: "Ok",
+            authMode: "oauth",
+            authHealthy: true,
+            lastAuthErrorAt: null,
+            lastAuthError: null,
+          },
+        ],
+        usersAwaitingReconnect: [],
+      }),
+    ).toEqual([]);
   });
 });

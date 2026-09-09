@@ -61,6 +61,11 @@ so consumers can always branch on `status`.
 2. **report_jobs** — recent `failed` (esp. poison / max attempts) within
    `OPS_FAILED_LOOKBACK_MS` (**2h**), `queued` older than 10m/30m, `running`
    with expired lease or high `attempt_count`.
+3. **Bullhorn auth** — active firms with `bullhorn_tokens.auth_healthy=false`
+   → **critical** (admin must re-authorize). Recruiters with
+   `reconnect_email_sent_at` set and no `refresh_token` → **warn** (auto
+   reconnect email already sent; awaiting click). See
+   [bullhorn-auth-automation.md](./bullhorn-auth-automation.md).
 
 Response: `status` (`ok` | `warn` | `critical`) + `summary` + pasteable
 `agentBrief` + `fingerprint` for dedupe.
@@ -175,6 +180,9 @@ Never put secrets in git. Leave unrelated dirty files alone.
 | `OPS_ALERTS` | optional | `0` disables health scheduler + health notify |
 | `OPS_HEALTH_SECRET` | optional | Dedicated bearer (else MCP token) |
 | `SENDGRID_API_KEY` / `FROM_EMAIL` | for email | Existing transactional mail |
+| `BULLHORN_AUTH_REFRESH` | optional | `0` disables proactive OAuth refresh scheduler |
+| `BULLHORN_AUTH_REFRESH_INTERVAL_MS` | optional (1h) | Proactive firm/user refresh tick |
+| `RECONNECT_EMAIL_COOLDOWN_HOURS` | optional (24) | Auto recruiter reconnect email dedupe |
 
 ## Code map
 
@@ -182,6 +190,7 @@ Never put secrets in git. Leave unrelated dirty files alone.
 - Health notify/dedupe: `artifacts/api-server/src/lib/ops-alerts.ts`
 - Agent notify: `artifacts/api-server/src/lib/ops-agent-notify.ts`
 - Scheduler: `artifacts/api-server/src/lib/ops-health-scheduler.ts`
+- Bullhorn proactive refresh: `bullhorn-auth-refresh-scheduler.ts` (see bullhorn-auth-automation.md)
 - Routes: `artifacts/api-server/src/routes/ops-health.ts`, `ops-agent-notify.ts`
 - Auth: `artifacts/api-server/src/middlewares/ops-internal-auth.ts`
 - Table: `ops_alert_state` (migration `0017_ops_alert_state`)

@@ -20,6 +20,8 @@ export const usersTable = pgTable(
     invitedAt: timestamp("invited_at"),
     enrollToken: text("enroll_token").unique(),
     enrollTokenExpiresAt: timestamp("enroll_token_expires_at"),
+    /** Last automatic reconnect email — used as a spam cooldown. */
+    reconnectEmailSentAt: timestamp("reconnect_email_sent_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

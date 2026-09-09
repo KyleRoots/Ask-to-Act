@@ -175,6 +175,11 @@ startReportJobWorker();
 const { startOpsHealthScheduler } = await import("./lib/ops-health-scheduler.js");
 startOpsHealthScheduler();
 
+const { startBullhornAuthRefreshScheduler } = await import(
+  "./lib/bullhorn-auth-refresh-scheduler.js"
+);
+startBullhornAuthRefreshScheduler();
+
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");

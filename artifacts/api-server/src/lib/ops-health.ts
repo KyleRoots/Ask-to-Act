@@ -3,12 +3,14 @@
  * Pure evaluate* helpers are unit-tested; DB gather lives in evaluateOpsHealthFromDb.
  */
 import { createHash } from "node:crypto";
-import { and, eq, gte, inArray, or } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import {
   db,
   firmsTable,
   noteSnapshotCoverageTable,
   reportJobsTable,
+  bullhornTokensTable,
+  usersTable,
 } from "@workspace/db";
 import {
   DEFAULT_NOTE_SNAPSHOT_TTL_MS,
@@ -69,6 +71,10 @@ export type OpsHealthReport = {
       poison: number;
       workerEnabled: boolean;
       workerActive: number;
+    };
+    bullhornAuth: {
+      unhealthyFirms: number;
+      usersAwaitingReconnect: number;
     };
   };
 };
@@ -230,6 +236,63 @@ export function evaluateNoteSnapshotHealth(opts: {
   return issues;
 }
 
+export type FirmAuthSnapshot = {
+  firmId: string;
+  firmName: string | null;
+  authMode: string;
+  authHealthy: boolean;
+  lastAuthErrorAt: Date | null;
+  lastAuthError: string | null;
+};
+
+export type UserReconnectSnapshot = {
+  userId: string;
+  email: string | null;
+  firmId: string | null;
+  reconnectEmailSentAt: Date;
+};
+
+/**
+ * Firm OAuth unhealthy → critical (whole tenant AI blocked).
+ * Recruiters awaiting reconnect (auto-emailed, still no refresh token) → warn.
+ */
+export function evaluateBullhornAuthHealth(opts: {
+  firms: FirmAuthSnapshot[];
+  usersAwaitingReconnect: UserReconnectSnapshot[];
+}): OpsHealthIssue[] {
+  const issues: OpsHealthIssue[] = [];
+
+  for (const firm of opts.firms) {
+    if (firm.authHealthy) continue;
+    issues.push({
+      code: `bullhorn_auth.firm_unhealthy:${firm.firmId}`,
+      severity: "critical",
+      message: `Bullhorn OAuth unhealthy for ${firm.firmName ?? firm.firmId} — admin re-authorize required`,
+      details: {
+        firmId: firm.firmId,
+        authMode: firm.authMode,
+        lastAuthErrorAt: firm.lastAuthErrorAt?.toISOString() ?? null,
+        lastAuthError: firm.lastAuthError,
+      },
+    });
+  }
+
+  if (opts.usersAwaitingReconnect.length > 0) {
+    const sample = opts.usersAwaitingReconnect.slice(0, 8).map((u) => u.email ?? u.userId);
+    issues.push({
+      code: "bullhorn_auth.users_awaiting_reconnect",
+      severity: "warn",
+      message: `${opts.usersAwaitingReconnect.length} recruiter(s) awaiting Bullhorn reconnect (auto-email already sent)`,
+      details: {
+        count: opts.usersAwaitingReconnect.length,
+        sample,
+      },
+    });
+  }
+
+  return issues;
+}
+
 export function evaluateReportJobsHealth(opts: {
   jobs: ReportJobSnapshot[];
   nowMs: number;
@@ -351,6 +414,8 @@ export function buildOpsHealthReport(opts: {
   workerActive: number;
   maxAttempts: number;
   failedLookbackMs?: number;
+  unhealthyFirmCount?: number;
+  usersAwaitingReconnectCount?: number;
 }): OpsHealthReport {
   const failedLookbackMs = opts.failedLookbackMs ?? OPS_FAILED_LOOKBACK_MS;
   let status: OpsSeverity = "ok";
@@ -379,11 +444,13 @@ export function buildOpsHealthReport(opts: {
   const staleOrFailed = opts.issues.filter((i) =>
     i.code.startsWith("note_snapshot."),
   ).length;
+  const unhealthyFirms = opts.unhealthyFirmCount ?? 0;
+  const usersAwaitingReconnect = opts.usersAwaitingReconnectCount ?? 0;
 
   const fingerprint = opsAlertFingerprint(opts.issues);
   const summary =
     status === "ok"
-      ? "All ops checks passed (note-snapshot coverage + report_jobs)."
+      ? "All ops checks passed (note-snapshot, report_jobs, bullhorn auth)."
       : opts.issues.map((i) => `[${i.severity}] ${i.message}`).join(" · ");
 
   const agentBrief = [
@@ -405,8 +472,9 @@ export function buildOpsHealthReport(opts: {
     "Checks:",
     `  noteSnapshot: activeFirms=${opts.activeFirmCount} coverageRows=${opts.coverageRows.length} staleOrFailed=${staleOrFailed}`,
     `  reportJobs: recentFailed=${recentFailed.length} staleQueued=${staleQueued.length} staleRunning=${staleRunning.length} poison=${poison.length} workerEnabled=${opts.workerEnabled} workerActive=${opts.workerActive}`,
+    `  bullhornAuth: unhealthyFirms=${unhealthyFirms} usersAwaitingReconnect=${usersAwaitingReconnect}`,
     "",
-    "Hints: GET /api/internal/ops-health (service bearer); note-snapshot cron POST /api/firms/:id/note-snapshot/sync; report_jobs lease worker in api-server.",
+    "Hints: GET /api/internal/ops-health (service bearer); firm OAuth → admin setup reconnect; recruiter → one-click reconnect email (auto); note-snapshot cron; report_jobs lease worker.",
   ].join("\n");
 
   return {
@@ -429,6 +497,10 @@ export function buildOpsHealthReport(opts: {
         poison: poison.length,
         workerEnabled: opts.workerEnabled,
         workerActive: opts.workerActive,
+      },
+      bullhornAuth: {
+        unhealthyFirms,
+        usersAwaitingReconnect,
       },
     },
   };
@@ -499,6 +571,67 @@ export async function evaluateOpsHealthFromDb(
     ...evaluateReportJobsHealth({ jobs, nowMs, maxAttempts }),
   ];
 
+  const firmAuthRows =
+    activeIds.length > 0
+      ? await db
+          .select({
+            firmId: bullhornTokensTable.firmId,
+            authMode: bullhornTokensTable.authMode,
+            authHealthy: bullhornTokensTable.authHealthy,
+            lastAuthErrorAt: bullhornTokensTable.lastAuthErrorAt,
+            lastAuthError: bullhornTokensTable.lastAuthError,
+          })
+          .from(bullhornTokensTable)
+          .where(inArray(bullhornTokensTable.firmId, activeIds))
+      : [];
+
+  const firmAuthSnapshots: FirmAuthSnapshot[] = firmAuthRows
+    .filter((r): r is typeof r & { firmId: string } => Boolean(r.firmId))
+    .map((r) => ({
+      firmId: r.firmId,
+      firmName: firmNameById.get(r.firmId) ?? null,
+      authMode: r.authMode,
+      authHealthy: r.authHealthy,
+      lastAuthErrorAt: r.lastAuthErrorAt,
+      lastAuthError: r.lastAuthError,
+    }));
+
+  // Auto-emailed recruiters who still have no refresh token = awaiting reconnect.
+  const awaitingRows = await db
+    .select({
+      userId: usersTable.id,
+      email: usersTable.email,
+      firmId: usersTable.firmId,
+      reconnectEmailSentAt: usersTable.reconnectEmailSentAt,
+    })
+    .from(usersTable)
+    .where(
+      and(
+        isNull(usersTable.refreshToken),
+        isNotNull(usersTable.reconnectEmailSentAt),
+      ),
+    )
+    .limit(200);
+
+  const usersAwaitingReconnect: UserReconnectSnapshot[] = awaitingRows
+    .filter(
+      (r): r is typeof r & { reconnectEmailSentAt: Date } =>
+        r.reconnectEmailSentAt != null,
+    )
+    .map((r) => ({
+      userId: r.userId,
+      email: r.email,
+      firmId: r.firmId,
+      reconnectEmailSentAt: r.reconnectEmailSentAt,
+    }));
+
+  issues.push(
+    ...evaluateBullhornAuthHealth({
+      firms: firmAuthSnapshots,
+      usersAwaitingReconnect,
+    }),
+  );
+
   const workerStats = getReportJobWorkerStats();
   // Worker disabled via env is an ops concern when jobs are queued.
   const workerEnabled = process.env["REPORT_JOB_WORKER"] !== "0";
@@ -519,6 +652,8 @@ export async function evaluateOpsHealthFromDb(
     workerEnabled,
     workerActive: workerStats.activeCount,
     maxAttempts,
+    unhealthyFirmCount: firmAuthSnapshots.filter((f) => !f.authHealthy).length,
+    usersAwaitingReconnectCount: usersAwaitingReconnect.length,
   });
 }
 

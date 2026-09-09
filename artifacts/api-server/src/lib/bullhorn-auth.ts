@@ -1053,6 +1053,11 @@ export async function getUserSession(userId: string): Promise<Session> {
       userSessions.delete(userId);
       logger.error({ userId, err }, "Bullhorn: user session refresh failed — re-enrollment may be required");
       const connectUrl = await getBullhornReconnectUrlForUser(userId);
+      // Fire-and-forget notify: recruiter gets a one-click email without waiting
+      // for Kyle/admin to notice. Cooldown lives in maybeSendUserReconnectEmail.
+      void import("./user-reconnect-notify.js").then(({ maybeSendUserReconnectEmail }) =>
+        maybeSendUserReconnectEmail({ userId, connectUrl }),
+      );
       throw new BullhornReconnectRequiredError(connectUrl);
     }
   })().finally(() => {

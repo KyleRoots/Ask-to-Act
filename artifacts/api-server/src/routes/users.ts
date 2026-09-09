@@ -403,6 +403,13 @@ router.post("/users/:id/invite", bearerAuth, requireService, async (req: Request
         };
         if (isReconnect) {
           await sendReconnectEmail(payload);
+          await db
+            .update(usersTable)
+            .set({
+              reconnectEmailSentAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(usersTable.id, id));
         } else {
           await sendInviteEmail(payload);
         }
