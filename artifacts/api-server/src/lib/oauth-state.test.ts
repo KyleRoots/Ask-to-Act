@@ -3,8 +3,11 @@ import { db, oauthStatesTable } from "@workspace/db";
 import { like } from "drizzle-orm";
 import {
   rememberState,
+  claimStateForExchange,
   consumeState,
+  deleteClaimedState,
   peekFirmId,
+  peekExpectedGeneration,
   userIdFromState,
 } from "./oauth-state.js";
 
@@ -20,9 +23,18 @@ beforeAll(async () => {
     CREATE TABLE IF NOT EXISTS oauth_states (
       state TEXT PRIMARY KEY NOT NULL,
       firm_id TEXT,
+      expected_generation INTEGER,
+      claim_attempt_id TEXT,
+      claimed_at TIMESTAMP,
       expires_at TIMESTAMP NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT now()
     );
+  `);
+  await pool.query(`
+    ALTER TABLE oauth_states
+      ADD COLUMN IF NOT EXISTS expected_generation INTEGER,
+      ADD COLUMN IF NOT EXISTS claim_attempt_id TEXT,
+      ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP;
   `);
   await cleanup();
 });
@@ -32,10 +44,22 @@ beforeEach(cleanup);
 describe("oauth-state (durable)", () => {
   it("remembers and peeks firmId, then consumes once", async () => {
     const state = `${PREFIX}svc-1`;
-    await rememberState(state, "firm-abc");
+    await rememberState(state, "firm-abc", 4);
     expect(await peekFirmId(state)).toBe("firm-abc");
+    expect(await peekExpectedGeneration(state)).toBe(4);
     expect(await consumeState(state)).toBe(true);
     expect(await peekFirmId(state)).toBeNull();
+    expect(await consumeState(state)).toBe(false);
+  });
+
+  it("claims Bullhorn exchange once and deletes only the matching claim", async () => {
+    const state = `${PREFIX}claim`;
+    await rememberState(state, "firm-abc", 9);
+    const claim = await claimStateForExchange(state);
+    expect(claim).toMatchObject({ firmId: "firm-abc", expectedGeneration: 9 });
+    expect(await claimStateForExchange(state)).toBeNull();
+    expect(await deleteClaimedState(state, "wrong-attempt")).toBe(false);
+    expect(await deleteClaimedState(state, claim!.attemptId)).toBe(true);
     expect(await consumeState(state)).toBe(false);
   });
 
@@ -53,11 +77,14 @@ describe("oauth-state (durable)", () => {
 
   it("rejects expired state on consume", async () => {
     const state = `${PREFIX}expired`;
-    await db.insert(oauthStatesTable).values({
-      state,
-      firmId: "firm-x",
-      expiresAt: new Date(Date.now() - 60_000),
-    });
+    const { pool } = await import("@workspace/db");
+    await pool.query(
+      `
+        INSERT INTO oauth_states (state, firm_id, expires_at)
+        VALUES ($1, 'firm-x', now() - interval '1 minute')
+      `,
+      [state],
+    );
     expect(await peekFirmId(state)).toBeNull();
     expect(await consumeState(state)).toBe(false);
   });

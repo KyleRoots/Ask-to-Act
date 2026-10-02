@@ -44,6 +44,7 @@ const SERVICE_TOKEN = process.env["MCP_BEARER_TOKEN"];
 // prove the service guard is specific (it must NOT fire for a normal firm).
 const PREFIX = "test-task54";
 const CONTROL_FIRM = `${PREFIX}-firm-control`;
+const SERVICE_FIRM = `${PREFIX}-firm-service`;
 
 // Resolved in beforeAll: the real service firm's id (the row whose auth_mode is
 // "service"). Looking it up by definition keeps the test resilient to id
@@ -55,10 +56,29 @@ beforeAll(async () => {
     throw new Error("MCP_BEARER_TOKEN must be set for these tests to run.");
   }
 
+  await db.delete(firmConfigTable).where(eq(firmConfigTable.firmId, SERVICE_FIRM));
+  await db.delete(firmConfigTable).where(eq(firmConfigTable.firmId, CONTROL_FIRM));
+  await db.delete(bullhornTokensTable).where(eq(bullhornTokensTable.firmId, SERVICE_FIRM));
+  await db.delete(firmsTable).where(inArray(firmsTable.id, [CONTROL_FIRM, SERVICE_FIRM]));
+  await db.insert(firmsTable).values([
+    { id: SERVICE_FIRM, name: "Task54 Service Firm" },
+    { id: CONTROL_FIRM, name: "Task54 Control Firm" },
+  ]);
+  await db.insert(bullhornTokensTable).values({
+    id: `${SERVICE_FIRM}-token`,
+    firmId: SERVICE_FIRM,
+    refreshToken: `${PREFIX}-service-refresh`,
+    oauthUrl: "https://oauth.test.invalid",
+    restUrl: "https://rest.test.invalid/rest-services/session",
+    loginUrl: "https://rest.test.invalid/rest-services/login",
+    authMode: "service",
+    authHealthy: true,
+  });
+
   const rows = await db
     .select({ firmId: bullhornTokensTable.firmId })
     .from(bullhornTokensTable)
-    .where(eq(bullhornTokensTable.authMode, "service"))
+    .where(eq(bullhornTokensTable.firmId, SERVICE_FIRM))
     .limit(1);
   const serviceFirmId = rows[0]?.firmId;
   if (!serviceFirmId) {
@@ -67,14 +87,13 @@ beforeAll(async () => {
     );
   }
   SERVICE_FIRM_ID = serviceFirmId;
-
-  await db.delete(firmsTable).where(inArray(firmsTable.id, [CONTROL_FIRM]));
-  await db.insert(firmsTable).values([{ id: CONTROL_FIRM, name: "Task54 Control Firm" }]);
 });
 
 afterAll(async () => {
+  await db.delete(firmConfigTable).where(eq(firmConfigTable.firmId, SERVICE_FIRM));
   await db.delete(firmConfigTable).where(eq(firmConfigTable.firmId, CONTROL_FIRM));
-  await db.delete(firmsTable).where(inArray(firmsTable.id, [CONTROL_FIRM]));
+  await db.delete(bullhornTokensTable).where(eq(bullhornTokensTable.firmId, SERVICE_FIRM));
+  await db.delete(firmsTable).where(inArray(firmsTable.id, [CONTROL_FIRM, SERVICE_FIRM]));
 });
 
 describe("POST /api/firms/:id/discover-config — service firm protection", () => {

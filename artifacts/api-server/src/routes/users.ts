@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { db, usersTable, firmsTable } from "@workspace/db";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import {
   invalidateUserSession,
@@ -1019,6 +1019,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
         enrollToken: usersTable.enrollToken,
         enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
         refreshToken: usersTable.refreshToken,
+        bullhornRefreshGeneration: sql<number>`bullhorn_refresh_generation`,
         apiKey: usersTable.apiKey,
       })
       .from(usersTable)
@@ -1112,7 +1113,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
       try {
         const state = `user:${rows[0].id}:${randomBytes(16).toString("hex")}`;
         const userFirmId = rows[0].firmId ?? undefined;
-        await rememberState(state, userFirmId);
+        await rememberState(state, userFirmId, rows[0].bullhornRefreshGeneration);
         const authorizeUrl = await getAuthorizeUrl(state, userFirmId);
         res.cookie(ENROLL_ATTEMPT_COOKIE, rows[0].id, {
           httpOnly: true,

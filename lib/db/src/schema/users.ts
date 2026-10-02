@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, bigint, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, bigint, index, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { firmsTable } from "./firms";
@@ -22,6 +22,18 @@ export const usersTable = pgTable(
     enrollTokenExpiresAt: timestamp("enroll_token_expires_at"),
     /** Last automatic reconnect email — used as a spam cooldown. */
     reconnectEmailSentAt: timestamp("reconnect_email_sent_at"),
+    bullhornRefreshGeneration: integer("bullhorn_refresh_generation").notNull().default(0),
+    bullhornRefreshOutcome: text("bullhorn_refresh_outcome").notNull().default("idle"),
+    bullhornRefreshAttemptId: text("bullhorn_refresh_attempt_id"),
+    bullhornRefreshLeaseExpiresAt: timestamp("bullhorn_refresh_lease_expires_at"),
+    bullhornRefreshUncertainAt: timestamp("bullhorn_refresh_uncertain_at"),
+    bullhornReconnectNoticeState: text("bullhorn_reconnect_notice_state")
+      .notNull()
+      .default("idle"),
+    bullhornReconnectNoticeAttemptId: text("bullhorn_reconnect_notice_attempt_id"),
+    bullhornReconnectNoticeClaimedAt: timestamp("bullhorn_reconnect_notice_claimed_at"),
+    bullhornReconnectNoticeCompletedAt: timestamp("bullhorn_reconnect_notice_completed_at"),
+    bullhornReconnectNoticeError: text("bullhorn_reconnect_notice_error"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

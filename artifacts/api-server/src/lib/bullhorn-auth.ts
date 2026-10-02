@@ -1,10 +1,23 @@
 import { db, bullhornTokensTable, usersTable, firmsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "./logger.js";
 import { decryptToken, encryptToken } from "./token-crypto.js";
 import { getBaseUrl } from "./getBaseUrl.js";
+import {
+  claimRefreshAttempt,
+  currentRefreshGeneration,
+  persistDefinitiveInvalidGrant,
+  persistReconnectTokenBeforeLogin,
+  persistRefreshTokenSuccess,
+  persistRefreshUncertain,
+  refreshFlightKey,
+  runInProcessRefreshFlight,
+  updateFirmSessionAfterRefresh,
+  updateUserSessionAfterRefresh,
+} from "./bullhorn-refresh-coordinator.js";
+import { BULLHORN_REFRESH_HTTP_TIMEOUT_MS } from "./bullhorn-refresh-limits.js";
 
 const USER_ENROLL_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -31,11 +44,14 @@ export class BullhornReconnectRequiredError extends Error {
  * Clears the stale Bullhorn refresh session first. Without that, the enroll
  * page short-circuits to "already connected" and never replaces the dead token.
  */
-export async function getBullhornReconnectUrlForUser(userId: string): Promise<string> {
+export async function getBullhornReconnectUrlForUser(
+  userId: string,
+  expectedGeneration?: number,
+): Promise<string> {
   const enrollToken = randomBytes(32).toString("hex");
   const enrollTokenExpiresAt = new Date(Date.now() + USER_ENROLL_TOKEN_TTL_MS);
   invalidateUserSession(userId);
-  await db
+  const updated = await db
     .update(usersTable)
     .set({
       enrollToken,
@@ -47,7 +63,16 @@ export async function getBullhornReconnectUrlForUser(userId: string): Promise<st
       sessionExpiresAt: null,
       updatedAt: new Date(),
     })
-    .where(eq(usersTable.id, userId));
+    .where(
+      expectedGeneration === undefined
+        ? eq(usersTable.id, userId)
+        : sql`${usersTable.id} = ${userId}
+            AND bullhorn_refresh_generation = ${expectedGeneration}`,
+    )
+    .returning({ id: usersTable.id });
+  if (updated.length !== 1) {
+    throw new Error("Bullhorn reconnect URL request was superseded by a newer user generation.");
+  }
   // force=1 skips the "already connected" short-circuit; manual=1 opens the
   // credential form so the recruiter actually re-auths Bullhorn.
   return `${getBaseUrl()}/api/auth/user/enroll?token=${enrollToken}&force=1&manual=1`;
@@ -88,6 +113,16 @@ interface Session {
   refreshToken: string;
   tokenExpiresAt: number;
   sessionExpiresAt: number;
+}
+
+class BullhornRefreshTokenError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: "invalid_grant" | "ambiguous",
+  ) {
+    super(message);
+    this.name = "BullhornRefreshTokenError";
+  }
 }
 
 /**
@@ -144,6 +179,9 @@ let endpoints: Endpoints | null = null;
 // trip Bullhorn's failedLoginLockoutThreshold and lock the API user.
 const DIRECT_LOGIN_COOLDOWN_MS = 60_000;
 let directLoginBlockedUntil = 0;
+let beforeUserReconnectUrlForTests:
+  | ((opts: { userId: string; expectedGeneration: number }) => Promise<void> | void)
+  | null = null;
 
 function getEnv(key: string): string {
   const val = process.env[key];
@@ -155,11 +193,13 @@ function getEnv(key: string): string {
 
 interface FirmTokenRow {
   refreshToken: string | null;
+  encryptedRefreshToken: string | null;
   oauthUrl: string | null;
   restUrl: string | null;
   loginUrl: string | null;
   authMode: string;
   authHealthy: boolean;
+  refreshGeneration: number;
 }
 
 /** Loads a firm's stored connection row (decrypting the refresh token). */
@@ -172,6 +212,7 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
       loginUrl: bullhornTokensTable.loginUrl,
       authMode: bullhornTokensTable.authMode,
       authHealthy: bullhornTokensTable.authHealthy,
+      refreshGeneration: sql<number>`refresh_generation`,
     })
     .from(bullhornTokensTable)
     .where(eq(bullhornTokensTable.firmId, firmId))
@@ -180,11 +221,13 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
   if (!row) return null;
   return {
     refreshToken: row.refreshToken ? decryptToken(row.refreshToken) : null,
+    encryptedRefreshToken: row.refreshToken ?? null,
     oauthUrl: row.oauthUrl ?? null,
     restUrl: row.restUrl ?? null,
     loginUrl: row.loginUrl ?? null,
     authMode: row.authMode ?? "oauth",
     authHealthy: row.authHealthy,
+    refreshGeneration: (row as { refreshGeneration?: number }).refreshGeneration ?? 0,
   };
 }
 
@@ -237,6 +280,15 @@ async function markFirmAuthUnhealthy(firmId: string, err: unknown): Promise<void
   } catch (alertErr) {
     logger.error({ firmId, err: alertErr }, "Failed to send Bullhorn auth failure alert");
   }
+}
+
+async function notifyFirmAuthFailure(opts: {
+  firmId: string;
+  expectedGeneration: number;
+  errorMessage: string;
+}): Promise<void> {
+  const { maybeSendFirmAuthFailureAlert } = await import("./firm-auth-failure-notify.js");
+  await maybeSendFirmAuthFailureAlert(opts);
 }
 
 export type FirmBullhornHealthStatus = {
@@ -649,6 +701,8 @@ async function fetchTokenWithRefresh(
   oauthUrl: string,
   refreshToken: string,
 ): Promise<TokenResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BULLHORN_REFRESH_HTTP_TIMEOUT_MS);
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
@@ -656,16 +710,34 @@ async function fetchTokenWithRefresh(
     client_secret: getEnv("BULLHORN_CLIENT_SECRET"),
   });
 
-  const res = await fetch(`${oauthUrl}/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${oauthUrl}/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = controller.signal.aborted;
+    throw new BullhornRefreshTokenError(
+      aborted
+        ? "Bullhorn refresh token request timed out; provider processing may still complete."
+        : `Bullhorn refresh token request failed ambiguously: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+      "ambiguous",
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
+    const invalidGrant = res.status === 400 && /invalid_grant/i.test(text);
+    throw new BullhornRefreshTokenError(
       `Bullhorn refresh token request failed (${res.status}): ${text.slice(0, 200)}`,
+      invalidGrant ? "invalid_grant" : "ambiguous",
     );
   }
 
@@ -745,23 +817,52 @@ function buildSession(tokens: TokenResponse, loginData: LoginResponse, sessionEx
  * tokens, establishes a Bullhorn REST session, and persists the refresh token
  * so future sessions can be created headlessly. Called by the OAuth callback.
  */
-export async function completeAuthorization(code: string, firmId?: string): Promise<void> {
+export async function completeAuthorization(
+  code: string,
+  firmId?: string,
+  expectedGeneration?: number,
+  claimedState?: { state: string; attemptId: string },
+): Promise<void> {
   const fid = currentFirmId(firmId);
   const existing = await loadTokenRow(fid);
   const ep = await resolveFirmEndpoints(existing);
+  const generation = expectedGeneration ?? existing?.refreshGeneration ?? 0;
+  if (existing && existing.refreshGeneration !== generation) {
+    throw new Error("Bullhorn reconnect callback is stale for this firm generation.");
+  }
+  if (!existing && generation !== 0) {
+    throw new Error("Bullhorn reconnect callback is stale for a missing firm connection.");
+  }
   const tokens = await exchangeCodeForToken(ep.oauthUrl, code);
+  const saved = await persistReconnectTokenBeforeLogin({
+    kind: "firm",
+    id: fid,
+    expectedGeneration: generation,
+    encryptedRefreshToken: encryptToken(tokens.refresh_token),
+    claimedState,
+    firm: {
+      oauthUrl: ep.oauthUrl,
+      loginUrl: ep.loginUrl,
+      authMode: existing?.authMode === "service" ? "service" : "oauth",
+      allowInsert: !existing,
+    },
+  });
+  if (!saved.saved) {
+    throw new Error("Bullhorn reconnect was superseded before token persistence.");
+  }
   const loginData = await login(tokens.access_token, ep.loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
   const s = buildSession(tokens, loginData, sessionExpiresAt);
-  sessions.set(fid, s);
-  await saveFirmConnection(fid, {
-    refreshToken: tokens.refresh_token,
-    oauthUrl: ep.oauthUrl,
+  const sessionUpdated = await updateFirmSessionAfterRefresh({
+    firmId: fid,
+    generation: saved.generation,
     restUrl: loginData.restUrl,
     loginUrl: deriveLoginUrl(loginData.restUrl) ?? ep.loginUrl,
-    // Preserve a service firm's mode across reconnects; new firms are oauth.
-    authMode: existing?.authMode === "service" ? "service" : "oauth",
   });
+  if (!sessionUpdated) {
+    throw new Error("Bullhorn reconnect was superseded before session publication.");
+  }
+  sessions.set(fid, s);
   logger.info({ restUrl: s.restUrl, firmId: fid }, "Bullhorn: authorization complete, session established");
 }
 
@@ -772,14 +873,96 @@ export async function completeAuthorization(code: string, firmId?: string): Prom
  */
 async function sessionFromRefreshToken(
   firmId: string,
-  refreshToken: string,
+  row: FirmTokenRow,
   ep: Endpoints,
 ): Promise<Session> {
-  const tokens = await fetchTokenWithRefresh(ep.oauthUrl, refreshToken);
+  if (!row.encryptedRefreshToken || !row.refreshToken) {
+    throw new Error("No Bullhorn refresh token available for firm refresh.");
+  }
+  const attemptId = randomUUID();
+  const claimed = await claimRefreshAttempt({
+    kind: "firm",
+    id: firmId,
+    attemptId,
+    expectedGeneration: row.refreshGeneration,
+    expectedEncryptedRefreshToken: row.encryptedRefreshToken,
+  });
+  if (!claimed) {
+    throw new Error("Bullhorn firm refresh was not claimed; another attempt or uncertainty exists.");
+  }
+
+  let tokens: TokenResponse;
+  let persistedGeneration: number | null = null;
+  try {
+    tokens = await fetchTokenWithRefresh(ep.oauthUrl, row.refreshToken);
+  } catch (err) {
+    if (err instanceof BullhornRefreshTokenError && err.kind === "invalid_grant") {
+      const persisted = await persistDefinitiveInvalidGrant({
+        kind: "firm",
+        id: firmId,
+        attemptId,
+        expectedGeneration: row.refreshGeneration,
+        error: err.message,
+      });
+      if (persisted && row.authMode !== "service") {
+        await notifyFirmAuthFailure({
+          firmId,
+          expectedGeneration: row.refreshGeneration,
+          errorMessage: err.message,
+        });
+      }
+    } else {
+      const persisted = await persistRefreshUncertain({
+        kind: "firm",
+        id: firmId,
+        attemptId,
+        expectedGeneration: row.refreshGeneration,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      if (persisted && row.authMode !== "service") {
+        await notifyFirmAuthFailure({
+          firmId,
+          expectedGeneration: row.refreshGeneration,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    throw err;
+  }
+
+  const replacementCiphertext = encryptToken(tokens.refresh_token);
+  const saved = await persistRefreshTokenSuccess({
+    kind: "firm",
+    id: firmId,
+    attemptId,
+    expectedGeneration: row.refreshGeneration,
+    expectedEncryptedRefreshToken: row.encryptedRefreshToken,
+    replacementEncryptedRefreshToken: replacementCiphertext,
+  });
+  if (!saved.saved) {
+    if (row.authMode !== "service") {
+      await notifyFirmAuthFailure({
+        firmId,
+        expectedGeneration: row.refreshGeneration,
+        errorMessage: "conditional refresh-token save exhausted retry budget",
+      });
+    }
+    throw new Error("Bullhorn firm refresh token save is uncertain; refusing REST login.");
+  }
+  persistedGeneration = saved.generation;
+
   const loginData = await login(tokens.access_token, ep.loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
   const s = buildSession(tokens, loginData, sessionExpiresAt);
-  await saveRotatedRefreshToken(firmId, tokens.refresh_token);
+  const sessionUpdated = await updateFirmSessionAfterRefresh({
+    firmId,
+    generation: persistedGeneration,
+    restUrl: loginData.restUrl,
+    loginUrl: deriveLoginUrl(loginData.restUrl) ?? ep.loginUrl,
+  });
+  if (!sessionUpdated) {
+    throw new Error("Bullhorn firm refresh was superseded before session publication.");
+  }
   return s;
 }
 
@@ -801,19 +984,37 @@ async function directLogin(firmId: string): Promise<Session> {
     );
   }
   try {
+    const existing = await loadTokenRow(firmId);
     const { oauthUrl, loginUrl } = await discoverEndpoints();
     const code = await fetchAuthCodeHeadless(oauthUrl);
     const tokens = await exchangeCodeForToken(oauthUrl, code);
+    const saved = await persistReconnectTokenBeforeLogin({
+      kind: "firm",
+      id: firmId,
+      expectedGeneration: existing?.refreshGeneration ?? 0,
+      encryptedRefreshToken: encryptToken(tokens.refresh_token),
+      firm: {
+        oauthUrl,
+        loginUrl,
+        authMode: "service",
+        allowInsert: !existing,
+      },
+    });
+    if (!saved.saved) {
+      throw new Error("Bullhorn headless login was superseded before token persistence.");
+    }
     const loginData = await login(tokens.access_token, loginUrl);
     const sessionExpiresAt = await resolveSessionExpiry(loginData);
     const s = buildSession(tokens, loginData, sessionExpiresAt);
-    await saveFirmConnection(firmId, {
-      refreshToken: tokens.refresh_token,
-      oauthUrl,
+    const sessionUpdated = await updateFirmSessionAfterRefresh({
+      firmId,
+      generation: saved.generation,
       restUrl: loginData.restUrl,
       loginUrl: deriveLoginUrl(loginData.restUrl) ?? loginUrl,
-      authMode: "service",
     });
+    if (!sessionUpdated) {
+      throw new Error("Bullhorn headless login was superseded before session publication.");
+    }
     logger.info({ restUrl: s.restUrl, firmId }, "Bullhorn: headless direct login complete");
     return s;
   } catch (err) {
@@ -834,22 +1035,15 @@ async function directLogin(firmId: string): Promise<Session> {
  */
 export async function connectHeadless(firmId?: string): Promise<{ restUrl: string }> {
   const fid = currentFirmId(firmId);
-  const inProgress = authInProgress.get(fid);
-  if (inProgress) {
-    const existing = await inProgress;
-    return { restUrl: existing.restUrl };
-  }
-  const work = directLogin(fid)
-    .then((s) => {
-      sessions.set(fid, s);
-      logger.info({ restUrl: s.restUrl, firmId: fid }, "Bullhorn: session established (headless)");
-      return s;
-    })
-    .finally(() => {
-      authInProgress.delete(fid);
-    });
-  authInProgress.set(fid, work);
-  const s = await work;
+  const s = await runInProcessRefreshFlight(refreshFlightKey("firm", fid), async () => {
+    const session = await directLogin(fid);
+    sessions.set(fid, session);
+    logger.info(
+      { restUrl: session.restUrl, firmId: fid },
+      "Bullhorn: session established (headless)",
+    );
+    return session;
+  });
   return { restUrl: s.restUrl };
 }
 
@@ -874,7 +1068,8 @@ async function reauthenticate(firmId: string): Promise<Session> {
   if (refreshToken) {
     try {
       logger.info({ firmId }, "Bullhorn: establishing session from refresh token");
-      return await sessionFromRefreshToken(firmId, refreshToken, ep);
+      if (!row) throw new Error("No Bullhorn token row found for firm refresh.");
+      return await sessionFromRefreshToken(firmId, row, ep);
     } catch (err) {
       // Only the env-credential service firm can self-heal via headless login;
       // customer (oauth) firms must re-authorize interactively.
@@ -887,9 +1082,11 @@ async function reauthenticate(firmId: string): Promise<Session> {
       }
       logger.error(
         { firmId, err },
-        "Bullhorn: refresh token failed for oauth firm; re-authorization required",
+        "Bullhorn: refresh token failed for oauth firm",
       );
-      await markFirmAuthUnhealthy(firmId, err);
+      if (err instanceof BullhornRefreshTokenError && err.kind !== "invalid_grant") {
+        throw err;
+      }
       throw new BullhornNotAuthorizedError();
     }
   }
@@ -903,11 +1100,6 @@ async function reauthenticate(firmId: string): Promise<Session> {
 
 export async function getSession(firmId?: string): Promise<Session> {
   const fid = currentFirmId(firmId);
-
-  const inProgress = authInProgress.get(fid);
-  if (inProgress) {
-    return inProgress;
-  }
 
   const cached = sessions.get(fid);
   if (cached) {
@@ -929,17 +1121,12 @@ export async function getSession(firmId?: string): Promise<Session> {
   }
 
   logger.info({ firmId: fid }, "Bullhorn: session invalid or missing, (re)authenticating");
-  const work = reauthenticate(fid)
-    .then((s) => {
-      sessions.set(fid, s);
-      logger.info({ firmId: fid, restUrl: s.restUrl }, "Bullhorn: session established");
-      return s;
-    })
-    .finally(() => {
-      authInProgress.delete(fid);
-    });
-  authInProgress.set(fid, work);
-  return work;
+  return runInProcessRefreshFlight(refreshFlightKey("firm", fid), async () => {
+    const s = await reauthenticate(fid);
+    sessions.set(fid, s);
+    logger.info({ firmId: fid, restUrl: s.restUrl }, "Bullhorn: session established");
+    return s;
+  });
 }
 
 /**
@@ -983,28 +1170,6 @@ export async function getUserByApiKey(apiKey: string) {
   return rows[0] ?? null;
 }
 
-/** Persist updated Bullhorn session fields back to the user's row. */
-async function persistUserSession(
-  userId: string,
-  tokens: TokenResponse,
-  loginData: LoginResponse,
-  sessionExpiresAt: number,
-): Promise<Session> {
-  const s = buildSession(tokens, loginData, sessionExpiresAt);
-  await db
-    .update(usersTable)
-    .set({
-      refreshToken: encryptToken(tokens.refresh_token),
-      bhRestToken: loginData.BhRestToken,
-      restUrl: loginData.restUrl,
-      tokenExpiresAt: s.tokenExpiresAt,
-      sessionExpiresAt,
-      updatedAt: new Date(),
-    })
-    .where(eq(usersTable.id, userId));
-  return s;
-}
-
 /**
  * Returns a live Bullhorn session for the given enrolled user. Refreshes and
  * persists the rotating refresh token when the session is stale. Throws if the
@@ -1012,9 +1177,6 @@ async function persistUserSession(
  * required).
  */
 export async function getUserSession(userId: string): Promise<Session> {
-  const inProgress = userAuthInProgress.get(userId);
-  if (inProgress) return inProgress;
-
   const cached = userSessions.get(userId);
   if (cached) {
     const tokenOk = Date.now() < cached.tokenExpiresAt;
@@ -1022,50 +1184,119 @@ export async function getUserSession(userId: string): Promise<Session> {
     if (tokenOk && sessionOk) return cached;
   }
 
-  const rows = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.id, userId))
-    .limit(1);
-  const user = rows[0];
-  if (!user) throw new Error(`User ${userId} not found.`);
-  if (!user.refreshToken) {
-    const connectUrl = await getBullhornReconnectUrlForUser(userId);
-    throw new BullhornReconnectRequiredError(connectUrl);
-  }
-
-  const work = (async (): Promise<Session> => {
+  return runInProcessRefreshFlight(refreshFlightKey("user", userId), async () => {
+    const rows = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .limit(1);
+    const user = rows[0];
+    if (!user) throw new Error(`User ${userId} not found.`);
+    const expectedGeneration =
+      (user as { bullhornRefreshGeneration?: number }).bullhornRefreshGeneration ?? 0;
+    if (!user.refreshToken) {
+      const connectUrl = await getBullhornReconnectUrlForUser(userId, expectedGeneration);
+      throw new BullhornReconnectRequiredError(connectUrl);
+    }
     // Use the firm's own stored endpoints (captured at connect time) so a user
     // at a firm on a different Bullhorn data-center gets the right OAuth/login
     // URLs, not Myticas's. Falls back to discoverEndpoints() only when no firm
     // row exists (shouldn't happen for an enrolled user, but degrades safely).
     const firmTokenRow = user.firmId ? await loadTokenRow(user.firmId) : null;
     const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
+    const attemptId = randomUUID();
+    const claimed = await claimRefreshAttempt({
+      kind: "user",
+      id: userId,
+      attemptId,
+      expectedGeneration,
+      expectedEncryptedRefreshToken: user.refreshToken,
+    });
+    if (!claimed) {
+      throw new Error("Bullhorn user refresh was not claimed; another attempt or uncertainty exists.");
+    }
+
+    let tokenPersisted = false;
+    let persistedGeneration = expectedGeneration;
     try {
       const tokens = await fetchTokenWithRefresh(oauthUrl, decryptToken(user.refreshToken!));
+      const sPreview = buildSession(
+        tokens,
+        { BhRestToken: "", restUrl: "" },
+        Date.now(),
+      );
+      const replacementCiphertext = encryptToken(tokens.refresh_token);
+      const saved = await persistRefreshTokenSuccess({
+        kind: "user",
+        id: userId,
+        attemptId,
+        expectedGeneration,
+        expectedEncryptedRefreshToken: user.refreshToken!,
+        replacementEncryptedRefreshToken: replacementCiphertext,
+      });
+      if (!saved.saved) {
+        throw new Error("Bullhorn user refresh token save is uncertain; refusing REST login.");
+      }
+      tokenPersisted = true;
+      persistedGeneration = saved.generation;
       const loginData = await login(tokens.access_token, loginUrl);
       const sessionExpiresAt = await resolveSessionExpiry(loginData);
-      const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
+      const s = {
+        ...sPreview,
+        BhRestToken: loginData.BhRestToken,
+        restUrl: loginData.restUrl,
+        sessionExpiresAt,
+      };
+      const sessionUpdated = await updateUserSessionAfterRefresh({
+        userId,
+        generation: persistedGeneration,
+        bhRestToken: loginData.BhRestToken,
+        restUrl: loginData.restUrl,
+        tokenExpiresAt: s.tokenExpiresAt,
+        sessionExpiresAt,
+      });
+      if (!sessionUpdated) {
+        throw new Error("Bullhorn user refresh was superseded before session publication.");
+      }
       userSessions.set(userId, s);
       logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: user session established");
       return s;
     } catch (err) {
       userSessions.delete(userId);
       logger.error({ userId, err }, "Bullhorn: user session refresh failed — re-enrollment may be required");
-      const connectUrl = await getBullhornReconnectUrlForUser(userId);
+      if (tokenPersisted) {
+        throw err;
+      }
+      if (!tokenPersisted) {
+        if (err instanceof BullhornRefreshTokenError && err.kind === "invalid_grant") {
+          await persistDefinitiveInvalidGrant({
+            kind: "user",
+            id: userId,
+            attemptId,
+            expectedGeneration,
+            error: err.message,
+          });
+        } else {
+          await persistRefreshUncertain({
+            kind: "user",
+            id: userId,
+            attemptId,
+            expectedGeneration,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
+      }
+      await beforeUserReconnectUrlForTests?.({ userId, expectedGeneration });
+      const connectUrl = await getBullhornReconnectUrlForUser(userId, expectedGeneration);
       // Fire-and-forget notify: recruiter gets a one-click email without waiting
       // for Kyle/admin to notice. Cooldown lives in maybeSendUserReconnectEmail.
       void import("./user-reconnect-notify.js").then(({ maybeSendUserReconnectEmail }) =>
-        maybeSendUserReconnectEmail({ userId, connectUrl }),
+        maybeSendUserReconnectEmail({ userId, connectUrl, expectedGeneration }),
       );
       throw new BullhornReconnectRequiredError(connectUrl);
     }
-  })().finally(() => {
-    userAuthInProgress.delete(userId);
   });
-
-  userAuthInProgress.set(userId, work);
-  return work;
 }
 
 /** Drop the in-memory session cache for a user (forces re-auth on next call). */
@@ -1155,14 +1386,40 @@ export async function enrollUserHeadless(
     .where(eq(usersTable.id, userId))
     .limit(1);
   const firmId = userRows[0]?.firmId ?? null;
+  const expectedGeneration = await currentRefreshGeneration("user", userId);
+  if (expectedGeneration === null) throw new Error(`User ${userId} not found.`);
+  if (!firmId) {
+    throw new Error("Bullhorn user enrollment requires an active firm membership.");
+  }
   const firmTokenRow = firmId ? await loadTokenRow(firmId) : null;
   const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
 
   const code = await fetchAuthCodeHeadlessForUser(oauthUrl, bhUsername, bhPassword);
   const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const saved = await persistReconnectTokenBeforeLogin({
+    kind: "user",
+    id: userId,
+    expectedGeneration,
+    encryptedRefreshToken: encryptToken(tokens.refresh_token),
+    expectedFirmId: firmId,
+  });
+  if (!saved.saved) {
+    throw new Error("Bullhorn user enrollment was superseded before token persistence.");
+  }
   const loginData = await login(tokens.access_token, loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
-  const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
+  const s = buildSession(tokens, loginData, sessionExpiresAt);
+  const sessionUpdated = await updateUserSessionAfterRefresh({
+    userId,
+    generation: saved.generation,
+    bhRestToken: loginData.BhRestToken,
+    restUrl: loginData.restUrl,
+    tokenExpiresAt: s.tokenExpiresAt,
+    sessionExpiresAt,
+  });
+  if (!sessionUpdated) {
+    throw new Error("Bullhorn user enrollment was superseded before session publication.");
+  }
   userSessions.set(userId, s);
   logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: per-user headless enrollment complete");
 }
@@ -1171,7 +1428,12 @@ export async function enrollUserHeadless(
  * Completes a user's Bullhorn enrollment via the browser-based OAuth callback
  * (kept for compatibility; headless enrollment is now preferred via enrollUserHeadless).
  */
-export async function completeUserEnrollment(userId: string, code: string): Promise<void> {
+export async function completeUserEnrollment(
+  userId: string,
+  code: string,
+  expectedGeneration?: number,
+  claimedState?: { state: string; attemptId: string; expectedFirmId?: string | null },
+): Promise<void> {
   // Use the user's firm's stored endpoints so a second tenant on a different
   // Bullhorn data-center gets the correct token exchange and login URLs.
   const userRows = await db
@@ -1180,13 +1442,67 @@ export async function completeUserEnrollment(userId: string, code: string): Prom
     .where(eq(usersTable.id, userId))
     .limit(1);
   const firmId = userRows[0]?.firmId ?? null;
+  const currentGeneration = await currentRefreshGeneration("user", userId);
+  if (currentGeneration === null) throw new Error(`User ${userId} not found.`);
+  const generation = expectedGeneration ?? currentGeneration;
+  if (currentGeneration !== generation) {
+    throw new Error("Bullhorn user enrollment callback is stale for this generation.");
+  }
+  if (!firmId) {
+    throw new Error("Bullhorn user enrollment callback requires an active firm membership.");
+  }
+  if (claimedState?.expectedFirmId !== undefined && firmId !== claimedState.expectedFirmId) {
+    throw new Error("Bullhorn user enrollment callback is stale for this firm membership.");
+  }
   const firmTokenRow = firmId ? await loadTokenRow(firmId) : null;
   const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
 
   const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const saved = await persistReconnectTokenBeforeLogin({
+    kind: "user",
+    id: userId,
+    expectedGeneration: generation,
+    encryptedRefreshToken: encryptToken(tokens.refresh_token),
+    expectedFirmId: firmId,
+    claimedState,
+  });
+  if (!saved.saved) {
+    throw new Error("Bullhorn user enrollment was superseded before token persistence.");
+  }
   const loginData = await login(tokens.access_token, loginUrl);
   const sessionExpiresAt = await resolveSessionExpiry(loginData);
-  const s = await persistUserSession(userId, tokens, loginData, sessionExpiresAt);
+  const s = buildSession(tokens, loginData, sessionExpiresAt);
+  const sessionUpdated = await updateUserSessionAfterRefresh({
+    userId,
+    generation: saved.generation,
+    bhRestToken: loginData.BhRestToken,
+    restUrl: loginData.restUrl,
+    tokenExpiresAt: s.tokenExpiresAt,
+    sessionExpiresAt,
+  });
+  if (!sessionUpdated) {
+    throw new Error("Bullhorn user enrollment was superseded before session publication.");
+  }
   userSessions.set(userId, s);
   logger.info({ userId, restUrl: s.restUrl }, "Bullhorn: user enrollment complete (browser callback)");
 }
+
+export const __bullhornAuthTestHooks = {
+  fetchTokenWithRefresh,
+  setBeforeUserReconnectUrl(
+    hook:
+      | ((opts: { userId: string; expectedGeneration: number }) => Promise<void> | void)
+      | null,
+  ) {
+    beforeUserReconnectUrlForTests = hook;
+  },
+  resetAuthState() {
+    sessions.clear();
+    authInProgress.clear();
+    userSessions.clear();
+    userAuthInProgress.clear();
+    endpoints = null;
+    directLoginBlockedUntil = 0;
+    beforeUserReconnectUrlForTests = null;
+  },
+};

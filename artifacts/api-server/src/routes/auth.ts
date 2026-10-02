@@ -9,13 +9,19 @@ import {
   getFirmBullhornHealthStatus,
   firmContext,
 } from "../lib/bullhorn-auth.js";
+import { currentRefreshGeneration } from "../lib/bullhorn-refresh-coordinator.js";
 import {
   completeMailboxConnection,
   getMicrosoftAuthorizeUrl,
   resolveUserIdFromMailboxConnectToken,
 } from "../lib/m365-auth.js";
 import { countEntity } from "../lib/bullhorn-client.js";
-import { rememberState, consumeState, userIdFromState, peekFirmId } from "../lib/oauth-state.js";
+import {
+  claimStateForExchange,
+  consumeState,
+  rememberState,
+  userIdFromState,
+} from "../lib/oauth-state.js";
 import { publicErrorReason } from "../lib/public-error.js";
 import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { logger } from "../lib/logger.js";
@@ -54,7 +60,8 @@ router.get("/auth/bullhorn/login", bearerAuth, requireService, async (req: Reque
       return;
     }
     const state = randomBytes(16).toString("hex");
-    await rememberState(state, firmId);
+    const expectedGeneration = (await currentRefreshGeneration("firm", firmId)) ?? 0;
+    await rememberState(state, firmId, expectedGeneration);
     const url = await getAuthorizeUrl(state, firmId);
     res.redirect(url);
   } catch (err) {
@@ -91,7 +98,8 @@ router.get(
     }
     try {
       const state = randomBytes(16).toString("hex");
-      await rememberState(state, firmId);
+      const expectedGeneration = (await currentRefreshGeneration("firm", firmId)) ?? 0;
+      await rememberState(state, firmId, expectedGeneration);
       const url = await getAuthorizeUrl(state, firmId);
       res.json({ url });
     } catch (err) {
@@ -136,10 +144,8 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  // Peek at firmId BEFORE consuming the state (consumeState deletes the entry).
-  const firmId = (await peekFirmId(state)) ?? undefined;
-
-  if (!(await consumeState(state))) {
+  const claimedState = await claimStateForExchange(state);
+  if (!claimedState) {
     res
       .status(400)
       .send(
@@ -158,11 +164,17 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
     return;
   }
 
+  const firmId = claimedState.firmId ?? undefined;
+  const expectedGeneration = claimedState.expectedGeneration ?? 0;
   const userId = userIdFromState(state);
 
   if (userId) {
     try {
-      await completeUserEnrollment(userId, code);
+      await completeUserEnrollment(userId, code, expectedGeneration, {
+        state,
+        attemptId: claimedState.attemptId,
+        expectedFirmId: claimedState.firmId,
+      });
       logger.info({ userId }, "Bullhorn: user enrollment complete via shared callback");
 
       // One-time enrollment token is now spent — clear it so the link can't be reused.
@@ -245,7 +257,10 @@ router.get("/auth/bullhorn/callback", async (req: Request, res: Response) => {
   }
 
   try {
-    await completeAuthorization(code, firmId);
+    await completeAuthorization(code, firmId, expectedGeneration, {
+      state,
+      attemptId: claimedState.attemptId,
+    });
     res.send(
       page(
         "Bullhorn connected",

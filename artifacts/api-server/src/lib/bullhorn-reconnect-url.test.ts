@@ -4,7 +4,9 @@ vi.mock("@workspace/db", () => ({
   db: {
     update: vi.fn(() => ({
       set: vi.fn(() => ({
-        where: vi.fn(async () => undefined),
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => [{ id: "user-123" }]),
+        })),
       })),
     })),
   },

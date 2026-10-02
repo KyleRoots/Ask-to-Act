@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, unique, boolean } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, unique, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { firmsTable } from "./firms";
@@ -34,6 +34,16 @@ export const bullhornTokensTable = pgTable(
     authHealthy: boolean("auth_healthy").notNull().default(true),
     lastAuthErrorAt: timestamp("last_auth_error_at"),
     lastAuthError: text("last_auth_error"),
+    refreshGeneration: integer("refresh_generation").notNull().default(0),
+    refreshOutcome: text("refresh_outcome").notNull().default("idle"),
+    refreshAttemptId: text("refresh_attempt_id"),
+    refreshLeaseExpiresAt: timestamp("refresh_lease_expires_at"),
+    refreshUncertainAt: timestamp("refresh_uncertain_at"),
+    reconnectNoticeState: text("reconnect_notice_state").notNull().default("idle"),
+    reconnectNoticeAttemptId: text("reconnect_notice_attempt_id"),
+    reconnectNoticeClaimedAt: timestamp("reconnect_notice_claimed_at"),
+    reconnectNoticeCompletedAt: timestamp("reconnect_notice_completed_at"),
+    reconnectNoticeError: text("reconnect_notice_error"),
     connectedAt: timestamp("connected_at"),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

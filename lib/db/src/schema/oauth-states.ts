@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
 
 /**
  * Short-lived OAuth CSRF / correlation state for browser authorize → callback.
@@ -10,6 +10,9 @@ export const oauthStatesTable = pgTable(
   {
     state: text("state").primaryKey(),
     firmId: text("firm_id"),
+    expectedGeneration: integer("expected_generation"),
+    claimAttemptId: text("claim_attempt_id"),
+    claimedAt: timestamp("claimed_at"),
     expiresAt: timestamp("expires_at").notNull(),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

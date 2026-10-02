@@ -1,35 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  vi,
-} from "vitest";
-
-// ---------------------------------------------------------------------------
-// isFirmConnected mock.
-//
-// requireBullhornFirm calls isFirmConnected(firmId) to check whether THE
-// CALLER'S firm has its own Bullhorn workspace connected (a token row exists).
-// We intercept the module so each test can control which firms are "connected"
-// without touching the database.
-//
-// The mutable `bhState.connectedFirmIds` is read on every call; set it before
-// each test.
-// ---------------------------------------------------------------------------
-const bhState = vi.hoisted(() => ({
-  connectedFirmIds: new Set<string>(),
-}));
-
-vi.mock("../lib/bullhorn-auth.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../lib/bullhorn-auth.js")>();
-  return {
-    ...original,
-    isFirmConnected: async (firmId: string) => bhState.connectedFirmIds.has(firmId),
-  };
-});
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Clerk mock (app.ts imports @clerk/express; stub it so the process does not
@@ -53,7 +22,7 @@ vi.mock("@clerk/express", () => ({
 
 const { default: app } = await import("../app.js");
 const request = (await import("supertest")).default;
-const { db, firmsTable, usersTable } = await import("@workspace/db");
+const { db, firmsTable, usersTable, bullhornTokensTable } = await import("@workspace/db");
 const { inArray, eq } = await import("drizzle-orm");
 
 // ---------------------------------------------------------------------------
@@ -78,8 +47,23 @@ const SERVICE_TOKEN = process.env["MCP_BEARER_TOKEN"];
 const PROBE = "/api/v1/reports";
 
 async function cleanup() {
+  await db.delete(bullhornTokensTable).where(inArray(bullhornTokensTable.firmId, ALL_FIRM_IDS));
   await db.delete(usersTable).where(inArray(usersTable.id, ALL_USER_IDS));
   await db.delete(firmsTable).where(inArray(firmsTable.id, ALL_FIRM_IDS));
+}
+
+async function seedFirmAConnection() {
+  await db.delete(bullhornTokensTable).where(inArray(bullhornTokensTable.firmId, ALL_FIRM_IDS));
+  await db.insert(bullhornTokensTable).values({
+    id: `${FIRM_A}-token`,
+    firmId: FIRM_A,
+    refreshToken: `${PREFIX}-refresh-token-a`,
+    oauthUrl: "https://oauth.test.invalid",
+    restUrl: "https://rest.test.invalid/rest-services/session",
+    loginUrl: "https://rest.test.invalid/rest-services/login",
+    authMode: "oauth",
+    authHealthy: true,
+  });
 }
 
 beforeAll(async () => {
@@ -128,7 +112,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   // Default: Firm A has its own Bullhorn workspace connected; Firm B does not.
-  bhState.connectedFirmIds = new Set([FIRM_A]);
+  return seedFirmAConnection();
 });
 
 // ---------------------------------------------------------------------------
@@ -196,7 +180,7 @@ describe("requireBullhornFirm — unconnected-firm user", () => {
 describe("requireBullhornFirm — no firm connected", () => {
   beforeEach(() => {
     // Override: simulate a deployment where no firm has connected Bullhorn yet.
-    bhState.connectedFirmIds = new Set();
+    return db.delete(bullhornTokensTable).where(inArray(bullhornTokensTable.firmId, ALL_FIRM_IDS));
   });
 
   it("returns 403 for any user caller when their firm is not connected", async () => {

@@ -40,6 +40,17 @@ vi.mock("@clerk/express", () => ({
   },
 }));
 
+vi.mock("../lib/bullhorn-auth.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../lib/bullhorn-auth.js")>();
+  return {
+    ...original,
+    getAuthorizeUrl: async (state: string, firmId?: string) =>
+      `https://bullhorn.test.invalid/oauth/authorize?state=${encodeURIComponent(
+        state,
+      )}&firmId=${encodeURIComponent(firmId ?? "")}`,
+  };
+});
+
 const { default: app } = await import("../app.js");
 const request = (await import("supertest")).default;
 const { db, firmsTable, usersTable, bullhornTokensTable } = await import("@workspace/db");
@@ -47,19 +58,35 @@ const { eq } = await import("drizzle-orm");
 
 const SERVICE_TOKEN = process.env["MCP_BEARER_TOKEN"];
 const PREFIX = "test-task55";
+const SERVICE_FIRM_ID = `${PREFIX}-service-firm`;
 
 // Resolved by the create-firm test; shared across all subsequent steps.
 let createdFirmId = "";
 
 async function cleanup() {
-  if (!createdFirmId) return;
-  await db.delete(usersTable).where(eq(usersTable.firmId, createdFirmId));
-  await db.delete(bullhornTokensTable).where(eq(bullhornTokensTable.firmId, createdFirmId));
-  await db.delete(firmsTable).where(eq(firmsTable.id, createdFirmId));
+  if (createdFirmId) {
+    await db.delete(usersTable).where(eq(usersTable.firmId, createdFirmId));
+    await db.delete(bullhornTokensTable).where(eq(bullhornTokensTable.firmId, createdFirmId));
+    await db.delete(firmsTable).where(eq(firmsTable.id, createdFirmId));
+  }
+  await db.delete(bullhornTokensTable).where(eq(bullhornTokensTable.firmId, SERVICE_FIRM_ID));
+  await db.delete(firmsTable).where(eq(firmsTable.id, SERVICE_FIRM_ID));
 }
 
 beforeAll(async () => {
   if (!SERVICE_TOKEN) throw new Error("MCP_BEARER_TOKEN must be set for these tests.");
+  await cleanup();
+  await db.insert(firmsTable).values({ id: SERVICE_FIRM_ID, name: `${PREFIX} Service Firm` });
+  await db.insert(bullhornTokensTable).values({
+    id: `${SERVICE_FIRM_ID}-token`,
+    firmId: SERVICE_FIRM_ID,
+    refreshToken: `${PREFIX}-service-refresh`,
+    oauthUrl: "https://oauth.test.invalid",
+    restUrl: "https://rest.test.invalid/rest-services/session",
+    loginUrl: "https://rest.test.invalid/rest-services/login",
+    authMode: "service",
+    authHealthy: true,
+  });
 });
 
 afterAll(async () => {
