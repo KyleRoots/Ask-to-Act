@@ -32,9 +32,14 @@ export interface FindCandidatesArgs {
   city?: string;
   /** Prefer (do not hard-filter) candidates in this state/province. */
   state?: string;
-  /** Restrict to an exact Bullhorn status (e.g. "Active"). Optional. */
+  /** Requested upstream status phrase; whole-field equality is unverified. */
   status?: string;
-  /** Include archived/inactive candidates. Default false (workable pool only). */
+  /** Candidate.dateAdded day bounds: UTC inclusive start, exclusive end. */
+  dateAddedStart?: string;
+  dateAddedEnd?: string;
+  /** Exact case-insensitive status values; no tenant-specific alias expansion. */
+  excludedStatuses?: string[];
+  /** Include Archive status candidates. Default false; not a general inactive-status policy. */
   includeInactive?: boolean;
   /** Drop candidates whose résumé does not confirm at least one required term. Default false. */
   requireResumeConfirmation?: boolean;
@@ -81,7 +86,19 @@ function locationOf(c: Record<string, unknown>): string {
 
 /** Quote a Lucene phrase value, escaping embedded quotes. */
 function phrase(v: string): string {
-  return `"${v.replace(/"/g, '\\"')}"`;
+  return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function dateBound(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`${name} must be a valid YYYY-MM-DD date (UTC).`);
+  }
+  const ms = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== value) {
+    throw new Error(`${name} must be a valid YYYY-MM-DD date (UTC).`);
+  }
+  return ms;
 }
 
 export async function findCandidates(args: FindCandidatesArgs): Promise<unknown> {
@@ -90,6 +107,22 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
     throw new Error("find_candidates requires at least one mustHave concept.");
   }
   const niceToHave = (args.niceToHave ?? []).map((s) => s.trim()).filter(Boolean);
+  const startMs = dateBound(args.dateAddedStart, "dateAddedStart");
+  const endMs = dateBound(args.dateAddedEnd, "dateAddedEnd");
+  if (startMs !== undefined && endMs !== undefined && endMs <= startMs) {
+    throw new Error("dateAddedEnd must be after dateAddedStart (exclusive UTC end).");
+  }
+  const excludedStatuses: string[] = [];
+  const excludedKeys = new Set<string>();
+  for (const value of args.excludedStatuses ?? []) {
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error("excludedStatuses must contain non-empty status values.");
+    const key = trimmed.toLowerCase();
+    if (!excludedKeys.has(key)) {
+      excludedKeys.add(key);
+      excludedStatuses.push(trimmed);
+    }
+  }
   const limit = Math.min(Math.max(1, args.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   const poolSize = Math.min(Math.max(limit * 4, args.poolSize ?? DEFAULT_POOL), MAX_POOL);
 
@@ -106,6 +139,9 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
   const queryParts: string[] = [];
   if (!args.includeInactive) queryParts.push("NOT status:Archive");
   if (args.status) queryParts.push(`status:${phrase(args.status)}`);
+  // Do not push the new filters into Lucene without index-contract evidence:
+  // phrase matching need not be whole-field equality, and a second-resolution
+  // end bound could lose the final milliseconds. Filter only this bounded pool.
   const query = queryParts.length ? queryParts.join(" AND ") : undefined;
 
   const searchRes = await searchCandidates({
@@ -114,7 +150,19 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
     count: poolSize,
     fields: SEARCH_FIELDS,
   });
-  const pool = asArray(searchRes) as Array<Record<string, unknown>>;
+  const fetchedPool = asArray(searchRes) as Array<Record<string, unknown>>;
+  // Recheck requested exclusions before ranking or fetching any résumé. Missing
+  // date evidence cannot satisfy a requested bound. Defaults otherwise stay intact.
+  const pool = fetchedPool.filter((candidate) => {
+    if (excludedKeys.has(str(candidate.status).trim().toLowerCase())) return false;
+    if (startMs !== undefined || endMs !== undefined) {
+      const added = num(candidate.dateAdded);
+      if (added === null || !Number.isFinite(added)) return false;
+      if (startMs !== undefined && added < startMs) return false;
+      if (endMs !== undefined && added >= endMs) return false;
+    }
+    return true;
+  });
 
   const now = Date.now();
   const rankCtx = {
@@ -205,16 +253,53 @@ export async function findCandidates(args: FindCandidatesArgs): Promise<unknown>
       location: [args.city, args.state].filter(Boolean).join(", ") || null,
       status: args.status ?? null,
       includeInactive: !!args.includeInactive,
+      dateAddedStart: args.dateAddedStart ?? null,
+      dateAddedEnd: args.dateAddedEnd ?? null,
+      excludedStatuses,
       requireResumeConfirmation: !!args.requireResumeConfirmation,
     },
+    appliedFilters: {
+      structuredQuery: query ?? null,
+      archiveExcluded: !args.includeInactive,
+      upstreamStatus: {
+        requestedPhrase: args.status ?? null,
+        applied: !!args.status,
+        wholeFieldEqualityVerified: false,
+      },
+      excludedStatuses,
+      requestedFilterStage: "fetched_pool_before_ranking",
+      dateAdded: {
+        field: "Candidate.dateAdded",
+        startInclusive: args.dateAddedStart ?? null,
+        endExclusive: args.dateAddedEnd ?? null,
+        timezone: "UTC",
+      },
+      location: { city: args.city ?? null, state: args.state ?? null, mode: "ranking_preference" },
+      contactHistoryExclusion: { supported: false, applied: false },
+    },
+    searchScope: {
+      exhaustive: false,
+      requestedFiltersPushedDown: false,
+      poolRequested: poolSize,
+      fetched: fetchedPool.length,
+      eligibleInFetchedPool: pool.length,
+      resumeCheckLimit: limit * 2,
+      resultLimit: limit,
+    },
     totals: {
-      candidatesScanned: pool.length,
+      candidatesScanned: fetchedPool.length,
+      droppedRequestedFilters: fetchedPool.length - pool.length,
       resumesChecked: verifyIds.length,
       droppedUnconfirmed,
       returned: matches.length,
     },
     matches,
     notes: [
+      "Requested date bounds and excluded statuses are applied only within the fetched pool before ranking, not by the upstream search. Eligible records outside that pool may be missed; an empty result does not establish no eligible candidates exist.",
+      "Results are highest-ranked within a bounded fetched and résumé-checked pool, not an exhaustive search or a total count of eligible candidates.",
+      "City/state are ranking preferences, not hard filters. Report appliedFilters and query.expandedTo when explaining this search.",
+      "Positive status is an upstream phrase request; whole-field equality is unverified. This is distinct from exact local excludedStatuses comparisons.",
+      "Already-contacted exclusion is unsupported and was not applied; neither candidate status nor job submission proves contact history.",
       "Ranking is deterministic and server-side: structured skill hits, résumé-confirmed skills, current/recent relevant roles, local match, and availability — not just Bullhorn text relevance. Older relevant experience stays in the list; it is not treated as unqualified.",
       "matchedSkills come from structured fields; resumeConfirmed/resumeEvidence are the citable proof from the résumé. Do not claim a skill that is neither in matchedSkills nor resumeConfirmed.",
       "Security clearance is NOT a structured field in Bullhorn; it lives in résumé text. Treat any clearance as UNVERIFIED until confirmed via resumeEvidence, and remember clearances can lapse.",
