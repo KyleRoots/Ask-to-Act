@@ -852,7 +852,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "find_candidates",
-    "PREFERRED for ad-hoc candidate search (not tied to a job): synonym expansion, résumé-confirmed ranking, evidence quotes. Use match_candidates_for_job for a specific job. Link NAME to bullhornUrl; cite resumeEvidence for skills/clearance.",
+    "PREFERRED for ad-hoc candidate search (not tied to a job): synonym expansion, résumé-confirmed ranking, evidence quotes. Use match_candidates_for_job for a specific job. Link NAME to bullhornUrl; cite resumeEvidence for skills/clearance. Disclose appliedFilters and query.expandedTo; location is a preference and results are bounded, not exhaustive. Already-contacted exclusion is unsupported: never claim it was applied.",
     {
       mustHave: z
         .array(z.string())
@@ -875,11 +875,14 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       status: z
         .string()
         .optional()
-        .describe("Restrict to an exact Bullhorn candidate status (e.g. \"Active\"). Optional."),
+        .describe("Request an upstream Bullhorn status phrase (e.g. \"Active\"). Whole-field equality is unverified; no local equality filter is applied."),
+      dateAddedStart: z.string().optional().describe("Candidate.dateAdded start, inclusive UTC midnight; valid YYYY-MM-DD only. Applied within the fetched pool before ranking, not pushed to upstream search."),
+      dateAddedEnd: z.string().optional().describe("Candidate.dateAdded end, exclusive UTC midnight; valid YYYY-MM-DD only. Must be after start when both are supplied. Applied within the fetched pool before ranking."),
+      excludedStatuses: z.array(z.string().trim().min(1)).optional().describe("Explicit status values to exclude, matched case-insensitively. No automatic mapping of Placed, DNU or tenant aliases; use the requested actual status values. Applied within the fetched pool only, not upstream. Does not exclude contact history."),
       includeInactive: z
         .boolean()
         .optional()
-        .describe("Set true to INCLUDE archived/inactive candidates (excluded by default — only the workable pool is searched)."),
+        .describe("Set true to include Archive status candidates. Default excludes Archive only; other inactive or tenant-specific statuses are not automatically excluded."),
       requireResumeConfirmation: z
         .boolean()
         .optional()

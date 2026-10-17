@@ -438,8 +438,8 @@ function redactCandidateDescriptions(
  * wrongly conclude the data is unavailable. When every top-level clause is negated,
  * prepend a positive anchor (`id:[1 TO *]`, which matches every record) so the
  * negations apply to the full set. A query that already has a positive clause is
- * left untouched: anchoring it would be a harmless no-op, but we restrict the
- * rewrite to the all-negative case to avoid surprising intended results.
+ * left untouched: inserting an anchor can change classic Lucene Boolean
+ * semantics, so only the conservative all-negative conjunction is repaired.
  */
 function anchorPureNegationQuery(query: string, entity: string): string {
   const trimmed = query.trim();
@@ -803,7 +803,12 @@ function combineCandidateQuery(
   const kw = keywords ? buildCandidateKeywordQuery(keywords) : "";
   if (kw) parts.push(kw);
   const q = (query ?? "").trim();
-  if (q) parts.push(`(${q})`);
+  // Recognize only complete negative status terms joined by explicit AND.
+  // This small allowlist covers our generated Archive clause and simple quoted
+  // exclusions; it is not a Lucene parser. Preserve all other raw syntax.
+  const negativeStatus = String.raw`NOT\s+status:(?:"(?:\\[^\r\n]|[^"\\\r\n])*"|[A-Za-z0-9_-]+)`;
+  const simpleStatusNegation = new RegExp(`^${negativeStatus}(?:\\s+AND\\s+${negativeStatus})*$`).test(q);
+  if (q) parts.push(`(${simpleStatusNegation ? `id:[1 TO *] AND ${q}` : q})`);
   if (parts.length === 0) {
     throw new Error(
       "search_candidates requires `query` (structured filters) and/or `keywords` (résumé/skills text search).",
