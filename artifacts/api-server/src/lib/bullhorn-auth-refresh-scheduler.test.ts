@@ -98,11 +98,11 @@ describe("Bullhorn auth refresh scheduler", () => {
 
   it("skips an overlapping tick and runs again once the in-flight refresh finishes", async () => {
     process.env["BULLHORN_AUTH_REFRESH_INTERVAL_MS"] = String(MIN_INTERVAL_MS);
-    let release: (() => void) | undefined;
-    runProactiveBullhornAuthRefresh.mockImplementation(
+    let releaseFirst: (() => void) | undefined;
+    runProactiveBullhornAuthRefresh.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          release = () => resolve(okResult);
+          releaseFirst = () => resolve(okResult);
         }),
     );
 
@@ -113,7 +113,7 @@ describe("Bullhorn auth refresh scheduler", () => {
     await vi.advanceTimersByTimeAsync(MIN_INTERVAL_MS);
     expect(runProactiveBullhornAuthRefresh).toHaveBeenCalledTimes(1);
 
-    release?.();
+    releaseFirst?.();
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(MIN_INTERVAL_MS);
     expect(runProactiveBullhornAuthRefresh).toHaveBeenCalledTimes(2);
