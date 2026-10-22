@@ -5,7 +5,11 @@ description: Status board for confidence ~8.5–9 without live Stripe or a secon
 
 # Peak before Stripe + customer #2
 
-**Score:** ~8.3–8.6 → **~8.7–8.9** after tranche 2 (staff async + host UX docs)
+**Status:** `achieved pending staff soak`
+
+**Score:** **~8.8–9.0** (win band 8.5–9 met; not a full “9.0 locked” until short staff soak)
+
+**Closed (agent side):** 2026-08-05 — live async smokes (scout + match + recruiter_leaderboard), Railway SUCCESS on HEAD, board win conditions done/deferred with honesty.
 
 **Win condition:** Raise production confidence without:
 
@@ -14,6 +18,56 @@ description: Status board for confidence ~8.5–9 without live Stripe or a secon
 - Marketplace / ChatGPT store listing
 
 Soft walls stay unchanged (~95s sync; async continuation is the escape hatch).
+
+**Next leap only:** Stripe live + customer #2. Nothing else gates declaring this peak closed after staff soak.
+
+## Production deploy (confirmed 2026-08-05)
+
+| Field | Value |
+|-------|--------|
+| Project | `ask-to-act` `b7311b38-ef88-49b1-b28f-98f4fcd3ad0b` |
+| Service | `@workspace/api-server` `a9961756-a60b-4f4d-a8cd-ab018c10df4f` |
+| Env | `production` `b647a409-377d-4067-8fbf-10d6fb325658` |
+| Latest deploy | `82f54581-35aa-4999-ba97-15801b767507` **SUCCESS** |
+| Commit | `e1330f6` (`e1330f62512f51cccb6cf183adc9773858f98c22`) — docs tranche 2 |
+| Code ancestry | `89af44c` (504 retry, entitlements, ops lookback) **is ancestor** of deployed HEAD — no further api deploy needed |
+
+Note: latest Railway image is docs-only rebuilds on top of tranche-1 code; image digest unchanged across `36e9aa7` → `e1330f6` is expected.
+
+## Checklist — win conditions
+
+| # | Win condition | State | Evidence |
+|---|---------------|-------|----------|
+| 1 | Tenant-safe sync/cron/jobs/alerts (no cross-tenant hardcoding) | **done** | Firm-scoped runtime; Myticas cron URL intentional single-firm |
+| 2 | Note-snapshot Bullhorn 502/503/504 retry on reads | **done** | `bullhorn-transient.ts` + unit tests; in `89af44c` → prod via `e1330f6` |
+| 3 | Ops aged-failure thrash reduced (2h lookback) | **done** | Code default; automation no-ops on ops-health `ok` |
+| 4 | Entitlement hook stub, enforcement **off** | **done** | `assertFirmEntitled`; `ENTITLEMENTS_ENFORCED` unset in prod → default off |
+| 5 | Staff soft-wall escape: start_* → get_report_job complete | **done** | Live scout + match (prior) + leaderboard (2026-08-05) |
+| 6 | Light security pass (MCP/REST/ops auth notes) | **done** | Notes only; no auth rewrite |
+| 7 | Host UX polish (secrets / ops-health gotcha) | **done** | Docs in this board + asktoact-mcp-api-key / ops-alerts |
+| 8 | Broader async wrap of all long tools | **deferred** | No regular sync-only wall incidents; revisit on fingerprint |
+| — | Soft walls unchanged | **done** | Contract tests; no wall shortening |
+| — | Stripe live | **out of scope** | Next leap |
+| — | Customer #2 Bullhorn tenant | **out of scope** | Next leap (incl. multi-firm cron) |
+| — | Marketplace listing | **out of scope** | GTM timing |
+
+### Remaining (not blockers for this peak)
+
+| Item | Owner | Notes |
+|------|-------|-------|
+| Staff soak (days, not weeks) | Kyle / recruiters | Use scout/match/leaderboard async when walls hit; watch ops alerts |
+| Ops-health green via **service** bearer | Kyle | Portal user key → 403 (expected); see USER ACTIONS |
+| Optional: set Cursor `ASKTOACT_MCP_API_KEY` = service token for headless ops | Kyle | Keeps MCP tools + ops-health on one secret for agents |
+| Do **not** set `ENTITLEMENTS_ENFORCED=1` | Kyle | Until Stripe checkout + webhooks trusted |
+
+## Live smokes (2026-08-05)
+
+| Path | Result |
+|------|--------|
+| `start_recruiter_leaderboard_job` (2026-07-01→07) → `get_report_job` | Job `56696c2b-…` **complete**, `confirmedComplete=true`, `stopReason=complete` (empty period OK) |
+| Scout async | Prior: `3f609702-…` complete |
+| Match async | Prior: `4af76790-…` complete (`status=partial` = sourcing semantics) |
+| `ops-health --json` with current Cursor secret | **403** — secret is portal user apiKey (64-char), not service bearer (32-char). Documented gotcha, not a prod outage. |
 
 ## Explicitly deferred
 
@@ -24,7 +78,31 @@ Soft walls stay unchanged (~95s sync; async continuation is the escape hatch).
 | Marketplace listing | GTM timing; not a reliability unlock |
 | Broader soft-wall → async wrap | No sync-only tool regularly hits walls in staff use (see §8) |
 
-## Prioritized backlog
+## USER ACTIONS (Kyle)
+
+### Already live — no deploy needed
+
+- Tranche 1 API on production: 504/502/503 read retries, `assertFirmEntitled` (off), ops failed-job lookback 2h.
+- Async escape hatches: scout, match, recruiter_leaderboard (`start_*` → `get_report_job`).
+- Docs / status board on main (`e1330f6`).
+- Note-snapshot cron still Myticas-only (intentional until customer #2).
+
+### You should still do (short list)
+
+1. **Staff soak (1–3 days):** Have recruiters run normal ChatGPT/Cursor flows; if a soft wall appears, confirm the host continues via `asyncContinuation` (or ask them to call the matching `start_*` tool). No need to force sync `wall_time`.
+2. **Ops-health with service credentials:**  
+   `pnpm --filter @workspace/scripts ops-health -- --json`  
+   using production **`MCP_BEARER_TOKEN`** or **`OPS_HEALTH_SECRET`** (not a portal user apiKey). Prefer `status: ok`.
+3. **Leave entitlements off:** Do not set `ENTITLEMENTS_ENFORCED=1` until Stripe is live and trusted.
+4. **Optional secret hygiene:** For cloud agents that need ops + MCP, set Cursor Runtime Secret `ASKTOACT_MCP_API_KEY` to the **service** bearer; use portal user keys only when writes must attribute to a recruiter.
+
+### Not your job for this milestone
+
+- Redeploy api-server (already SUCCESS on `e1330f6`).
+- Enable Stripe, add customer #2, or list on the marketplace.
+- Expand note-snapshot cron to multi-firm (belongs with customer #2).
+
+## Prioritized backlog (archive)
 
 | # | Item | Status | Notes |
 |---|------|--------|-------|
@@ -32,7 +110,7 @@ Soft walls stay unchanged (~95s sync; async continuation is the escape hatch).
 | 2 | Note-snapshot Bullhorn 504 retry/backoff | `done` | Bounded retries on 502/503/504; unit coverage in `bullhorn-transient.test.ts` |
 | 3 | Ops aged-failure / thrash reduction | `done` | Failed-job alert lookback 6h → 2h; automation already no-ops on `ok` |
 | 4 | Entitlement/subscription hook stubs | `done` | `assertFirmEntitled` + `ENTITLEMENTS_ENFORCED=0` default; plugs into Stripe later |
-| 5 | Staff-path reliability (async tools vs walls) | `done` | Live start→poll complete for scout + match; contract tests for wall_time→asyncContinuation |
+| 5 | Staff-path reliability (async tools vs walls) | `done` | Live start→poll complete for scout + match + leaderboard; contract tests for wall_time→asyncContinuation |
 | 6 | Light security pass (MCP/REST/ops auth) | `done` | Notes below; no auth rewrite |
 | 7 | Host UX polish (Custom GPT / secrets) | `done` | Docs-only — secrets + ops-health auth gotcha |
 | 8 | Broader async coverage | `deferred` | Rationale in §8 — do not preemptively wrap every paged tool |
@@ -91,12 +169,13 @@ ENTITLEMENTS_ENFORCED=1   # enforce via assertFirmEntitled(firmId)
 
 **Unit / contract:** `report-jobs.test.ts` — `wall_time` → host-complete `asyncContinuation` (MCP + REST) for scout/match/leaderboard; soft walls stay 95s/75s; async safety max ~20 min.
 
-**Live smoke (prod MCP, service/user bearer via `ASKTOACT_MCP_API_KEY`):**
+**Live smoke (prod MCP):**
 
 | Path | Evidence |
 |------|----------|
 | Scout async | `start_scout_dept_report_job` (STSI, limit=2) → `get_report_job` **complete**, `confirmedComplete=true`, `stopReason=complete` (job `3f609702-…`) |
 | Match async | `start_match_candidates_job` (job 31887) → `get_report_job` **complete** with match payload (job `4af76790-…`; result `status=partial` is expected sourcing semantics, not job failure) |
+| Leaderboard async | `start_recruiter_leaderboard_job` (2026-07-01→07) → `get_report_job` **complete** (job `56696c2b-…`) |
 | Sync wall_time | Hard to force under snapshot-fast path; contract tests cover `asyncContinuation` shape. Sync scout with limit=2 returns `complete` without continuation (healthy). |
 
 Hitting sync `wall_time` in production is uncommon for scout while note-snapshot coverage is fresh — that is success, not a gap. Escape hatch remains: start_* → poll.
@@ -145,8 +224,13 @@ Sync-only long walks (broad `search_*`, placements fan-out, exhaustive note asso
    # expect status complete
    pnpm --filter @workspace/scripts asktoact-mcp call start_match_candidates_job '{"jobId":31887,"limit":4}'
    # poll get_report_job until complete|failed
+   pnpm --filter @workspace/scripts asktoact-mcp call start_recruiter_leaderboard_job '{"startDate":"2026-07-01","endDate":"2026-07-07"}'
    ```
 2. `pnpm --filter @workspace/scripts ops-health -- --json` → prefer `ok`. Requires **service** bearer or `OPS_HEALTH_SECRET` (not a portal user key).
 3. Note-snapshot: cron `SYNC_OK`; coverage not stuck `failed` from transient 504s.
 4. With `ENTITLEMENTS_ENFORCED` unset: tools work as today. Do **not** enable in prod until Stripe path is ready.
 5. Contract tests: `pnpm --filter @workspace/api-server exec vitest run src/lib/report-jobs.test.ts src/lib/bullhorn-transient.test.ts`
+
+## After this milestone
+
+**Only:** Stripe live billing + customer #2 (corp token, discovery, multi-firm note-snapshot cron). Marketplace remains GTM-timed and separate.
