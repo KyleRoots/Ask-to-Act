@@ -54,7 +54,7 @@ Recruiters enable the Bullhorn connector in their AI (ChatGPT, Claude, Gemini, o
 - `RATE_LIMIT_WINDOW_MS` (optional) — window size in ms, default 60000
 - `CACHE_TTL_MS` (optional) — read-cache entry lifetime in ms, default 60000 (set 0 to disable)
 - `CACHE_MAX_ENTRIES` (optional) — max cached read responses, default 500
-- `BULLHORN_UI_BASE_URL` (optional) — base URL used to build record deep links; defaults to the UI cluster derived from the REST swimlane (e.g. `rest45...` → `https://cls45.bullhornstaffing.com`). Set this only if the instance's UI host differs.
+- `BULLHORN_UI_BASE_URL` (optional) — Bullhorn web app host used to build record deep links. Defaults to `https://app.bullhornstaffing.com`. Trailing slashes are trimmed. This is not the REST swimlane (`rest{N}`) and not a `cls{N}` host.
 
 ## Gotchas
 
@@ -64,7 +64,7 @@ Recruiters enable the Bullhorn connector in their AI (ChatGPT, Claude, Gemini, o
 - Bullhorn search uses Lucene syntax; entity queries use SQL WHERE syntax — different endpoints (`search/` vs `query/`)
 - Session tokens expire; the auth module auto-refreshes from a persisted refresh token, falling back to a headless authorization_code login on failure
 - `MCP_BEARER_TOKEN` must be set or the server will return 503 on all MCP requests
-- Read results for Candidate/ClientContact/ClientCorporation/JobOrder/Lead/Opportunity records include a `bullhornUrl` deep link (`OpenWindow.cfm`) so the AI can link straight to the record. The host is derived from the REST swimlane by default; override with `BULLHORN_UI_BASE_URL` if the instance moves clusters. Transactional entities (submissions, placements, notes, tasks, etc.) intentionally get no link.
+- Read results for linkable records include a `bullhornUrl` deep link (`{base}/openwindow?entity={Entity}&id={id}`) so the AI can link straight to the record. The host defaults to `https://app.bullhornstaffing.com`; override with `BULLHORN_UI_BASE_URL` only if the web app host differs. After Bullhorn's October 2026 incident, `cls{N}` `/BullhornStaffing/OpenWindow.cfm` links return HTTP 503 and are no longer generated. The whitelist is Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Lead, Opportunity, and Placement. Note, Task, Appointment, and Sendout get no link.
 
 ## Deployment
 

@@ -22,7 +22,9 @@ in prose, lists, AND tables; never show the name as plain text when a bullhornUr
 present`. Apply consistently across all linkable-entity tools, not just the one a user
 complained about — otherwise the same complaint resurfaces on the next entity.
 
-Precondition to even have a link: `resolveUiBaseUrl()` must resolve. It derives
-`cls{N}.bullhornstaffing.com` from the REST swimlane host `rest{N}.bullhornstaffing.com`
-(or honors `BULLHORN_UI_BASE_URL`). If the host doesn't match that regex it returns null
-and NO bullhornUrl is added — check the host first when links are entirely absent.
+Precondition to even have a link: the entity is in `UI_LINKABLE_ENTITIES` and the record
+has a positive numeric `id`. The URL is always
+`{base}/openwindow?entity={Entity}&id={id}`, where `base` is `BULLHORN_UI_BASE_URL`
+(trailing slashes trimmed) or `https://app.bullhornstaffing.com`. It does not depend on
+the REST swimlane. The old `cls{N}` `OpenWindow.cfm` links started returning HTTP 503
+after Bullhorn's October 2026 incident and are not used.

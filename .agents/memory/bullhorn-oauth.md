@@ -100,14 +100,19 @@ the `meta/{Entity}` endpoint). Confirmed corrections vs. generic assumptions:
 
 ## Bullhorn UI deep links (record links from REST data)
 A record's UI deep link is
-`https://cls{N}.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity={Entity}&id={id}`.
-The UI cluster host maps 1:1 from the REST swimlane: `restUrl` host `rest{N}.bullhornstaffing.com`
-→ UI host `cls{N}.bullhornstaffing.com` (e.g. rest45 → cls45). `OpenWindow.cfm` is the
-long-standing version-agnostic deep link that resolves for the logged-in user; it does NOT need the
-corp token. Only "profile-like" entities have a useful standalone view — Candidate, ClientContact,
-ClientCorporation, JobOrder, Lead, Opportunity. Don't link transactional/junction entities
-(JobSubmission, Placement, Note, Task, Appointment, Sendout). Make the host overridable (env) in case
-a corp is migrated to a different cluster, but the swimlane derivation is the right default.
+`{base}/openwindow?entity={Entity}&id={id}`.
+`base` is `BULLHORN_UI_BASE_URL` when set (trailing slashes trimmed), otherwise
+`https://app.bullhornstaffing.com`. This is Bullhorn's Novo open-window page, the same URL
+its Share button copies. It does not use the REST corp token or the session `restUrl`.
+
+After Bullhorn's October 2026 security incident, the old cluster link
+`https://cls{N}.bullhornstaffing.com/BullhornStaffing/OpenWindow.cfm?Entity={Entity}&id={id}`
+returns HTTP 503 on every cls host ("This page is currently unavailable"). Do not derive
+`cls{N}` from `rest{N}`. `BULLHORN_UI_BASE_URL` means the Bullhorn web app host.
+
+The linkable whitelist is `UI_LINKABLE_ENTITIES`: Candidate, ClientContact,
+ClientCorporation, JobOrder, JobSubmission, Lead, Opportunity, Placement. Note, Task,
+Appointment, and Sendout get no link. Ids that are not positive finite numbers get no link.
 
 ## History (kept for context; superseded by the headless solution above)
 The browser "Agree" bounced back to login with no code, reproducibly, across users,
