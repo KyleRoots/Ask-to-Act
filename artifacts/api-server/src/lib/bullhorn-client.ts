@@ -202,7 +202,7 @@ function sanitizeFields(fields: string): string {
  * Appointment, Sendout, etc.) are excluded; Placement and JobSubmission are
  * included because recruiters navigate to them directly.
  */
-const UI_LINKABLE_ENTITIES = new Set<string>([
+export const UI_LINKABLE_ENTITIES = new Set<string>([
   "Candidate",
   "ClientContact",
   "ClientCorporation",
@@ -249,67 +249,31 @@ export function ensureLinkableIdField(entity: string, fields: string): string {
   return `id,${fields}`;
 }
 
-// Cache the swimlane-derived host keyed by the restUrl it was derived from, so a
-// cluster migration/failover that changes restUrl on re-auth recomputes the host.
-// Keyed by restUrl (a Map) so multiple firms on different swimlanes don't thrash
-// a single shared memo.
-const memoDerivedUiBase = new Map<string, string | null>();
+const DEFAULT_BULLHORN_UI_BASE_URL = "https://app.bullhornstaffing.com";
 
 /**
- * Resolves the Bullhorn UI base URL used to build record deep links. Prefers an
- * explicit BULLHORN_UI_BASE_URL override; otherwise derives the cluster host
- * from the REST swimlane (e.g. rest45.bullhornstaffing.com ->
- * cls45.bullhornstaffing.com). Returns null when it cannot be determined, in
- * which case deep links are simply omitted.
+ * Bullhorn web app host for Novo open-window links. `BULLHORN_UI_BASE_URL`
+ * overrides it (trailing slashes trimmed). This is not the REST swimlane host.
  */
-function deriveUiBaseFromRestUrl(restUrl: string): string | null {
-  const memo = memoDerivedUiBase.get(restUrl);
-  if (memo !== undefined) return memo;
-  let base: string | null = null;
-  try {
-    const host = new URL(restUrl).hostname;
-    const m = /^rest(\d+)\.bullhornstaffing\.com$/i.exec(host);
-    base = m ? `https://cls${m[1]}.bullhornstaffing.com` : null;
-  } catch {
-    base = null;
-  }
-  memoDerivedUiBase.set(restUrl, base);
-  return base;
-}
-
-async function resolveUiBaseUrl(): Promise<string | null> {
+function bullhornUiBaseUrl(): string {
   const configured = process.env.BULLHORN_UI_BASE_URL?.trim();
-  if (configured) return configured.replace(/\/+$/, "");
-  let restUrl: string;
-  try {
-    restUrl = (await getSession()).restUrl;
-  } catch {
-    return null;
-  }
-  return deriveUiBaseFromRestUrl(restUrl);
+  if (!configured) return DEFAULT_BULLHORN_UI_BASE_URL;
+  return configured.replace(/\/+$/, "");
 }
 
 /**
- * Deep link for a linkable Bullhorn record, or null when the entity is not
- * UI-linkable / the swimlane UI host cannot be derived. Prefer passing the
- * caller's write-session restUrl so links work without the shared read session.
+ * Novo open-window deep link for a linkable Bullhorn record, or null when the
+ * entity is not UI-linkable or the id is not a positive finite number.
+ * Independent of the REST session.
  */
-function bullhornUrlForEntity(
+export function bullhornUrlForEntity(
   entity: string,
   id: number,
-  restUrl?: string,
 ): string | null {
   if (!UI_LINKABLE_ENTITIES.has(entity) || !Number.isFinite(id) || id <= 0) {
     return null;
   }
-  const configured = process.env.BULLHORN_UI_BASE_URL?.trim();
-  const base = configured
-    ? configured.replace(/\/+$/, "")
-    : restUrl
-      ? deriveUiBaseFromRestUrl(restUrl)
-      : null;
-  if (!base) return null;
-  return `${base}/BullhornStaffing/OpenWindow.cfm?Entity=${entity}&id=${id}`;
+  return `${bullhornUiBaseUrl()}/openwindow?entity=${entity}&id=${id}`;
 }
 
 /**
@@ -317,23 +281,21 @@ function bullhornUrlForEntity(
  * response (mutating it in place). Handles both the `{ data: ... }` envelope
  * returned by search/query (and entity GET on this instance) and a bare
  * single-record payload (`{ id, ... }`), so `get_*` links don't depend on
- * Bullhorn always wrapping single records. No-op for non-linkable entities or
- * when the UI base URL cannot be resolved. Records without a numeric `id` are
- * left untouched.
+ * Bullhorn always wrapping single records. No-op for non-linkable entities.
+ * Records without a positive numeric `id` are left untouched.
  */
-async function enrichWithProfileUrls(
+export async function enrichWithProfileUrls(
   entity: string,
   json: unknown,
 ): Promise<unknown> {
   if (!UI_LINKABLE_ENTITIES.has(entity)) return json;
   if (!json || typeof json !== "object" || Array.isArray(json)) return json;
-  const base = await resolveUiBaseUrl();
-  if (!base) return json;
   const addUrl = (rec: unknown) => {
     if (rec && typeof rec === "object" && !Array.isArray(rec)) {
       const r = rec as Record<string, unknown>;
       if (typeof r.id === "number") {
-        r.bullhornUrl = `${base}/BullhornStaffing/OpenWindow.cfm?Entity=${entity}&id=${r.id}`;
+        const url = bullhornUrlForEntity(entity, r.id);
+        if (url) r.bullhornUrl = url;
       }
     }
   };
@@ -5201,11 +5163,7 @@ export async function uploadFileToRecord(
     fileId: data.fileId ?? 0,
     entityType: entry.canonical,
     entityId: args.entityId,
-    bullhornUrl: bullhornUrlForEntity(
-      entry.canonical,
-      args.entityId,
-      session.restUrl,
-    ),
+    bullhornUrl: bullhornUrlForEntity(entry.canonical, args.entityId),
     fileType: resolvedType,
   };
 }
@@ -5336,6 +5294,6 @@ export async function createCandidateFromResume(
     candidateId,
     fileId,
     parsedName: typeof body.name === "string" ? body.name : undefined,
-    bullhornUrl: bullhornUrlForEntity("Candidate", candidateId, session.restUrl),
+    bullhornUrl: bullhornUrlForEntity("Candidate", candidateId),
   };
 }
