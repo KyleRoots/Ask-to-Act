@@ -2,27 +2,47 @@ import { createHash, randomBytes } from "node:crypto";
 import type { BullhornWriteSession } from "./bullhorn-client.js";
 import { getUserMailboxStatus, getMailboxConnectUrlForUser } from "./m365-auth.js";
 import {
+  type EmailMergeField,
+  type EmailMergeValues,
+  parseEmailTemplates,
+} from "./email-merge-fields.js";
+import {
+  deliverPreparedEmail,
   previewEmailToRecord,
-  sendEmailToRecord,
   type EmailEntityType,
 } from "./send-email-to-record.js";
 
 /** Hard cap for bulk email v1 — adjustable later based on demand. */
 export const BULK_EMAIL_MAX_RECIPIENTS = 50;
 
+/** Rendered examples returned by a bulk preview (fewer only if fewer are ready). */
+export const BULK_EMAIL_PREVIEW_EXAMPLES = 3;
+
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
+const PREVIEW_TEXT_MAX_CHARS = 1000;
 
 export type BulkRecipientRef = {
   entityType: EmailEntityType;
   recordId: number;
 };
 
-type ConfirmEntry = {
-  userId: string;
+type PreviewedRecipient = {
+  entityType: EmailEntityType;
+  recordId: number;
+  name: string;
+  email: string;
+  status: string;
+  bullhornUrl: string | null;
+  mergeValues: Partial<EmailMergeValues>;
   subject: string;
   body: string;
+};
+
+type ConfirmEntry = {
+  userId: string;
   jobOrderId?: number;
-  recipients: BulkRecipientRef[];
+  mergeFields: EmailMergeField[];
+  ready: PreviewedRecipient[];
   fingerprint: string;
   expiresAt: number;
 };
@@ -47,6 +67,17 @@ function normalizeRecipients(recipients: BulkRecipientRef[]): BulkRecipientRef[]
   return out;
 }
 
+function previewText(text: string): string {
+  return text.length > PREVIEW_TEXT_MAX_CHARS
+    ? `${text.slice(0, PREVIEW_TEXT_MAX_CHARS)}...`
+    : text;
+}
+
+/**
+ * Binds a confirmToken to the templates and the requested recipient list.
+ * Each ready recipient's email and resolved merge values live in the stored
+ * entry and are re-checked against Bullhorn before the first send.
+ */
 function fingerprintPayload(args: {
   subject: string;
   body: string;
@@ -140,6 +171,25 @@ export function clearBulkEmailConfirmTokensForTests(): void {
   pendingConfirms.clear();
 }
 
+function pickExamples(ready: Array<PreviewedRecipient & { usedFallback: boolean }>) {
+  const picked = ready.slice(0, BULK_EMAIL_PREVIEW_EXAMPLES);
+  const fallbackRow = ready.find((r) => r.usedFallback);
+  if (fallbackRow && !picked.includes(fallbackRow) && picked.length > 0) {
+    picked[picked.length - 1] = fallbackRow;
+  }
+  return picked.map((r) => ({
+    entityType: r.entityType,
+    recordId: r.recordId,
+    name: r.name,
+    email: r.email,
+    bullhornUrl: r.bullhornUrl,
+    mergeValues: r.mergeValues,
+    usedFallback: r.usedFallback,
+    subject: r.subject,
+    body: previewText(r.body),
+  }));
+}
+
 export async function previewEmailsToRecords(args: {
   userId: string;
   recipients: BulkRecipientRef[];
@@ -165,14 +215,18 @@ export async function previewEmailsToRecords(args: {
     };
   }
 
-  const ready: Array<{
-    entityType: EmailEntityType;
-    recordId: number;
-    name: string;
-    email: string;
-    status: string;
-    bullhornUrl: string | null;
-  }> = [];
+  const template = parseEmailTemplates({ subject: args.subject, body: args.body });
+  if (!template.ok) {
+    return {
+      ok: false as const,
+      error: template.error,
+      message: template.message,
+      tags: template.tags,
+    };
+  }
+  const mergeFields = template.parsed.fields;
+
+  const ready: Array<PreviewedRecipient & { usedFallback: boolean }> = [];
   const skipped: Array<{
     entityType: EmailEntityType;
     recordId: number;
@@ -182,6 +236,7 @@ export async function previewEmailsToRecords(args: {
     bullhornUrl?: string | null;
     error: string;
     message: string;
+    missingFields?: EmailMergeField[];
   }> = [];
 
   for (const recipient of recipients) {
@@ -204,6 +259,7 @@ export async function previewEmailsToRecords(args: {
           bullhornUrl: preview.recipient?.bullhornUrl ?? null,
           error: preview.error ?? "skipped",
           message: preview.message ?? "Recipient was skipped.",
+          missingFields: "missingFields" in preview ? preview.missingFields : undefined,
         });
         continue;
       }
@@ -214,6 +270,10 @@ export async function previewEmailsToRecords(args: {
         email: preview.recipient.email!,
         status: preview.recipient.status,
         bullhornUrl: preview.recipient.bullhornUrl,
+        mergeValues: preview.mergeValues,
+        subject: preview.subject,
+        body: preview.renderedBody,
+        usedFallback: preview.usedFallback,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -234,18 +294,13 @@ export async function previewEmailsToRecords(args: {
   let confirmToken: string | null = null;
   let expiresAt: string | null = null;
   if (ready.length > 0 && mailbox.connected) {
-    const readyRefs = ready.map((r) => ({
-      entityType: r.entityType,
-      recordId: r.recordId,
-    }));
     // Fingerprint the full requested list so GPT can confirm with the same
     // recipients array it previewed; send loop still uses ready only.
     const minted = mintConfirmToken({
       userId: args.userId,
-      subject: args.subject,
-      body: args.body,
       jobOrderId: args.jobOrderId,
-      recipients: readyRefs,
+      mergeFields,
+      ready: ready.map(({ usedFallback: _usedFallback, ...r }) => r),
       fingerprint: fingerprintPayload({
         subject: args.subject,
         body: args.body,
@@ -264,14 +319,24 @@ export async function previewEmailsToRecords(args: {
     batchSize: recipients.length,
     readyCount: ready.length,
     skippedCount: skipped.length,
-    ready,
+    ready: ready.map((r) => ({
+      entityType: r.entityType,
+      recordId: r.recordId,
+      name: r.name,
+      email: r.email,
+      status: r.status,
+      bullhornUrl: r.bullhornUrl,
+      mergeValues: r.mergeValues,
+      subject: r.subject,
+    })),
     skipped,
     mailboxConnected: mailbox.connected,
     mailboxEmail: mailbox.mailboxEmail,
     connectUrl,
     subject: args.subject,
-    bodyPreview:
-      args.body.length > 1000 ? `${args.body.slice(0, 1000)}...` : args.body,
+    bodyPreview: previewText(args.body),
+    mergeFieldsUsed: mergeFields,
+    examples: pickExamples(ready),
     jobOrderId: args.jobOrderId ?? null,
     confirmToken,
     expiresAt,
@@ -280,8 +345,16 @@ export async function previewEmailsToRecords(args: {
         ? "No recipients are ready to send. Fix skipped rows or choose different records, then preview again."
         : !mailbox.connected
           ? "Mailbox is not connected. Open connectUrl, finish Microsoft 365 sign-in, then re-run dryRun=true before confirming."
-          : `Preview ready for ${ready.length} recipient(s). Show the ready/skipped tables in chat (link each NAME via bullhornUrl; leave emails as plain text). Do NOT use ChatGPT's native draft Send card. After the user confirms, call again with the SAME recipients/subject/body, dryRun=false, and this confirmToken.`,
+          : `Preview ready for ${ready.length} recipient(s). Show the template (subject + bodyPreview), every entry in examples exactly as rendered, the ready table, and the skipped table with each reason (link each NAME via bullhornUrl; leave emails as plain text). Do NOT use ChatGPT's native draft Send card. After the user confirms, call again with the SAME recipients/subject/body, dryRun=false, and this confirmToken.`,
   };
+}
+
+function sameMergeValues(
+  a: Partial<EmailMergeValues>,
+  b: Partial<EmailMergeValues>,
+  fields: readonly EmailMergeField[],
+): boolean {
+  return fields.every((f) => (a[f] ?? null) === (b[f] ?? null));
 }
 
 export async function sendEmailsToRecords(args: {
@@ -347,25 +420,109 @@ export async function sendEmailsToRecords(args: {
   const sent: Array<Record<string, unknown>> = [];
   const failed: Array<Record<string, unknown>> = [];
   const skipped: Array<Record<string, unknown>> = [];
+  const changed: Array<Record<string, unknown>> = [];
+  const toSend: PreviewedRecipient[] = [];
+
+  // Re-read every ready recipient before the first send. Any change to a
+  // previewed email or merge value voids the whole confirm.
+  for (const previewed of confirmed.entry.ready) {
+    let current: Awaited<ReturnType<typeof previewEmailToRecord>>;
+    try {
+      current = await previewEmailToRecord({
+        userId: args.userId,
+        entityType: previewed.entityType,
+        recordId: previewed.recordId,
+        subject: args.subject,
+        body: args.body,
+        jobOrderId: args.jobOrderId,
+      });
+    } catch (err) {
+      failed.push({
+        entityType: previewed.entityType,
+        recordId: previewed.recordId,
+        error: "resolve_failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+    if (!current.ok) {
+      if (current.error === "missing_email" || current.error === "do_not_contact") {
+        skipped.push({
+          entityType: previewed.entityType,
+          recordId: previewed.recordId,
+          recipient: current.recipient,
+          error: current.error,
+          message: current.message,
+        });
+        continue;
+      }
+      changed.push({
+        entityType: previewed.entityType,
+        recordId: previewed.recordId,
+        name: previewed.name,
+        reason: current.error,
+      });
+      continue;
+    }
+    const unchanged =
+      current.recipient.email === previewed.email &&
+      sameMergeValues(current.mergeValues, previewed.mergeValues, confirmed.entry.mergeFields) &&
+      current.subject === previewed.subject &&
+      current.renderedBody === previewed.body;
+    if (!unchanged) {
+      changed.push({
+        entityType: previewed.entityType,
+        recordId: previewed.recordId,
+        name: previewed.name,
+        reason: "bullhorn_value_changed",
+      });
+      continue;
+    }
+    toSend.push(previewed);
+  }
+
+  if (changed.length > 0) {
+    return {
+      ok: false as const,
+      error: "preview_stale",
+      message:
+        "One or more recipients changed in Bullhorn since the preview (email or merge value). Nothing was sent. Re-run dryRun=true, show the new rendered examples, and confirm again.",
+      changed,
+      sent: [],
+      failed: [],
+      skipped: [],
+      stoppedEarly: true,
+    };
+  }
+
   let stoppedEarly = false;
   let stopReason: string | null = null;
 
-  for (const recipient of confirmed.entry.recipients) {
-    const result = await sendEmailToRecord({
+  for (const recipient of toSend) {
+    const result = await deliverPreparedEmail({
       userId: args.userId,
       bullhornSession: args.bullhornSession,
-      entityType: recipient.entityType,
-      recordId: recipient.recordId,
-      subject: args.subject,
-      body: args.body,
+      prepared: {
+        recipient: {
+          entityType: recipient.entityType,
+          recordId: recipient.recordId,
+          name: recipient.name,
+          email: recipient.email,
+          status: recipient.status,
+          bullhornUrl: recipient.bullhornUrl,
+        },
+        subject: recipient.subject,
+        body: recipient.body,
+      },
       jobOrderId: args.jobOrderId,
     });
 
-    if (result.ok && "logId" in result) {
+    if (result.ok) {
       sent.push({
         entityType: recipient.entityType,
         recordId: recipient.recordId,
         recipient: result.recipient,
+        subject: result.subject,
         logId: result.logId,
         bullhornNoteId: result.bullhornNoteId,
         senderEmail: result.senderEmail,
@@ -373,43 +530,30 @@ export async function sendEmailsToRecords(args: {
       continue;
     }
 
-    if (!result.ok) {
-      if (
-        result.error === "mailbox_not_connected" ||
-        result.error === "mailbox_reconnect_required"
-      ) {
-        failed.push({
-          entityType: recipient.entityType,
-          recordId: recipient.recordId,
-          recipient: "recipient" in result ? result.recipient : undefined,
-          error: result.error,
-          message: result.message,
-          connectUrl: "connectUrl" in result ? result.connectUrl : undefined,
-        });
-        stoppedEarly = true;
-        stopReason = result.error;
-        break;
-      }
-
-      if (result.error === "missing_email" || result.error === "do_not_contact") {
-        skipped.push({
-          entityType: recipient.entityType,
-          recordId: recipient.recordId,
-          recipient: "recipient" in result ? result.recipient : undefined,
-          error: result.error,
-          message: result.message,
-        });
-        continue;
-      }
-
+    if (
+      result.error === "mailbox_not_connected" ||
+      result.error === "mailbox_reconnect_required"
+    ) {
       failed.push({
         entityType: recipient.entityType,
         recordId: recipient.recordId,
-        recipient: "recipient" in result ? result.recipient : undefined,
+        recipient: result.recipient,
         error: result.error,
         message: result.message,
+        connectUrl: "connectUrl" in result ? result.connectUrl : undefined,
       });
+      stoppedEarly = true;
+      stopReason = result.error;
+      break;
     }
+
+    failed.push({
+      entityType: recipient.entityType,
+      recordId: recipient.recordId,
+      recipient: result.recipient,
+      error: result.error,
+      message: result.message,
+    });
   }
 
   return {
