@@ -276,6 +276,10 @@ const SERVER_INSTRUCTIONS = [
 const READ_PRESENTATION_SUFFIX =
   " | Presentation: if a result record includes a `bullhornUrl`, make that record clickable — render its NAME (or Bullhorn ID) as a Markdown link to its bullhornUrl, e.g. [Acme Corp](url). Do this for EVERY row, including rows that also show an email or phone — the name is the link, the email stays plain text. Put the link ONLY on the record name/ID; never link email addresses or phone numbers.";
 
+const MERGE_FIELD_TOOL_NOTE =
+  "Merge fields: {{firstName}}, {{lastName}}, {{fullName}} in subject/body, filled from the Bullhorn record only (never pass names). " +
+  "Fallback: {{firstName|there}}. Unknown tags fail preview; no value and no fallback skips that recipient.";
+
 // Shared schema for Bullhorn ADDRESS composite parameters on update tools.
 // Defined as a top-level typed object so OpenAI's tool-call validator can
 // accept it without ambiguity (nested objects inside z.record additionalProperties
@@ -1691,14 +1695,16 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "ALWAYS preview first: show the user the exact recipient name (as a Markdown link to recipient.bullhornUrl when present), recipient email as plain text, subject, and body, then get explicit confirmation before a live send. " +
       "Prefer dryRun=true for that preview. After a successful send, again render the recipient NAME as a Markdown link to recipient.bullhornUrl and mention that an Email note was logged on the Bullhorn record. " +
       "The tool fetches the recipient email from Bullhorn (do not trust a caller-supplied address), blocks obvious do-not-contact / opted-out statuses, and returns a connectUrl if the mailbox is not connected yet. " +
+      MERGE_FIELD_TOOL_NOTE +
+      " Show the rendered subject/bodyPreview from dryRun before sending. " +
       "For multiple recipients, use send_email_to_records instead of calling this tool in a loop.",
     {
       entityType: z
         .enum(["Candidate", "ClientContact"])
         .describe("Which Bullhorn record type to email."),
       recordId: z.number().int().positive().describe("Bullhorn Candidate or ClientContact ID."),
-      subject: z.string().min(1).describe("Email subject line."),
-      body: z.string().min(1).describe("Email body to send. Plain text is safest; the service will render line breaks for the mailbox."),
+      subject: z.string().min(1).describe("Email subject line. May use merge fields such as {{firstName}}."),
+      body: z.string().min(1).describe("Email body to send. Plain text is safest; the service will render line breaks for the mailbox. May use merge fields such as {{firstName|there}}."),
       jobOrderId: z.number().int().positive().optional().describe("Optional related Bullhorn job order ID for context and note logging."),
       dryRun: z.boolean().optional().describe("If true, do not send anything — only resolve the recipient, consent gate, and mailbox connection status."),
     },
@@ -1735,11 +1741,13 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "send_email_to_records",
-    "WRITE: Sends ONE shared email to multiple Bullhorn candidates/contacts through YOUR Microsoft 365 mailbox (serial), logging each success as a Bullhorn Email note plus an AskToAct ledger row. " +
+    "WRITE: Sends one email template to multiple Bullhorn candidates/contacts through YOUR Microsoft 365 mailbox (serial), logging each success (as rendered) to a Bullhorn Email note plus an AskToAct ledger row. " +
       `Hard max ${BULK_EMAIL_MAX_RECIPIENTS} recipients per run — split larger lists. ` +
-      "REQUIRED WORKFLOW: (1) dryRun=true preview — show ready vs skipped tables in chat (NAME linked via bullhornUrl; email plain text), subject, body, and mailbox status; (2) get explicit user confirmation in chat; (3) live send with the SAME recipients/subject/body plus confirmToken from the preview. " +
+      MERGE_FIELD_TOOL_NOTE +
+      " REQUIRED WORKFLOW: (1) dryRun=true preview — show the template, EVERY `examples` entry as rendered, the ready table, and skipped rows with reasons (NAME linked via bullhornUrl; email plain text), plus mailbox status; (2) get explicit user confirmation in chat; (3) live send with the SAME recipients/subject/body plus confirmToken from the preview. " +
+      "If Bullhorn values changed since preview, send returns preview_stale (nothing sent): preview again. " +
       "Do NOT use ChatGPT's native email draft / Send card — confirm AskToAct send in chat only. " +
-      "Do NOT loop send_email_to_record for the same batch. Skips missing-email and do-not-contact rows; stops early on mailbox reconnect failures. Shared subject/body only (no per-recipient merge fields).",
+      "Do NOT loop send_email_to_record for the same batch. Skips missing-email, do-not-contact, and missing-merge-value rows; stops early on mailbox reconnect failures.",
     {
       recipients: z
         .array(
@@ -1753,8 +1761,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .min(1)
         .max(BULK_EMAIL_MAX_RECIPIENTS)
         .describe(`Recipients to email (max ${BULK_EMAIL_MAX_RECIPIENTS}). Pass the same array on preview and confirm.`),
-      subject: z.string().min(1).describe("Shared email subject for every recipient."),
-      body: z.string().min(1).describe("Shared email body for every recipient. Plain text is safest."),
+      subject: z.string().min(1).describe("Email subject template for every recipient. May use merge fields such as {{firstName}}."),
+      body: z.string().min(1).describe("Email body template for every recipient. Plain text is safest. May use merge fields such as Hi {{firstName|there}},"),
       jobOrderId: z.number().int().positive().optional().describe("Optional related Bullhorn job order ID for note logging."),
       dryRun: z
         .boolean()
