@@ -208,6 +208,7 @@ interface FirmTokenRow {
   loginUrl: string | null;
   encryptedClientId: string | null;
   encryptedClientSecret: string | null;
+  usesPlatformClient: boolean;
   authMode: string;
   authHealthy: boolean;
   refreshGeneration: number;
@@ -223,6 +224,7 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
       loginUrl: bullhornTokensTable.loginUrl,
       oauthClientId: bullhornTokensTable.oauthClientId,
       oauthClientSecret: bullhornTokensTable.oauthClientSecret,
+      usesPlatformClient: bullhornTokensTable.usesPlatformClient,
       authMode: bullhornTokensTable.authMode,
       authHealthy: bullhornTokensTable.authHealthy,
       refreshGeneration: sql<number>`refresh_generation`,
@@ -240,6 +242,7 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
     loginUrl: row.loginUrl ?? null,
     encryptedClientId: row.oauthClientId ?? null,
     encryptedClientSecret: row.oauthClientSecret ?? null,
+    usesPlatformClient: row.usesPlatformClient === true,
     authMode: row.authMode ?? "oauth",
     authHealthy: row.authHealthy,
     refreshGeneration: (row as { refreshGeneration?: number }).refreshGeneration ?? 0,
@@ -477,6 +480,7 @@ function deriveLoginUrl(restUrl: string): string | null {
 function oauthAppFromTokenRow(row: FirmTokenRow | null): BullhornOAuthApp {
   return resolveBullhornOAuthApp({
     authMode: row?.authMode ?? null,
+    usesPlatformClient: row?.usesPlatformClient === true,
     encryptedClientId: row?.encryptedClientId,
     encryptedClientSecret: row?.encryptedClientSecret,
   });
@@ -499,8 +503,8 @@ async function resolveFirmEndpoints(row: FirmTokenRow | null): Promise<Endpoints
     return { oauthUrl: row.oauthUrl, loginUrl: row.loginUrl };
   }
   // A customer firm must not discover its swimlane with the service username.
-  // The service firm (and a first headless login with no row) still uses env.
-  if (row && row.authMode !== "service") {
+  // Service rows and pre-existing platform-client rows keep the old fallback.
+  if (row && row.authMode !== "service" && !row.usesPlatformClient) {
     throw new BullhornDataCenterUnknownError();
   }
   return discoverEndpoints();
@@ -1124,9 +1128,9 @@ export async function saveFirmBullhornOAuthClient(
   const material = assertOAuthClientMaterial(clientId, clientSecret);
   const encrypted = encryptOAuthClientMaterial(material.clientId, material.clientSecret);
   const existing = await loadTokenRow(firmId);
-  if (existing?.authMode === "service") {
+  if (existing?.authMode === "service" || existing?.usesPlatformClient) {
     throw new BullhornOAuthClientStoreError(
-      "The service firm uses the platform Bullhorn client from the environment. Per-firm client credentials cannot be stored on it.",
+      "This firm uses the platform Bullhorn client from the environment. Per-firm client credentials cannot be stored on it.",
       409,
     );
   }
@@ -1137,6 +1141,7 @@ export async function saveFirmBullhornOAuthClient(
       refreshToken: "",
       authMode: "oauth",
       authHealthy: false,
+      usesPlatformClient: false,
       oauthClientId: encrypted.encryptedClientId,
       oauthClientSecret: encrypted.encryptedClientSecret,
       updatedAt: new Date(),

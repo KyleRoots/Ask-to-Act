@@ -12,7 +12,9 @@ vi.mock("./emailService.js", () => ({
 
 const {
   __bullhornAuthTestHooks,
+  completeAuthorization,
   completeUserEnrollment,
+  getAuthorizeUrl,
   getSession,
   getUserSession,
 } = await import("./bullhorn-auth.js");
@@ -58,6 +60,7 @@ async function seedFirmToken(opts: {
   authMode?: "service" | "oauth";
   oauthClientId?: string | null;
   oauthClientSecret?: string | null;
+  usesPlatformClient?: boolean;
 }): Promise<void> {
   await seedFirm(opts.firmId);
   await pool.query(
@@ -71,9 +74,10 @@ async function seedFirmToken(opts: {
         login_url,
         auth_mode,
         oauth_client_id,
-        oauth_client_secret
+        oauth_client_secret,
+        uses_platform_client
       )
-      VALUES ($1, $1, $2, 'https://oauth.fake', 'https://rest.fake/rest-services/original', 'https://rest.fake/rest-services/login', $3, $4, $5)
+      VALUES ($1, $1, $2, 'https://oauth.fake', 'https://rest.fake/rest-services/original', 'https://rest.fake/rest-services/login', $3, $4, $5, $6)
     `,
     [
       opts.firmId,
@@ -81,6 +85,7 @@ async function seedFirmToken(opts: {
       opts.authMode ?? "oauth",
       opts.oauthClientId ?? null,
       opts.oauthClientSecret ?? null,
+      opts.usesPlatformClient ?? false,
     ],
   );
 }
@@ -368,6 +373,82 @@ describe("Bullhorn auth production orchestration safety", () => {
     });
     expect(rows[0].refresh_attempt_id).toBeTruthy();
     expect(rows[0].refresh_uncertain_at).toBeInstanceOf(Date);
+  });
+
+  it("refreshes and reconnects a platform-client oauth row with the env client", async () => {
+    await seedFirmToken({
+      firmId: "test_auth_orch_platform_oauth",
+      refreshToken: "old-platform-refresh",
+      authMode: "oauth",
+      usesPlatformClient: true,
+    });
+
+    const authorizeUrl = new URL(
+      await getAuthorizeUrl("state-platform", "test_auth_orch_platform_oauth"),
+    );
+    expect(authorizeUrl.origin).toBe("https://oauth.fake");
+    expect(authorizeUrl.searchParams.get("client_id")).toBe("client-id");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "https://oauth.fake/token") {
+          const body = bodyParams(init);
+          expect(body.get("client_id")).toBe("client-id");
+          expect(body.get("client_secret")).toBe("client-secret");
+          if (body.get("grant_type") === "refresh_token") {
+            expect(body.get("refresh_token")).toBe("old-platform-refresh");
+            return json({
+              access_token: "platform-access",
+              refresh_token: "platform-refresh-new",
+              expires_in: 600,
+            });
+          }
+          if (body.get("grant_type") === "authorization_code") {
+            expect(body.get("code")).toBe("reconnect-code");
+            return json({
+              access_token: "reconnect-access",
+              refresh_token: "reconnect-refresh",
+              expires_in: 600,
+            });
+          }
+        }
+        if (url.startsWith("https://rest.fake/rest-services/login")) {
+          return json({
+            BhRestToken: "platform-bh-rest",
+            restUrl: "https://rest.fake/rest-services/session",
+          });
+        }
+        if (url.startsWith("https://rest.fake/rest-services/session/ping")) {
+          return json({ sessionExpires: Date.now() + 600_000 });
+        }
+        throw new Error(`unexpected fake fetch: ${url}`);
+      }),
+    );
+
+    await expect(getSession("test_auth_orch_platform_oauth")).resolves.toMatchObject({
+      BhRestToken: "platform-bh-rest",
+      refreshToken: "platform-refresh-new",
+    });
+
+    __bullhornAuthTestHooks.resetAuthState();
+    await completeAuthorization("reconnect-code", "test_auth_orch_platform_oauth");
+
+    const { rows } = await pool.query(
+      `
+        SELECT auth_mode, uses_platform_client, oauth_client_id, oauth_client_secret,
+               refresh_token
+        FROM bullhorn_tokens
+        WHERE firm_id = 'test_auth_orch_platform_oauth'
+      `,
+    );
+    expect(rows[0]).toMatchObject({
+      auth_mode: "oauth",
+      uses_platform_client: true,
+      oauth_client_id: null,
+      oauth_client_secret: null,
+      refresh_token: "reconnect-refresh",
+    });
   });
 
   it("fails closed for an oauth firm with no stored client and does not call Bullhorn", async () => {

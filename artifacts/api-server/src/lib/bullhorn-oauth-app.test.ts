@@ -35,10 +35,24 @@ describe("resolveBullhornOAuthApp", () => {
     });
   });
 
+  it("uses the env pair for an oauth firm that already uses the platform client", () => {
+    const app = resolveBullhornOAuthApp({
+      authMode: "oauth",
+      usesPlatformClient: true,
+      encryptedClientId: null,
+      encryptedClientSecret: null,
+    });
+    expect(app).toEqual({
+      clientId: "myticas-client-id",
+      clientSecret: "myticas-client-secret",
+    });
+  });
+
   it("fails closed for an oauth firm with no stored client", () => {
     expect(() =>
       resolveBullhornOAuthApp({
         authMode: "oauth",
+        usesPlatformClient: false,
         encryptedClientId: null,
         encryptedClientSecret: null,
       }),

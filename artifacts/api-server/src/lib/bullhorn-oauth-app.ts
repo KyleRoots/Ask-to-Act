@@ -58,18 +58,20 @@ function envClient(env: NodeJS.ProcessEnv): BullhornOAuthApp {
 }
 
 /**
- * Service firms always use the platform env pair, even if a row has stored
- * values. Any other firm uses its encrypted columns, or fails closed.
+ * Service rows and rows flagged at migration time use the platform env pair,
+ * even if stored client columns are filled. Any other firm uses its encrypted
+ * columns, or fails closed.
  */
 export function resolveBullhornOAuthApp(
   args: {
     authMode: string | null;
+    usesPlatformClient?: boolean | null;
     encryptedClientId?: string | null;
     encryptedClientSecret?: string | null;
   },
   env: NodeJS.ProcessEnv = process.env,
 ): BullhornOAuthApp {
-  if (args.authMode === "service") {
+  if (args.authMode === "service" || args.usesPlatformClient === true) {
     return envClient(env);
   }
   const encryptedClientId = args.encryptedClientId ?? null;

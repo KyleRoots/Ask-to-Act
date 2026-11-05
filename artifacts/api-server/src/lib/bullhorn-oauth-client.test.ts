@@ -47,6 +47,7 @@ vi.mock("@workspace/db", () => {
       loginUrl: "loginUrl",
       oauthClientId: "oauthClientId",
       oauthClientSecret: "oauthClientSecret",
+      usesPlatformClient: "usesPlatformClient",
       authMode: "authMode",
       authHealthy: "authHealthy",
       lastAuthErrorAt: "lastAuthErrorAt",
@@ -85,6 +86,7 @@ function serviceRow(overrides: TokenRow = {}): TokenRow {
     loginUrl: "https://myticas-rest.example/rest-services/login",
     oauthClientId: null,
     oauthClientSecret: null,
+    usesPlatformClient: false,
     authMode: "service",
     authHealthy: true,
     refreshGeneration: 1,
@@ -159,8 +161,63 @@ describe("getAuthorizeUrl", () => {
     expect(url.origin).toBe("https://myticas-oauth.example");
   });
 
+  it("uses the env client for a platform-client oauth row and keeps its stored swimlane", async () => {
+    state.rows = [
+      serviceRow({
+        authMode: "oauth",
+        usesPlatformClient: true,
+        refreshToken: "live-refresh",
+        oauthUrl: "https://auth-east.example/oauth",
+        loginUrl: "https://rest-east.example/rest-services/login",
+        oauthClientId: null,
+        oauthClientSecret: null,
+      }),
+    ];
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const url = new URL(await getAuthorizeUrl("state-1", "firm-platform"));
+    expect(url.searchParams.get("client_id")).toBe("myticas-client-id");
+    expect(url.origin).toBe("https://auth-east.example");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("lets a platform-client oauth row discover endpoints when its swimlane is missing", async () => {
+    state.rows = [
+      serviceRow({
+        authMode: "oauth",
+        usesPlatformClient: true,
+        oauthUrl: null,
+        loginUrl: null,
+      }),
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const url = new URL(input);
+        expect(url.searchParams.get("username")).toBe("myticas-api-user");
+        return new Response(
+          JSON.stringify({
+            oauthUrl: "https://auth.example/oauth",
+            restUrl: "https://rest.example/rest-services/abc",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+    const url = new URL(await getAuthorizeUrl("state-1", "firm-platform"));
+    expect(url.searchParams.get("client_id")).toBe("myticas-client-id");
+    expect(url.origin).toBe("https://auth.example");
+  });
+
   it("fails closed for an oauth firm with no stored client and does not call Bullhorn", async () => {
-    state.rows = [serviceRow({ authMode: "oauth", oauthUrl: null, loginUrl: null })];
+    state.rows = [
+      serviceRow({
+        authMode: "oauth",
+        usesPlatformClient: false,
+        oauthUrl: null,
+        loginUrl: null,
+      }),
+    ];
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     await expect(getAuthorizeUrl("state-1", "firm-oauth")).rejects.toBeInstanceOf(
@@ -221,6 +278,7 @@ describe("oauthAppFromTokenRow", () => {
         loginUrl: String(row["loginUrl"]),
         encryptedClientId: String(row["oauthClientId"]),
         encryptedClientSecret: String(row["oauthClientSecret"]),
+        usesPlatformClient: false,
         authMode: "service",
         authHealthy: true,
         refreshGeneration: 1,
@@ -233,6 +291,21 @@ describe("oauthAppFromTokenRow", () => {
 });
 
 describe("saveFirmBullhornOAuthClient", () => {
+  it("rejects a platform-client oauth row and writes nothing", async () => {
+    state.rows = [
+      serviceRow({
+        authMode: "oauth",
+        usesPlatformClient: true,
+        refreshToken: "live-refresh",
+      }),
+    ];
+    await expect(
+      saveFirmBullhornOAuthClient("firm-platform", "qualified-client-id", "qualified-client-secret"),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(state.inserts).toHaveLength(0);
+    expect(state.updates).toHaveLength(0);
+  });
+
   it("rejects the service firm and writes nothing", async () => {
     state.rows = [serviceRow()];
     await expect(
@@ -254,6 +327,7 @@ describe("saveFirmBullhornOAuthClient", () => {
     expect(inserted["refreshToken"]).toBe("");
     expect(inserted["authMode"]).toBe("oauth");
     expect(inserted["authHealthy"]).toBe(false);
+    expect(inserted["usesPlatformClient"]).toBe(false);
     expect(String(inserted["oauthClientId"])).toMatch(/^enc:v1:/);
     expect(String(inserted["oauthClientSecret"])).toMatch(/^enc:v1:/);
     expect(JSON.stringify(inserted)).not.toContain("qualified-client-secret");

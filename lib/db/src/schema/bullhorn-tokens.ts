@@ -14,9 +14,9 @@ import { firmsTable } from "./firms";
  *  - `restUrl`   — the firm's authenticated REST base from its last login.
  *  - `loginUrl`  — the firm's REST /login endpoint (derived from restUrl), used
  *                  on refresh so we never reuse another firm's swimlane.
- *  - `authMode`  — "service" = env-credential headless account (only the
- *                  AskToAct/Myticas firm); "oauth" = interactive OAuth (customer
- *                  firms), which can only re-establish via refresh token.
+ *  - `authMode`  — "service" = env-password headless account; "oauth" =
+ *                  refresh-token account. Which client id to send is
+ *                  `usesPlatformClient`, not this column.
  */
 export const bullhornTokensTable = pgTable(
   "bullhorn_tokens",
@@ -30,10 +30,16 @@ export const bullhornTokensTable = pgTable(
     restUrl: text("rest_url"),
     loginUrl: text("login_url"),
     /**
+     * When true, authorize and refresh use BULLHORN_CLIENT_ID /
+     * BULLHORN_CLIENT_SECRET. Migration sets this on every row that already
+     * existed, including oauth rows. New rows default to false.
+     */
+    usesPlatformClient: boolean("uses_platform_client").notNull().default(false),
+    /**
      * Encrypted Bullhorn OAuth client id and secret for this firm
-     * (`enc:v1:` via token-crypto). Null on the service firm, which always
-     * uses BULLHORN_CLIENT_ID / BULLHORN_CLIENT_SECRET. An oauth firm with
-     * either value missing cannot authorize or refresh.
+     * (`enc:v1:` via token-crypto). Unused while `usesPlatformClient` is true
+     * or `authMode` is service. Any other firm with either value missing
+     * cannot authorize or refresh.
      */
     oauthClientId: text("oauth_client_id"),
     oauthClientSecret: text("oauth_client_secret"),

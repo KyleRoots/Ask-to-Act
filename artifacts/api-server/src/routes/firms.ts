@@ -656,7 +656,8 @@ router.post(
  * Admin-only. Stores this firm's Bullhorn OAuth client id and secret.
  * Body: { clientId, clientSecret }. The values come from the caller, never
  * from QUALIFIED_BULLHORN_* or any other environment variable. They are
- * encrypted at rest and are not echoed or logged. The service firm is rejected.
+ * encrypted at rest and are not echoed or logged. A service row, and any
+ * row with uses_platform_client, is rejected.
  */
 router.post(
   "/firms/:id/bullhorn-oauth-client",
