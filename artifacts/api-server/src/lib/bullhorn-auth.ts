@@ -4,6 +4,15 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "./logger.js";
 import { decryptToken, encryptToken } from "./token-crypto.js";
+import {
+  BullhornDataCenterUnknownError,
+  BullhornOAuthAppMissingError,
+  BullhornOAuthClientStoreError,
+  type BullhornOAuthApp,
+  assertOAuthClientMaterial,
+  encryptOAuthClientMaterial,
+  resolveBullhornOAuthApp,
+} from "./bullhorn-oauth-app.js";
 import { getBaseUrl } from "./getBaseUrl.js";
 import {
   claimRefreshAttempt,
@@ -197,6 +206,8 @@ interface FirmTokenRow {
   oauthUrl: string | null;
   restUrl: string | null;
   loginUrl: string | null;
+  encryptedClientId: string | null;
+  encryptedClientSecret: string | null;
   authMode: string;
   authHealthy: boolean;
   refreshGeneration: number;
@@ -210,6 +221,8 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
       oauthUrl: bullhornTokensTable.oauthUrl,
       restUrl: bullhornTokensTable.restUrl,
       loginUrl: bullhornTokensTable.loginUrl,
+      oauthClientId: bullhornTokensTable.oauthClientId,
+      oauthClientSecret: bullhornTokensTable.oauthClientSecret,
       authMode: bullhornTokensTable.authMode,
       authHealthy: bullhornTokensTable.authHealthy,
       refreshGeneration: sql<number>`refresh_generation`,
@@ -225,6 +238,8 @@ async function loadTokenRow(firmId: string): Promise<FirmTokenRow | null> {
     oauthUrl: row.oauthUrl ?? null,
     restUrl: row.restUrl ?? null,
     loginUrl: row.loginUrl ?? null,
+    encryptedClientId: row.oauthClientId ?? null,
+    encryptedClientSecret: row.oauthClientSecret ?? null,
     authMode: row.authMode ?? "oauth",
     authHealthy: row.authHealthy,
     refreshGeneration: (row as { refreshGeneration?: number }).refreshGeneration ?? 0,
@@ -459,15 +474,34 @@ function deriveLoginUrl(restUrl: string): string | null {
   return restUrl.slice(0, i + marker.length) + "login";
 }
 
+function oauthAppFromTokenRow(row: FirmTokenRow | null): BullhornOAuthApp {
+  return resolveBullhornOAuthApp({
+    authMode: row?.authMode ?? null,
+    encryptedClientId: row?.encryptedClientId,
+    encryptedClientSecret: row?.encryptedClientSecret,
+  });
+}
+
+function envOAuthApp(): BullhornOAuthApp {
+  return resolveBullhornOAuthApp({ authMode: "service" });
+}
+
 /**
  * Resolves the OAuth/login endpoints for a firm. Prefers the firm's own stored
  * endpoints (captured at connect time) so we never reuse one tenant's swimlane
  * for another; falls back to the global region-discovered endpoints only when a
  * firm has none stored yet (e.g. the service firm before its first capture).
+ * A customer row with no stored swimlane fails closed instead of calling
+ * loginInfo with the service username.
  */
 async function resolveFirmEndpoints(row: FirmTokenRow | null): Promise<Endpoints> {
   if (row?.oauthUrl && row?.loginUrl) {
     return { oauthUrl: row.oauthUrl, loginUrl: row.loginUrl };
+  }
+  // A customer firm must not discover its swimlane with the service username.
+  // The service firm (and a first headless login with no row) still uses env.
+  if (row && row.authMode !== "service") {
+    throw new BullhornDataCenterUnknownError();
   }
   return discoverEndpoints();
 }
@@ -512,9 +546,10 @@ async function discoverEndpoints(): Promise<Endpoints> {
  */
 export async function getAuthorizeUrl(state: string, firmId?: string): Promise<string> {
   const row = firmId ? await loadTokenRow(firmId) : null;
+  const app = oauthAppFromTokenRow(row);
   const { oauthUrl } = await resolveFirmEndpoints(row);
   const url = new URL(`${oauthUrl}/authorize`);
-  url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
+  url.searchParams.set("client_id", app.clientId);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
   url.searchParams.set("state", state);
@@ -672,12 +707,13 @@ async function fetchAuthCodeHeadless(oauthUrl: string): Promise<string> {
 async function exchangeCodeForToken(
   oauthUrl: string,
   code: string,
+  app: BullhornOAuthApp = envOAuthApp(),
 ): Promise<TokenResponse> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
-    client_id: getEnv("BULLHORN_CLIENT_ID"),
-    client_secret: getEnv("BULLHORN_CLIENT_SECRET"),
+    client_id: app.clientId,
+    client_secret: app.clientSecret,
     redirect_uri: getEnv("BULLHORN_REDIRECT_URI"),
   });
 
@@ -700,14 +736,15 @@ async function exchangeCodeForToken(
 async function fetchTokenWithRefresh(
   oauthUrl: string,
   refreshToken: string,
+  app: BullhornOAuthApp = envOAuthApp(),
 ): Promise<TokenResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BULLHORN_REFRESH_HTTP_TIMEOUT_MS);
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    client_id: getEnv("BULLHORN_CLIENT_ID"),
-    client_secret: getEnv("BULLHORN_CLIENT_SECRET"),
+    client_id: app.clientId,
+    client_secret: app.clientSecret,
   });
 
   let res: Response;
@@ -825,6 +862,7 @@ export async function completeAuthorization(
 ): Promise<void> {
   const fid = currentFirmId(firmId);
   const existing = await loadTokenRow(fid);
+  const app = oauthAppFromTokenRow(existing);
   const ep = await resolveFirmEndpoints(existing);
   const generation = expectedGeneration ?? existing?.refreshGeneration ?? 0;
   if (existing && existing.refreshGeneration !== generation) {
@@ -833,7 +871,7 @@ export async function completeAuthorization(
   if (!existing && generation !== 0) {
     throw new Error("Bullhorn reconnect callback is stale for a missing firm connection.");
   }
-  const tokens = await exchangeCodeForToken(ep.oauthUrl, code);
+  const tokens = await exchangeCodeForToken(ep.oauthUrl, code, app);
   const saved = await persistReconnectTokenBeforeLogin({
     kind: "firm",
     id: fid,
@@ -876,6 +914,7 @@ async function sessionFromRefreshToken(
   row: FirmTokenRow,
   ep: Endpoints,
 ): Promise<Session> {
+  const app = oauthAppFromTokenRow(row);
   if (!row.encryptedRefreshToken || !row.refreshToken) {
     throw new Error("No Bullhorn refresh token available for firm refresh.");
   }
@@ -894,7 +933,7 @@ async function sessionFromRefreshToken(
   let tokens: TokenResponse;
   let persistedGeneration: number | null = null;
   try {
-    tokens = await fetchTokenWithRefresh(ep.oauthUrl, row.refreshToken);
+    tokens = await fetchTokenWithRefresh(ep.oauthUrl, row.refreshToken, app);
   } catch (err) {
     if (err instanceof BullhornRefreshTokenError && err.kind === "invalid_grant") {
       const persisted = await persistDefinitiveInvalidGrant({
@@ -967,6 +1006,21 @@ async function sessionFromRefreshToken(
 }
 
 /**
+ * Service-firm headless authorize. Discovers the data center with
+ * BULLHORN_USERNAME and sends that username plus the env client id.
+ * Customer firms never call this.
+ */
+async function serviceHeadlessAuthCode(): Promise<{
+  oauthUrl: string;
+  loginUrl: string;
+  code: string;
+}> {
+  const { oauthUrl, loginUrl } = await discoverEndpoints();
+  const code = await fetchAuthCodeHeadless(oauthUrl);
+  return { oauthUrl, loginUrl, code };
+}
+
+/**
  * Headless ("direct") login for the SERVICE firm only: gets an authorization
  * code by sending the env-var credentials straight to /authorize, then runs the
  * standard token + REST-login exchange and persists the firm's connection. No
@@ -985,9 +1039,9 @@ async function directLogin(firmId: string): Promise<Session> {
   }
   try {
     const existing = await loadTokenRow(firmId);
-    const { oauthUrl, loginUrl } = await discoverEndpoints();
-    const code = await fetchAuthCodeHeadless(oauthUrl);
-    const tokens = await exchangeCodeForToken(oauthUrl, code);
+    // Platform env client and BULLHORN_USERNAME only. Never a per-firm client.
+    const { oauthUrl, loginUrl, code } = await serviceHeadlessAuthCode();
+    const tokens = await exchangeCodeForToken(oauthUrl, code, envOAuthApp());
     const saved = await persistReconnectTokenBeforeLogin({
       kind: "firm",
       id: firmId,
@@ -1047,14 +1101,56 @@ export async function connectHeadless(firmId?: string): Promise<{ restUrl: strin
   return { restUrl: s.restUrl };
 }
 
-/** True if the given firm has a Bullhorn service connection (token row exists). */
+/**
+ * True when the firm has a usable Bullhorn refresh token. A row that only
+ * stores OAuth client credentials is not connected.
+ */
 export async function isFirmConnected(firmId: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: bullhornTokensTable.id })
-    .from(bullhornTokensTable)
-    .where(eq(bullhornTokensTable.firmId, firmId))
-    .limit(1);
-  return rows.length > 0;
+  const status = await getFirmBullhornHealthStatus(firmId);
+  return status.connected;
+}
+
+/**
+ * Stores a customer firm's Bullhorn OAuth client id and secret from an admin
+ * request body. The password is not accepted here. Values are encrypted before
+ * write. The service firm is rejected so it keeps the env client pair.
+ * Does not read QUALIFIED_BULLHORN_* (or any other) environment variables.
+ */
+export async function saveFirmBullhornOAuthClient(
+  firmId: string,
+  clientId: unknown,
+  clientSecret: unknown,
+): Promise<void> {
+  const material = assertOAuthClientMaterial(clientId, clientSecret);
+  const encrypted = encryptOAuthClientMaterial(material.clientId, material.clientSecret);
+  const existing = await loadTokenRow(firmId);
+  if (existing?.authMode === "service") {
+    throw new BullhornOAuthClientStoreError(
+      "The service firm uses the platform Bullhorn client from the environment. Per-firm client credentials cannot be stored on it.",
+      409,
+    );
+  }
+  if (!existing) {
+    await db.insert(bullhornTokensTable).values({
+      id: firmId,
+      firmId,
+      refreshToken: "",
+      authMode: "oauth",
+      authHealthy: false,
+      oauthClientId: encrypted.encryptedClientId,
+      oauthClientSecret: encrypted.encryptedClientSecret,
+      updatedAt: new Date(),
+    });
+    return;
+  }
+  await db
+    .update(bullhornTokensTable)
+    .set({
+      oauthClientId: encrypted.encryptedClientId,
+      oauthClientSecret: encrypted.encryptedClientSecret,
+      updatedAt: new Date(),
+    })
+    .where(eq(bullhornTokensTable.firmId, firmId));
 }
 
 async function reauthenticate(firmId: string): Promise<Session> {
@@ -1084,6 +1180,12 @@ async function reauthenticate(firmId: string): Promise<Session> {
         { firmId, err },
         "Bullhorn: refresh token failed for oauth firm",
       );
+      if (
+        err instanceof BullhornOAuthAppMissingError ||
+        err instanceof BullhornDataCenterUnknownError
+      ) {
+        throw err;
+      }
       if (err instanceof BullhornRefreshTokenError && err.kind !== "invalid_grant") {
         throw err;
       }
@@ -1489,6 +1591,9 @@ export async function completeUserEnrollment(
 
 export const __bullhornAuthTestHooks = {
   fetchTokenWithRefresh,
+  exchangeCodeForToken,
+  serviceHeadlessAuthCode,
+  oauthAppFromTokenRow,
   setBeforeUserReconnectUrl(
     hook:
       | ((opts: { userId: string; expectedGeneration: number }) => Promise<void> | void)

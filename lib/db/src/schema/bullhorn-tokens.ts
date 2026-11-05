@@ -29,6 +29,14 @@ export const bullhornTokensTable = pgTable(
     oauthUrl: text("oauth_url"),
     restUrl: text("rest_url"),
     loginUrl: text("login_url"),
+    /**
+     * Encrypted Bullhorn OAuth client id and secret for this firm
+     * (`enc:v1:` via token-crypto). Null on the service firm, which always
+     * uses BULLHORN_CLIENT_ID / BULLHORN_CLIENT_SECRET. An oauth firm with
+     * either value missing cannot authorize or refresh.
+     */
+    oauthClientId: text("oauth_client_id"),
+    oauthClientSecret: text("oauth_client_secret"),
     authMode: text("auth_mode").notNull().default("oauth"),
     /** False when OAuth refresh fails for a customer firm — admin must re-authorize. */
     authHealthy: boolean("auth_healthy").notNull().default(true),

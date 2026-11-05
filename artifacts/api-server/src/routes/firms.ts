@@ -9,7 +9,8 @@ import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 import { getUserMailboxStatus } from "../lib/m365-auth.js";
 import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
-import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses, firmContext } from "../lib/bullhorn-auth.js";
+import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses, firmContext, saveFirmBullhornOAuthClient } from "../lib/bullhorn-auth.js";
+import { BullhornOAuthClientStoreError } from "../lib/bullhorn-oauth-app.js";
 import { syncNoteSnapshotForFirm } from "../lib/note-snapshot-sync.js";
 
 const router: IRouter = Router();
@@ -647,6 +648,47 @@ router.post(
       pilotNote: note ?? "Manually activated — no Stripe subscription",
       message: `Firm '${firm.name}' is now active. You can add users via POST /api/users with firmId=${id}.`,
     });
+  },
+);
+
+/**
+ * POST /api/firms/:id/bullhorn-oauth-client
+ * Admin-only. Stores this firm's Bullhorn OAuth client id and secret.
+ * Body: { clientId, clientSecret }. The values come from the caller, never
+ * from QUALIFIED_BULLHORN_* or any other environment variable. They are
+ * encrypted at rest and are not echoed or logged. The service firm is rejected.
+ */
+router.post(
+  "/firms/:id/bullhorn-oauth-client",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { clientId?: unknown; clientSecret?: unknown } | undefined;
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    try {
+      await saveFirmBullhornOAuthClient(id, body?.clientId, body?.clientSecret);
+      res.json({ ok: true, firmId: id });
+    } catch (err) {
+      if (err instanceof BullhornOAuthClientStoreError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      logger.error(
+        { firmId: id, error: err instanceof Error ? err.name : "Error" },
+        "Failed to store Bullhorn OAuth client",
+      );
+      res.status(500).json({ error: "Could not store the Bullhorn OAuth client." });
+    }
   },
 );
 

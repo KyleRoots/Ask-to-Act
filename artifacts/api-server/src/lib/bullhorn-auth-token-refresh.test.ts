@@ -32,6 +32,8 @@ describe("Bullhorn refresh token endpoint handling", () => {
       const body = init.body as URLSearchParams;
       expect(body.get("grant_type")).toBe("refresh_token");
       expect(body.get("refresh_token")).toBe("old-refresh");
+      expect(body.get("client_id")).toBe("client-id");
+      expect(body.get("client_secret")).toBe("client-secret");
       return new Response(
         JSON.stringify({
           access_token: "access",
@@ -98,5 +100,28 @@ describe("Bullhorn refresh token endpoint handling", () => {
     });
     await vi.advanceTimersByTimeAsync(15_000);
     await expectation;
+  });
+
+  it("sends an explicit firm client instead of the env pair", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = init.body as URLSearchParams;
+      expect(body.get("client_id")).toBe("qualified-client-id");
+      expect(body.get("client_secret")).toBe("qualified-client-secret");
+      return new Response(
+        JSON.stringify({
+          access_token: "access",
+          refresh_token: "new-refresh",
+          expires_in: 600,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await __bullhornAuthTestHooks.fetchTokenWithRefresh(
+      "https://oauth.example",
+      "old-refresh",
+      { clientId: "qualified-client-id", clientSecret: "qualified-client-secret" },
+    );
   });
 });

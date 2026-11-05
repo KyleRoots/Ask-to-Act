@@ -40,7 +40,9 @@ export async function ensureColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS reconnect_notice_attempt_id TEXT,
         ADD COLUMN IF NOT EXISTS reconnect_notice_claimed_at TIMESTAMP,
         ADD COLUMN IF NOT EXISTS reconnect_notice_completed_at TIMESTAMP,
-        ADD COLUMN IF NOT EXISTS reconnect_notice_error TEXT;
+        ADD COLUMN IF NOT EXISTS reconnect_notice_error TEXT,
+        ADD COLUMN IF NOT EXISTS oauth_client_id TEXT,
+        ADD COLUMN IF NOT EXISTS oauth_client_secret TEXT;
     `);
 
     await client.query(`
