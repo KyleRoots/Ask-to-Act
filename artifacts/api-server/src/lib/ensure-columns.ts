@@ -59,7 +59,10 @@ export async function ensureColumns(): Promise<void> {
         ) THEN
           ALTER TABLE bullhorn_tokens
             ADD COLUMN uses_platform_client BOOLEAN NOT NULL DEFAULT false;
-          UPDATE bullhorn_tokens SET uses_platform_client = true;
+          UPDATE bullhorn_tokens
+          SET uses_platform_client = true
+          WHERE oauth_client_id IS NULL
+            AND oauth_client_secret IS NULL;
         END IF;
       END $$;
     `);
