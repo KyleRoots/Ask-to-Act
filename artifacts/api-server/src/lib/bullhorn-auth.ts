@@ -47,6 +47,20 @@ export class BullhornReconnectRequiredError extends Error {
 }
 
 /**
+ * One-time per-firm Bullhorn connect failed or was refused.
+ * The message never includes the API password.
+ */
+export class BullhornFirmConnectError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: 400 | 409 | 429 | 502,
+  ) {
+    super(message);
+    this.name = "BullhornFirmConnectError";
+  }
+}
+
+/**
  * Issues a fresh one-time enrollment/reconnect token for an existing user and
  * returns the absolute browser URL GPT/clients should present.
  *
@@ -188,6 +202,10 @@ let endpoints: Endpoints | null = null;
 // trip Bullhorn's failedLoginLockoutThreshold and lock the API user.
 const DIRECT_LOGIN_COOLDOWN_MS = 60_000;
 let directLoginBlockedUntil = 0;
+// Separate from the service-firm breaker above. A failed customer password
+// must not pause headless login for the env API user.
+const FIRM_CONNECT_COOLDOWN_MS = 60_000;
+const firmConnectBlockedUntil = new Map<string, number>();
 let beforeUserReconnectUrlForTests:
   | ((opts: { userId: string; expectedGeneration: number }) => Promise<void> | void)
   | null = null;
@@ -708,6 +726,177 @@ async function fetchAuthCodeHeadless(oauthUrl: string): Promise<string> {
   );
 }
 
+const FIRM_CONNECT_FIELD_MAX = 500;
+
+function redactCredential(text: string, secret: string): string {
+  if (!secret) return text;
+  let out = text.split(secret).join("[redacted]");
+  const encoded = encodeURIComponent(secret);
+  if (encoded && encoded !== secret) {
+    out = out.split(encoded).join("[redacted]");
+  }
+  return out;
+}
+
+function assertFirmConnectCredentials(
+  username: unknown,
+  password: unknown,
+): { username: string; password: string } {
+  if (typeof username !== "string" || typeof password !== "string") {
+    throw new BullhornFirmConnectError("username and password are required.", 400);
+  }
+  const user = username.trim();
+  if (!user || password.length === 0) {
+    throw new BullhornFirmConnectError("username and password are required.", 400);
+  }
+  if (user.length > FIRM_CONNECT_FIELD_MAX || password.length > FIRM_CONNECT_FIELD_MAX) {
+    throw new BullhornFirmConnectError("username or password is too long.", 400);
+  }
+  if (/[\u0000-\u001F\u007F]/.test(user) || /[\u0000-\u001F\u007F]/.test(password)) {
+    throw new BullhornFirmConnectError(
+      "username or password contains invalid characters.",
+      400,
+    );
+  }
+  return { username: user, password };
+}
+
+function customerOAuthApp(row: FirmTokenRow | null): {
+  row: FirmTokenRow;
+  app: BullhornOAuthApp;
+} {
+  if (!row) {
+    throw new BullhornFirmConnectError(
+      "Store this firm's Bullhorn client id and secret before connecting.",
+      409,
+    );
+  }
+  if (row.authMode === "service" || row.usesPlatformClient) {
+    throw new BullhornFirmConnectError(
+      "This firm uses the platform Bullhorn client from the environment. Per-firm connect is refused.",
+      409,
+    );
+  }
+  try {
+    return { row, app: oauthAppFromTokenRow(row) };
+  } catch (err) {
+    if (err instanceof BullhornOAuthAppMissingError) {
+      throw new BullhornFirmConnectError(
+        "Store this firm's Bullhorn client id and secret before connecting.",
+        409,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * loginInfo for one firm username. Does not read BULLHORN_USERNAME and does
+ * not fill the process-wide endpoint cache used by the service firm.
+ */
+async function loginInfoForUsername(username: string): Promise<Endpoints> {
+  const url = new URL(BULLHORN_LOGIN_INFO_URL);
+  url.searchParams.set("username", username);
+  logger.info("Bullhorn: resolving data-center endpoints for a firm connect");
+  const res = await fetch(url.toString(), { redirect: "follow" });
+  if (!res.ok) {
+    throw new BullhornFirmConnectError("Bullhorn loginInfo failed.", 502);
+  }
+  const data = (await res.json()) as LoginInfoResponse;
+  if (!data.oauthUrl || !data.restUrl) {
+    throw new BullhornFirmConnectError(
+      "Bullhorn loginInfo did not return a data center.",
+      502,
+    );
+  }
+  return {
+    oauthUrl: data.oauthUrl.replace(/\/$/, ""),
+    loginUrl: `${data.restUrl.replace(/\/$/, "")}/login`,
+  };
+}
+
+async function saveFirmSwimlane(firmId: string, ep: Endpoints): Promise<void> {
+  await db
+    .update(bullhornTokensTable)
+    .set({
+      oauthUrl: ep.oauthUrl,
+      loginUrl: ep.loginUrl,
+      authMode: "oauth",
+      updatedAt: new Date(),
+    })
+    .where(eq(bullhornTokensTable.firmId, firmId));
+}
+
+/**
+ * Headless authorize for a customer firm. Uses the stored client id and the
+ * username and password from this request. Does not read the env client,
+ * BULLHORN_USERNAME, or BULLHORN_PASSWORD. The password is placed only on the
+ * outbound authorize request.
+ */
+async function fetchAuthCodeForStoredClient(
+  oauthUrl: string,
+  clientId: string,
+  username: string,
+  password: string,
+): Promise<string> {
+  const url = new URL(`${oauthUrl}/authorize`);
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
+  url.searchParams.set("username", username);
+  url.searchParams.set("password", password);
+  url.searchParams.set("action", "Login");
+  const authorizeUrl = url.toString();
+
+  const res = await fetch(authorizeUrl, { redirect: "manual" });
+  const location = res.headers.get("location") ?? "";
+  const directCode = codeFromLocation(location);
+  if (directCode) return directCode;
+  const directErr = errorFromLocation(location);
+  if (directErr) {
+    throw new BullhornFirmConnectError("Bullhorn authorize rejected the login.", 502);
+  }
+
+  if (res.status === 200) {
+    const html = await res.text();
+    if (/consentForm|Get Consent/i.test(html)) {
+      const setCookies =
+        res.headers.getSetCookie?.() ??
+        (res.headers.get("set-cookie")
+          ? [res.headers.get("set-cookie") as string]
+          : []);
+      const jsession =
+        setCookies
+          .map((c) => c.split(";")[0])
+          .find((c) => c.startsWith("JSESSIONID=")) ?? null;
+      logger.info("Bullhorn: consent screen returned for firm connect; submitting approval");
+      try {
+        return await approveConsent(authorizeUrl, html, jsession);
+      } catch {
+        throw new BullhornFirmConnectError(
+          "Bullhorn consent approval did not return an authorization code.",
+          502,
+        );
+      }
+    }
+    if (/invalid redirect uri/i.test(html)) {
+      throw new BullhornFirmConnectError(
+        "Bullhorn rejected the redirect URI for this firm's client.",
+        502,
+      );
+    }
+    throw new BullhornFirmConnectError(
+      "Bullhorn authorize returned an unexpected page. The firm username or password was rejected.",
+      502,
+    );
+  }
+
+  throw new BullhornFirmConnectError(
+    "Bullhorn authorize did not return an authorization code.",
+    502,
+  );
+}
+
 async function exchangeCodeForToken(
   oauthUrl: string,
   code: string,
@@ -1103,6 +1292,96 @@ export async function connectHeadless(firmId?: string): Promise<{ restUrl: strin
     return session;
   });
   return { restUrl: s.restUrl };
+}
+
+/**
+ * One-time headless connect for a customer firm.
+ * The API username and password come from the caller. They are not read from
+ * the environment, and the password is not stored. oauthUrl and loginUrl from
+ * loginInfo are saved before authorize or token exchange. Service firms and
+ * uses_platform_client rows are refused. A failure cools down only this firm.
+ */
+export async function connectFirmOAuth(
+  firmId: string,
+  username: unknown,
+  password: unknown,
+): Promise<{ authMode: "oauth" }> {
+  const credentials = assertFirmConnectCredentials(username, password);
+  const { row, app } = customerOAuthApp(await loadTokenRow(firmId));
+  const blockedUntil = firmConnectBlockedUntil.get(firmId) ?? 0;
+  if (Date.now() < blockedUntil) {
+    const secs = Math.ceil((blockedUntil - Date.now()) / 1000);
+    throw new BullhornFirmConnectError(
+      `Bullhorn connect for this firm is cooling down for ${secs}s after a recent failure. Verify the API username and password before retrying.`,
+      429,
+    );
+  }
+
+  // Distinct from the refresh flight. Sharing that key would hand a connect
+  // result to a session refresh, or the other way around.
+  return runInProcessRefreshFlight(`firm-connect:${firmId}`, async () => {
+    try {
+      const ep = await loginInfoForUsername(credentials.username);
+      await saveFirmSwimlane(firmId, ep);
+      const code = await fetchAuthCodeForStoredClient(
+        ep.oauthUrl,
+        app.clientId,
+        credentials.username,
+        credentials.password,
+      );
+      const tokens = await exchangeCodeForToken(ep.oauthUrl, code, app);
+      const saved = await persistReconnectTokenBeforeLogin({
+        kind: "firm",
+        id: firmId,
+        expectedGeneration: row.refreshGeneration,
+        encryptedRefreshToken: encryptToken(tokens.refresh_token),
+        firm: {
+          oauthUrl: ep.oauthUrl,
+          loginUrl: ep.loginUrl,
+          authMode: "oauth",
+          allowInsert: false,
+        },
+      });
+      if (!saved.saved) {
+        throw new BullhornFirmConnectError(
+          "Bullhorn connect was superseded before the refresh token was saved.",
+          409,
+        );
+      }
+      const loginData = await login(tokens.access_token, ep.loginUrl);
+      const sessionExpiresAt = await resolveSessionExpiry(loginData);
+      const s = buildSession(tokens, loginData, sessionExpiresAt);
+      const sessionUpdated = await updateFirmSessionAfterRefresh({
+        firmId,
+        generation: saved.generation,
+        restUrl: loginData.restUrl,
+        loginUrl: deriveLoginUrl(loginData.restUrl) ?? ep.loginUrl,
+      });
+      if (!sessionUpdated) {
+        throw new BullhornFirmConnectError(
+          "Bullhorn connect was superseded before the session was saved.",
+          409,
+        );
+      }
+      sessions.set(firmId, s);
+      firmConnectBlockedUntil.delete(firmId);
+      logger.info({ firmId }, "Bullhorn: per-firm connect complete");
+      return { authMode: "oauth" };
+    } catch (err) {
+      firmConnectBlockedUntil.set(firmId, Date.now() + FIRM_CONNECT_COOLDOWN_MS);
+      logger.error(
+        { firmId, error: err instanceof Error ? err.name : "Error" },
+        "Bullhorn: per-firm connect failed; cooling down this firm only",
+      );
+      if (err instanceof BullhornFirmConnectError) {
+        throw new BullhornFirmConnectError(
+          redactCredential(err.message, credentials.password).slice(0, 300),
+          err.statusCode,
+        );
+      }
+      throw new BullhornFirmConnectError("Bullhorn connect failed.", 502);
+    }
+  });
 }
 
 /**
@@ -1599,6 +1878,9 @@ export const __bullhornAuthTestHooks = {
   exchangeCodeForToken,
   serviceHeadlessAuthCode,
   oauthAppFromTokenRow,
+  isDirectLoginCoolingDown(): boolean {
+    return Date.now() < directLoginBlockedUntil;
+  },
   setBeforeUserReconnectUrl(
     hook:
       | ((opts: { userId: string; expectedGeneration: number }) => Promise<void> | void)
@@ -1613,6 +1895,7 @@ export const __bullhornAuthTestHooks = {
     userAuthInProgress.clear();
     endpoints = null;
     directLoginBlockedUntil = 0;
+    firmConnectBlockedUntil.clear();
     beforeUserReconnectUrlForTests = null;
   },
 };
