@@ -2181,7 +2181,7 @@ function applyMetricDefinitionGuard(
   // returns 0) and Placement search already excludes soft-deleted, so strip any supplied
   // isDeleted clause. (2) "Placements made" means CONFIRMED only — when the caller pins no
   // status, lock the base to confirmed so totals AND per-group breakdowns match the
-  // official metric (YTD 98 / all-time 2650), instead of the all-status 123/2775. A power
+  // confirmed placements only, instead of every status. A power
   // user wanting pending/canceled/all passes an explicit status filter to override.
   if (entity === "Placement") {
     let q = query;
@@ -2202,7 +2202,7 @@ function applyMetricDefinitionGuard(
       return {
         query: base,
         appliedDefinition:
-          `placements made = confirmed only ${CONFIRMED_PLACEMENT_CLAUSE} (the official metric: YTD 98 / all-time 2650; pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them.`,
+          `placements made = confirmed only ${CONFIRMED_PLACEMENT_CLAUSE} (pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them.`,
       };
     }
     if (q !== query) {
@@ -2352,7 +2352,7 @@ function applyMetricDefinitionGuardWhere(
           : andWhereClause(q, CONFIRMED_PLACEMENT_WHERE);
       return {
         where: base,
-        appliedDefinition: `placements made = confirmed only ${CONFIRMED_PLACEMENT_WHERE} (the official metric: YTD 98 / all-time 2650; pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them. Use count_entity for the total.`,
+        appliedDefinition: `placements made = confirmed only ${CONFIRMED_PLACEMENT_WHERE} (pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them. Use count_entity for the total.`,
       };
     }
     if (strippedDeleted) {
@@ -3980,6 +3980,48 @@ async function queryWithWriteSession(
   return Array.isArray(data.data) ? data.data : [];
 }
 
+/** Lucene specials. Inside a quoted phrase, backslash and quote must be escaped; the rest are escaped so a value cannot change the query. */
+const LUCENE_SPECIAL = /[+\-!(){}[\]^"~*?:\\/|&]/g;
+
+export function escapeLuceneValue(value: string): string {
+  return value.replace(LUCENE_SPECIAL, "\\$&");
+}
+
+function luceneQuoted(value: string): string {
+  return `"${escapeLuceneValue(value)}"`;
+}
+
+async function searchWithWriteSession(
+  session: BullhornWriteSession,
+  entity: string,
+  query: string,
+  fields: string,
+  count = 5,
+): Promise<Array<Record<string, unknown>>> {
+  const url = new URL(`search/${entity}`, session.restUrl);
+  url.searchParams.set("BhRestToken", session.BhRestToken);
+  url.searchParams.set("query", query);
+  url.searchParams.set("fields", fields);
+  url.searchParams.set("count", String(count));
+  url.searchParams.set("start", "0");
+  let res: Response;
+  try {
+    res = await fetch(url.toString());
+  } catch (err) {
+    logger.warn({ err, entity }, "Bullhorn: search before create failed");
+    throw new BullhornFieldValidationError(
+      `Could not check for an existing ${entity} before creating. Nothing was created. Retry, or pass allowDuplicate=true only after the user confirms a duplicate is acceptable.`,
+    );
+  }
+  if (!res.ok) {
+    throw new BullhornFieldValidationError(
+      `Could not check for an existing ${entity} before creating (Bullhorn returned ${res.status}). Nothing was created. Retry, or pass allowDuplicate=true only after the user confirms a duplicate is acceptable.`,
+    );
+  }
+  const data = (await res.json()) as { data?: Array<Record<string, unknown>> };
+  return Array.isArray(data.data) ? data.data : [];
+}
+
 export async function findOpenJobsWithSameTitle(
   session: BullhornWriteSession,
   title: string,
@@ -5444,6 +5486,53 @@ function phoneNeedles(values: Array<string | undefined>): string[] {
   return [...out];
 }
 
+export interface CandidateDuplicateQuery {
+  reason: "email" | "phone" | "name+city";
+  query: string;
+}
+
+/**
+ * Lucene clauses for /search/Candidate. Candidate rejects /query.
+ * Each value is a quoted phrase with Lucene specials escaped. isDeleted:0
+ * keeps soft-deleted records out of the match list.
+ */
+export function buildCandidateDuplicateLuceneQueries(identity: {
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  firstName?: string;
+  lastName?: string;
+  city?: string;
+}): CandidateDuplicateQuery[] {
+  const queries: CandidateDuplicateQuery[] = [];
+  const email = identity.email?.trim();
+  if (email) {
+    queries.push({
+      reason: "email",
+      query: `email:${luceneQuoted(email)} AND isDeleted:0`,
+    });
+  }
+  for (const phone of phoneNeedles([identity.phone, identity.mobile])) {
+    const quoted = luceneQuoted(phone);
+    queries.push({
+      reason: "phone",
+      query: `(phone:${quoted} OR mobile:${quoted}) AND isDeleted:0`,
+    });
+  }
+  const firstName = identity.firstName?.trim();
+  const lastName = identity.lastName?.trim();
+  const city = identity.city?.trim();
+  if (firstName && lastName && city) {
+    queries.push({
+      reason: "name+city",
+      query:
+        `firstName:${luceneQuoted(firstName)} AND lastName:${luceneQuoted(lastName)} ` +
+        `AND address.city:${luceneQuoted(city)} AND isDeleted:0`,
+    });
+  }
+  return queries;
+}
+
 /** Email, phone, or name plus city matches already in this firm's Candidate list. */
 export async function findLikelyCandidateDuplicates(
   session: BullhornWriteSession,
@@ -5478,34 +5567,15 @@ export async function findLikelyCandidateDuplicates(
       byId.set(row.id, match);
     }
   };
-  const lookup = async (
-    where: string,
-    reason: LikelyCandidateMatch["matchedOn"][number],
-  ) => {
+  const lookup = async (lucene: string, reason: LikelyCandidateMatch["matchedOn"][number]) => {
     try {
-      absorb(await queryWithWriteSession(session, "Candidate", where, fields), reason);
+      absorb(await searchWithWriteSession(session, "Candidate", lucene, fields), reason);
     } catch (err) {
       if (byId.size === 0) throw err;
     }
   };
-  const email = identity.email?.trim();
-  if (email) {
-    await lookup(`email='${quoteQueryLiteral(email)}' AND isDeleted=false`, "email");
-  }
-  for (const phone of phoneNeedles([identity.phone, identity.mobile])) {
-    await lookup(
-      `(phone='${quoteQueryLiteral(phone)}' OR mobile='${quoteQueryLiteral(phone)}') AND isDeleted=false`,
-      "phone",
-    );
-  }
-  const firstName = identity.firstName?.trim();
-  const lastName = identity.lastName?.trim();
-  const city = identity.city?.trim();
-  if (firstName && lastName && city) {
-    await lookup(
-      `firstName='${quoteQueryLiteral(firstName)}' AND lastName='${quoteQueryLiteral(lastName)}' AND address.city='${quoteQueryLiteral(city)}' AND isDeleted=false`,
-      "name+city",
-    );
+  for (const clause of buildCandidateDuplicateLuceneQueries(identity)) {
+    await lookup(clause.query, clause.reason);
   }
   return [...byId.values()];
 }

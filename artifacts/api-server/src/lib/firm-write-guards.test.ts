@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cacheGet, cacheSet, invalidateFirmReadCache, responseCache } from "./cache.js";
 import {
   applyNullClears,
+  buildCandidateDuplicateLuceneQueries,
   BullhornFieldValidationError,
   createCandidateFromResume,
   createJobOrder,
+  findLikelyCandidateDuplicates,
   isJobOrderPersistError,
   missingJobContactMessage,
   type BullhornWriteSession,
@@ -95,17 +97,24 @@ describe("résumé and job duplicate guards", () => {
           },
         });
       }
-      if (String(url).includes("query/Candidate") && String(url).includes("email%3D")) {
-        return json({
-          data: [{
-            id: 3344979,
-            name: "Ada Lovelace",
-            dateLastModified: 1700000000000,
-            owner: { firstName: "Quinn", lastName: "Recruiter" },
-          }],
-        });
+      const parsed = new URL(String(url));
+      if (parsed.pathname.includes("query/Candidate")) {
+        throw new Error(`Candidate lookup must use /search, not ${parsed.pathname}`);
       }
-      if (String(url).includes("query/Candidate")) return json({ data: [] });
+      if (parsed.pathname.includes("search/Candidate")) {
+        const query = parsed.searchParams.get("query") ?? "";
+        if (query.startsWith('email:"ada@example.com"')) {
+          return json({
+            data: [{
+              id: 3344979,
+              name: "Ada Lovelace",
+              dateLastModified: 1700000000000,
+              owner: { firstName: "Quinn", lastName: "Recruiter" },
+            }],
+          });
+        }
+        return json({ data: [] });
+      }
       throw new Error(`unexpected fetch ${init?.method ?? "GET"} ${url}`);
     }));
 
@@ -129,6 +138,53 @@ describe("résumé and job duplicate guards", () => {
       expect(result.matches[0]?.bullhornUrl).toContain("id=3344979");
     }
     expect(urls.some((call) => call.method === "PUT")).toBe(false);
+    expect(urls.some((call) => call.url.includes("query/Candidate"))).toBe(false);
+    expect(urls.some((call) => call.url.includes("search/Candidate"))).toBe(true);
+  });
+
+  it("builds the sample résumé Lucene clauses the architect can run live", () => {
+    expect(buildCandidateDuplicateLuceneQueries({
+      email: "ada.lovelace+lab@example.com",
+      phone: "(613) 555-0100",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      city: "Ottawa",
+    }).map((clause) => clause.query)).toEqual([
+      'email:"ada.lovelace\\+lab@example.com" AND isDeleted:0',
+      '(phone:"\\(613\\) 555\\-0100" OR mobile:"\\(613\\) 555\\-0100") AND isDeleted:0',
+      '(phone:"6135550100" OR mobile:"6135550100") AND isDeleted:0',
+      'firstName:"Ada" AND lastName:"Lovelace" AND address.city:"Ottawa" AND isDeleted:0',
+    ]);
+  });
+
+  it("looks up candidates with /search and escapes Lucene special characters", async () => {
+    const queries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const parsed = new URL(String(url));
+      expect(parsed.pathname).toContain("/search/Candidate");
+      expect(parsed.pathname).not.toContain("query/Candidate");
+      queries.push(parsed.searchParams.get("query") ?? "");
+      return json({ data: [] });
+    }));
+
+    const identity = {
+      email: "ada+smith@example.com",
+      phone: "(613) 555-0100",
+      firstName: "Ann(e)",
+      lastName: 'O"Brien',
+      city: "St. Louis",
+    };
+    const built = buildCandidateDuplicateLuceneQueries(identity);
+    expect(built.map((clause) => clause.query)).toEqual([
+      'email:"ada\\+smith@example.com" AND isDeleted:0',
+      '(phone:"\\(613\\) 555\\-0100" OR mobile:"\\(613\\) 555\\-0100") AND isDeleted:0',
+      '(phone:"6135550100" OR mobile:"6135550100") AND isDeleted:0',
+      'firstName:"Ann\\(e\\)" AND lastName:"O\\"Brien" AND address.city:"St. Louis" AND isDeleted:0',
+    ]);
+
+    const matches = await findLikelyCandidateDuplicates(session, identity);
+    expect(matches).toEqual([]);
+    expect(queries).toEqual(built.map((clause) => clause.query));
   });
 
   it("does not search when the caller already confirmed a duplicate candidate", async () => {
@@ -147,6 +203,7 @@ describe("résumé and job duplicate guards", () => {
       allowDuplicate: true,
     })).rejects.toThrow();
     expect(urls.some((url) => url.includes("query/Candidate"))).toBe(false);
+    expect(urls.some((url) => url.includes("search/Candidate"))).toBe(false);
   });
 
   it("returns an open job with the same title at the same client instead of creating", async () => {
@@ -204,6 +261,8 @@ describe("shared staffing text", () => {
     for (const src of [client, mcp]) {
       expect(src).not.toContain("= 398");
       expect(src).not.toContain("metric = 23");
+      expect(src).not.toContain("2650");
+      expect(src).not.toContain("YTD 98");
       expect(src).not.toContain("FANUC");
       expect(src).not.toContain("Joseph Arbolera");
     }
