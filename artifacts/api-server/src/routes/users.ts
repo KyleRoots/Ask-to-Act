@@ -1066,6 +1066,11 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     // stuck with "already connected" while MCP still failed to refresh.
     const forceReconnect =
       req.query["force"] === "1" || req.query["reconnect"] === "1";
+    // Regenerated invite links always include force=1, including a person who
+    // has never connected. Reconnect copy is only for someone who already
+    // enrolled (refresh generation moves off 0 on the first successful login).
+    const everEnrolled = (rows[0].bullhornRefreshGeneration ?? 0) > 0;
+    const showReconnectCopy = forceReconnect && everEnrolled;
     if (rows[0].refreshToken && !forceReconnect) {
       const baseUrl = getBaseUrl();
       const mcpUrl = rows[0].apiKey ? `${baseUrl}/api/mcp/${rows[0].apiKey}` : null;
@@ -1074,8 +1079,9 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     }
 
     // Plant reconnect intent for OAuth callback success copy (manual form
-    // carries reconnect=1 in the POST body instead).
-    if (forceReconnect) {
+    // carries reconnect=1 in the POST body instead). A first enrollment
+    // does not get this cookie, so a failed submit stays on first-time copy.
+    if (showReconnectCopy) {
       res.cookie(ENROLL_RECONNECT_COOKIE, "1", {
         httpOnly: true,
         secure: true,
@@ -1093,7 +1099,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
         req.query["oauth_failed"] === "1"
           ? "Automatic Bullhorn sign-in did not finish. Connect manually below — enter your Bullhorn username and password once; we complete the connection on the server."
           : undefined;
-      res.send(enrollForm(token, rows[0].name, firmName, oauthFailedBanner, forceReconnect));
+      res.send(enrollForm(token, rows[0].name, firmName, oauthFailedBanner, showReconnectCopy));
       return;
     }
 
@@ -1104,7 +1110,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     const forceRedirect = req.query["go"] === "1";
     if (!forceRedirect && readCookie(req, ENROLL_ATTEMPT_COOKIE) === rows[0].id) {
       res.set("Cache-Control", "no-store");
-      res.send(bounceRecoveryPage(token, rows[0].name, firmName, forceReconnect));
+      res.send(bounceRecoveryPage(token, rows[0].name, firmName, showReconnectCopy));
       return;
     }
 
@@ -1136,7 +1142,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
             rows[0].name,
             firmName,
             `Automatic Bullhorn sign-in failed (${reason}). Connect manually instead — enter your username and password below.`,
-            forceReconnect,
+            showReconnectCopy,
           ),
         );
       }
@@ -1147,7 +1153,7 @@ router.get("/auth/user/enroll", async (req: Request, res: Response) => {
     // redirecting to Bullhorn first caused most new users to hit the consent
     // bounce with no obvious way out until they re-opened the link.
     res.set("Cache-Control", "no-store");
-    res.send(enrollChoicePage(token, rows[0].name, firmName, forceReconnect));
+    res.send(enrollChoicePage(token, rows[0].name, firmName, showReconnectCopy));
   } catch (err) {
     logger.error({ err }, "Enrollment form failed");
     res.status(500).send(page("Error", "Could not load the enrollment page. Please try again."));
@@ -1167,8 +1173,11 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     bhPassword?: string;
     reconnect?: string;
   };
-  const isReconnect =
+  const requestedReconnect =
     reconnect === "1" || isEnrollReconnectRequest(req);
+  // Set once the enroll token resolves to a user. A person who has never
+  // enrolled keeps first-time copy even if an old force=1 link posted reconnect=1.
+  let isReconnect = false;
 
   if (!token || !bhUsername || !bhPassword) {
     res.status(400).send(page("Missing fields", "Enrollment token, username, and password are all required."));
@@ -1183,6 +1192,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
         firmId: usersTable.firmId,
         enrollToken: usersTable.enrollToken,
         enrollTokenExpiresAt: usersTable.enrollTokenExpiresAt,
+        bullhornRefreshGeneration: usersTable.bullhornRefreshGeneration,
       })
       .from(usersTable)
       .where(eq(usersTable.enrollToken, token))
@@ -1199,6 +1209,8 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     }
 
     const id = rows[0].id;
+    isReconnect =
+      requestedReconnect && (rows[0].bullhornRefreshGeneration ?? 0) > 0;
 
     await enrollUserHeadless(id, bhUsername.trim(), bhPassword);
     logger.info({ userId: id, isReconnect }, "Bullhorn: per-user headless enrollment complete via form");

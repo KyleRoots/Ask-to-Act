@@ -562,19 +562,19 @@ function endpointHost(url: string): string | null {
   }
 }
 
-/** Same Bullhorn data center when both the OAuth host and the REST host match. */
+/**
+ * Same Bullhorn data center when the OAuth hosts match.
+ * loginInfo's restUrl host (for example rest-east) and the firm's stored
+ * session login host (for example rest45) are different hosts inside one
+ * data center, so the REST host is not part of this check. Enroll still
+ * calls authorize and REST login on the stored swimlane and never writes it.
+ */
 function sameDataCenter(
-  stored: { oauthUrl: string; loginUrl: string },
+  stored: { oauthUrl: string },
   discovered: Endpoints,
 ): boolean {
   const oauth = endpointHost(stored.oauthUrl);
-  const login = endpointHost(stored.loginUrl);
-  return Boolean(
-    oauth &&
-      login &&
-      oauth === endpointHost(discovered.oauthUrl) &&
-      login === endpointHost(discovered.loginUrl),
-  );
+  return Boolean(oauth && oauth === endpointHost(discovered.oauthUrl));
 }
 
 async function discoverEndpoints(): Promise<Endpoints> {
@@ -1888,12 +1888,7 @@ async function enrollUserHeadlessUnsafe(
       throw new BullhornFirmNotConnectedError();
     }
     const discovered = await loginInfoForUsername(bhUsername);
-    if (
-      !sameDataCenter(
-        { oauthUrl: firmTokenRow.oauthUrl, loginUrl: firmTokenRow.loginUrl },
-        discovered,
-      )
-    ) {
+    if (!sameDataCenter({ oauthUrl: firmTokenRow.oauthUrl }, discovered)) {
       throw new BullhornUserDataCenterMismatchError();
     }
   }
