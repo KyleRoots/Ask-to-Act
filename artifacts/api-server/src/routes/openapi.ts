@@ -166,8 +166,8 @@ export function actionsSpec(baseUrl: string) {
           operationId: "getScoutQualifiedByDepartment",
           summary: "Scout Screen qualified by department",
           description:
-            "Screening/Scout notes by Internal Department — natural-language ready. Resolves nicknames " +
-            "(STSI→STS-STSI). For 'list N most recent' pass limit=N (server auto-pages open jobs, ranks by note date, ONE call). " +
+            "Screening/Scout notes by Internal Department — natural-language ready. Pass the department name stored on this firm's jobs. " +
+            "For 'list N most recent' pass limit=N (server auto-pages open jobs, ranks by note date, ONE call). " +
             "Read stopReason + confirmedComplete + asyncContinuation. Soft walls are channel realism — never a dead end. " +
             "On wall_time, follow asyncContinuation.rest: POST /reports/scout-qualified-by-department/jobs then poll " +
             "GET /reports/jobs/{jobId} (same args / resumeArgs). Never date-window fan-out. Never give up solely because of wall_time. " +
@@ -178,7 +178,7 @@ export function actionsSpec(baseUrl: string) {
               in: "query",
               required: true,
               description:
-                'Internal Department or nickname (JobOrder.correlatedCustomText1), e.g. "STS-STSI", "STSI", "MYT-Ottawa".',
+                "Internal Department name as stored on this firm's jobs.",
               schema: { type: "string" },
             },
             {
@@ -419,7 +419,7 @@ export function actionsSpec(baseUrl: string) {
                     },
                     groupBy: {
                       type: "string",
-                      description: "Field to break the count down by (e.g. status, correlatedCustomText1).",
+                      description: "Field to break the count down by (e.g. status, or this firm's department field from describe_entity).",
                     },
                     groupValues: {
                       type: "array",

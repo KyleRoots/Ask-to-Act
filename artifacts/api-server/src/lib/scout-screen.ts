@@ -194,7 +194,7 @@ export function buildDepartmentJobsQuery(
   openJobsOnly: boolean,
 ): string {
   const dept = department.trim();
-  if (!dept) throw new Error("department is required (e.g. \"STS-STSI\" or \"MYT-Ottawa\").");
+  if (!dept) throw new Error("department is required. Pass the department name stored on this firm's jobs.");
   const deptClause = `correlatedCustomText1:"${escapeLucenePhrase(dept)}"`;
   if (openJobsOnly) {
     // Matches the locked open-jobs metric (count_entity / open_jobs_report).

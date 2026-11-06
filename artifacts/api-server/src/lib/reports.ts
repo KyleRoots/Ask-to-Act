@@ -738,7 +738,7 @@ export async function recruiterLeaderboard(args: {
     asyncBudget,
     definitions: { conversionRate: CONVERSION_DEFINITION, placementsMade: DEPT_DEFINITIONS.placementsMade },
     notes: [
-      "Conversion credits the recruiter who SUBMITTED the candidate (JobSubmission.sendingUser), NOT the placement owner — they differ often on this instance, which previously caused impossible >100% rates.",
+      "Conversion credits the recruiter who SUBMITTED the candidate (JobSubmission.sendingUser), NOT the placement owner. Those two people often differ, which previously caused impossible >100% rates.",
       `Reliable rows are listed first; lowVolume = fewer than ${MIN_SUBMISSIONS_FOR_RELIABLE_RATE} submissions (rate is volatile and should not be ranked at face value).`,
       "conversionRate is capped at 100%; a placement whose submission predates the period can otherwise exceed it (flagged cappedAt100).",
       "v1 lists only recruiters whose submissions produced at least one confirmed placement in the period; unattributedPlacements counts confirmed placements with no submission sender.",
@@ -811,9 +811,9 @@ export const REPORTS_CATALOG = [
     name: "scout_dept_report",
     title: "Scout Screen Qualified by Department",
     description:
-      "Natural-language screening/Scout notes by Internal Department. Resolves nicknames (STSI→STS-STSI). For 'list N most recent' pass limit=N. Returns stopReason + confirmedComplete + asyncContinuation on wall_time — soft wall is never a dead end (MCP: start_scout_dept_report_job → get_report_job; REST: POST /v1/reports/scout-qualified-by-department/jobs → GET /v1/reports/jobs/{jobId}). Never date-window fan-out. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
+      "Natural-language screening/Scout notes by Internal Department. Pass the department name stored on this firm's jobs. For 'list N most recent' pass limit=N. Returns stopReason + confirmedComplete + asyncContinuation on wall_time — soft wall is never a dead end (MCP: start_scout_dept_report_job → get_report_job; REST: POST /v1/reports/scout-qualified-by-department/jobs → GET /v1/reports/jobs/{jobId}). Never date-window fan-out. MCP: scout_dept_report. REST: GET /v1/reports/scout-qualified-by-department.",
     parameters: {
-      department: "required Internal Department or nickname, e.g. STS-STSI, STSI, MYT-Ottawa",
+      department: "required Internal Department name as stored on this firm's jobs",
       noteAction: "optional; default 'Scout Screen - Qualified'",
       openJobsOnly: "optional boolean; default true — leave default for normal asks",
       applicantPool: "'responses' (default) or 'all' JobSubmission rows on those jobs",
@@ -834,6 +834,6 @@ export function listReports(): unknown {
       "Pre-built report library. For Scout Screen / qualified-by-department counts use scout_dept_report (MCP) or GET /v1/reports/scout-qualified-by-department — do NOT use Note Lucene search; if incomplete, report lower bound (do not fan out date windows unless mode=exhaustive). For anything else, use count_entity or search_*.",
     reports: REPORTS_CATALOG,
     note:
-      "Note entity Lucene search returns 0 on this Bullhorn instance; use get_notes per candidate or scout_dept_report for Scout workflows.",
+      "Note Lucene search can return 0; use get_notes per candidate or scout_dept_report for Scout workflows.",
   };
 }
