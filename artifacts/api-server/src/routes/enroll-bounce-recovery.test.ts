@@ -35,7 +35,7 @@ vi.mock("../lib/bullhorn-auth.js", async (importActual) => {
 const { default: app } = await import("../app.js");
 const request = (await import("supertest")).default;
 const { db, firmsTable, usersTable } = await import("@workspace/db");
-const { inArray } = await import("drizzle-orm");
+const { eq, inArray } = await import("drizzle-orm");
 
 const PREFIX = "test-bouncerec";
 const FIRM = `${PREFIX}-firm`;
@@ -141,5 +141,49 @@ describe("GET /api/auth/user/enroll — first-time consent bounce recovery", () 
     expect(res.status).toBe(200);
     expect(res.text).toContain("Automatic Bullhorn sign-in did not finish");
     expect(res.text).toContain('name="bhUsername"');
+  });
+
+  it("keeps first-time wording for a never-enrolled user, including after a failed submit", async () => {
+    const form = await request(app).get(
+      `/api/auth/user/enroll?token=${TOKEN}&manual=1&force=1`,
+    );
+    expect(form.status).toBe(200);
+    expect(form.text).toContain("Connect your Bullhorn account");
+    expect(form.text).not.toContain("Reconnect your Bullhorn account");
+    expect(form.text).not.toContain('name="reconnect"');
+    const setCookie = form.headers["set-cookie"];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "");
+    expect(cookieHeader).not.toContain("a2a_enroll_reconnect=1");
+
+    const failed = await request(app)
+      .post("/api/auth/user/enroll")
+      .set("Cookie", "a2a_enroll_reconnect=1")
+      .type("form")
+      .send({
+        token: TOKEN,
+        bhUsername: "never.enrolled",
+        bhPassword: "secret",
+        reconnect: "1",
+      });
+    expect(failed.status).toBe(400);
+    expect(failed.text).toContain("Connect your Bullhorn account");
+    expect(failed.text).not.toContain("Reconnect your Bullhorn account");
+    expect(failed.text).toContain("Connect account");
+  });
+
+  it("shows reconnect wording on a force=1 link after the user has enrolled once", async () => {
+    await db
+      .update(usersTable)
+      .set({ bullhornRefreshGeneration: 1 })
+      .where(eq(usersTable.id, USER));
+    const form = await request(app).get(
+      `/api/auth/user/enroll?token=${TOKEN}&manual=1&force=1`,
+    );
+    expect(form.status).toBe(200);
+    expect(form.text).toContain("Reconnect your Bullhorn account");
+    expect(form.text).toContain('name="reconnect" value="1"');
+    const setCookie = form.headers["set-cookie"];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.join(";") : String(setCookie ?? "");
+    expect(cookieHeader).toContain("a2a_enroll_reconnect=1");
   });
 });

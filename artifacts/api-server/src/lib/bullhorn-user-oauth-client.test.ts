@@ -207,7 +207,7 @@ afterEach(() => {
 });
 
 describe("recruiter enrollment uses the firm's Bullhorn client", () => {
-  it("enrolls and refreshes a customer user with the stored client and data center", async () => {
+  it("enrolls when loginInfo REST host differs from the stored swimlane but the OAuth host matches", async () => {
     const client = storedClient();
     await seedFirmToken({
       firmId: "test_user_firm_qualified",
@@ -228,9 +228,13 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
           const username = new URL(url).searchParams.get("username");
           loginInfoUsernames.push(username);
           if (username === "qualified.recruiter") {
+            // Same OAuth host as the firm, different REST host. Bullhorn
+            // returns rest-east from loginInfo and rest45 as the session
+            // login URL for one East data center.
             return json({
               oauthUrl: "https://auth-east.example/oauth",
-              restUrl: "https://rest45.example/rest-services",
+              restUrl: "https://rest-east.example/rest-services",
+              dataCenterId: 4,
             });
           }
           if (username === "service-user") {
@@ -585,7 +589,7 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
     assertSecretAbsent(logLines.join("\n"), PLATFORM_PASSWORD);
   });
 
-  it("refuses a recruiter in another data center and leaves the firm row unchanged", async () => {
+  it("refuses a recruiter whose OAuth host is a different data center and leaves the firm row unchanged", async () => {
     const client = storedClient();
     await seedFirmToken({
       firmId: "test_user_firm_mismatch",
