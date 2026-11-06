@@ -4,6 +4,7 @@ import { cacheGet, cacheSet, invalidateFirmReadCache, responseCache } from "./ca
 import {
   applyNullClears,
   buildCandidateDuplicateLuceneQueries,
+  phoneNeedles,
   BullhornFieldValidationError,
   createCandidateFromResume,
   createJobOrder,
@@ -140,6 +141,23 @@ describe("résumé and job duplicate guards", () => {
     expect(urls.some((call) => call.method === "PUT")).toBe(false);
     expect(urls.some((call) => call.url.includes("query/Candidate"))).toBe(false);
     expect(urls.some((call) => call.url.includes("search/Candidate"))).toBe(true);
+  });
+
+  it("adds the last 10 digits when a phone number includes a country code", () => {
+    expect(phoneNeedles(["+1 (613) 555-0100"])).toEqual([
+      "+1 (613) 555-0100",
+      "16135550100",
+      "6135550100",
+    ]);
+    expect(phoneNeedles(["16135550100"])).toEqual([
+      "16135550100",
+      "6135550100",
+    ]);
+    expect(phoneNeedles(["(613) 555-0100"])).toEqual([
+      "(613) 555-0100",
+      "6135550100",
+    ]);
+    expect(phoneNeedles(["555-0100"])).toEqual(["555-0100"]);
   });
 
   it("builds the sample résumé Lucene clauses the architect can run live", () => {

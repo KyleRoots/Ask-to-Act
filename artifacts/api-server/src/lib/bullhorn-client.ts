@@ -5475,13 +5475,16 @@ function textField(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function phoneNeedles(values: Array<string | undefined>): string[] {
+export function phoneNeedles(values: Array<string | undefined>): string[] {
   const out = new Set<string>();
   for (const value of values) {
     if (!value) continue;
     out.add(value);
     const digits = value.replace(/\D/g, "");
     if (digits.length >= 10 && digits !== value) out.add(digits);
+    // A stored "+1 613 555 0100" matches "6135550100" and misses "16135550100".
+    // Keep the full digit string and also search the last 10 digits.
+    if (digits.length > 10) out.add(digits.slice(-10));
   }
   return [...out];
 }
