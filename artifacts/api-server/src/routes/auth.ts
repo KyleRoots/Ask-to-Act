@@ -13,6 +13,8 @@ import { currentRefreshGeneration } from "../lib/bullhorn-refresh-coordinator.js
 import {
   completeMailboxConnection,
   getMicrosoftAuthorizeUrl,
+  MailboxEmailDomainMismatchError,
+  MailboxTenantMismatchError,
   resolveUserIdFromMailboxConnectToken,
 } from "../lib/m365-auth.js";
 import { countEntity } from "../lib/bullhorn-client.js";
@@ -311,7 +313,7 @@ router.get("/auth/m365/start", async (req: Request, res: Response) => {
 
     const state = `mailbox:${resolved.userId}:${randomBytes(16).toString("hex")}`;
     await rememberState(state);
-    const authorizeUrl = await getMicrosoftAuthorizeUrl(state);
+    const authorizeUrl = await getMicrosoftAuthorizeUrl(state, resolved.userId);
     res.set("Cache-Control", "no-store");
     res.redirect(authorizeUrl);
   } catch (err) {
@@ -386,6 +388,14 @@ router.get("/auth/m365/callback", async (req: Request, res: Response) => {
       ),
     );
   } catch (err) {
+    if (
+      err instanceof MailboxTenantMismatchError ||
+      err instanceof MailboxEmailDomainMismatchError
+    ) {
+      logger.warn({ userId, err: err.name }, "Microsoft 365 mailbox connect refused");
+      res.status(409).send(page("Microsoft 365 mailbox not connected", err.message));
+      return;
+    }
     logger.error({ err, userId }, "Microsoft 365 authorization exchange failed");
     res
       .status(500)
