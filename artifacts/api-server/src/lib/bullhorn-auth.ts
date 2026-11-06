@@ -511,18 +511,23 @@ function envOAuthApp(): BullhornOAuthApp {
 /**
  * Resolves the OAuth/login endpoints for a firm. Prefers the firm's own stored
  * endpoints (captured at connect time) so we never reuse one tenant's swimlane
- * for another; falls back to the global region-discovered endpoints only when a
- * firm has none stored yet (e.g. the service firm before its first capture).
- * A customer row with no stored swimlane fails closed instead of calling
- * loginInfo with the service username.
+ * for another. A customer row with no stored swimlane fails closed, unless the
+ * caller passes that user's own Bullhorn username: loginInfo then runs for
+ * that username only and does not fill the process-wide endpoint cache.
+ * Service rows and platform-client rows (Myticas, STSI) still fall back to
+ * discoverEndpoints(), which uses BULLHORN_USERNAME.
  */
-async function resolveFirmEndpoints(row: FirmTokenRow | null): Promise<Endpoints> {
+async function resolveFirmEndpoints(
+  row: FirmTokenRow | null,
+  username?: string,
+): Promise<Endpoints> {
   if (row?.oauthUrl && row?.loginUrl) {
     return { oauthUrl: row.oauthUrl, loginUrl: row.loginUrl };
   }
-  // A customer firm must not discover its swimlane with the service username.
-  // Service rows and pre-existing platform-client rows keep the old fallback.
+  // A customer firm must not discover its swimlane with the service username,
+  // and must not reuse the process-wide cache from a previous service lookup.
   if (row && row.authMode !== "service" && !row.usesPlatformClient) {
+    if (username) return loginInfoForUsername(username);
     throw new BullhornDataCenterUnknownError();
   }
   return discoverEndpoints();
@@ -734,6 +739,13 @@ function redactCredential(text: string, secret: string): string {
   const encoded = encodeURIComponent(secret);
   if (encoded && encoded !== secret) {
     out = out.split(encoded).join("[redacted]");
+  }
+  // URLSearchParams encodes spaces as "+", which encodeURIComponent does not.
+  const formEncoded = new URLSearchParams({ password: secret })
+    .toString()
+    .slice("password=".length);
+  if (formEncoded && formEncoded !== secret && formEncoded !== encoded) {
+    out = out.split(formEncoded).join("[redacted]");
   }
   return out;
 }
@@ -1541,7 +1553,7 @@ export async function isConnected(firmId?: string): Promise<boolean> {
 //
 // Each enrolled recruiter has their own Bullhorn OAuth session so Bullhorn
 // enforces THEIR permission gates on every write operation. Read tools
-// continue to use the shared service-account session.
+// continue to use the firm's shared API-user session.
 
 const userSessions = new Map<string, Session>();
 const userAuthInProgress = new Map<string, Promise<Session>>();
@@ -1584,11 +1596,12 @@ export async function getUserSession(userId: string): Promise<Session> {
       const connectUrl = await getBullhornReconnectUrlForUser(userId, expectedGeneration);
       throw new BullhornReconnectRequiredError(connectUrl);
     }
-    // Use the firm's own stored endpoints (captured at connect time) so a user
-    // at a firm on a different Bullhorn data-center gets the right OAuth/login
-    // URLs, not Myticas's. Falls back to discoverEndpoints() only when no firm
-    // row exists (shouldn't happen for an enrolled user, but degrades safely).
+    // Resolve the firm's client and data center before claiming the refresh.
+    // A missing client or an unknown customer swimlane must not mark the
+    // refresh uncertain, and must not fall through to the env client or the
+    // process-wide service endpoints. Platform-client firms keep both.
     const firmTokenRow = user.firmId ? await loadTokenRow(user.firmId) : null;
+    const app = oauthAppFromTokenRow(firmTokenRow);
     const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
     const attemptId = randomUUID();
     const claimed = await claimRefreshAttempt({
@@ -1605,7 +1618,11 @@ export async function getUserSession(userId: string): Promise<Session> {
     let tokenPersisted = false;
     let persistedGeneration = expectedGeneration;
     try {
-      const tokens = await fetchTokenWithRefresh(oauthUrl, decryptToken(user.refreshToken!));
+      const tokens = await fetchTokenWithRefresh(
+        oauthUrl,
+        decryptToken(user.refreshToken!),
+        app,
+      );
       const sPreview = buildSession(
         tokens,
         { BhRestToken: "", restUrl: "" },
@@ -1698,11 +1715,12 @@ export function invalidateUserSession(userId: string): void {
  */
 async function fetchAuthCodeHeadlessForUser(
   oauthUrl: string,
+  clientId: string,
   username: string,
   password: string,
 ): Promise<string> {
   const url = new URL(`${oauthUrl}/authorize`);
-  url.searchParams.set("client_id", getEnv("BULLHORN_CLIENT_ID"));
+  url.searchParams.set("client_id", clientId);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("redirect_uri", getEnv("BULLHORN_REDIRECT_URI"));
   url.searchParams.set("username", username);
@@ -1716,7 +1734,11 @@ async function fetchAuthCodeHeadlessForUser(
   const directCode = codeFromLocation(location);
   if (directCode) return directCode;
   const directErr = errorFromLocation(location);
-  if (directErr) throw new Error(`Bullhorn authorization returned an error: ${directErr}`);
+  if (directErr) {
+    throw new Error(
+      `Bullhorn authorization returned an error: ${redactCredential(directErr, password)}`,
+    );
+  }
 
   if (res.status === 200) {
     const html = await res.text();
@@ -1731,9 +1753,14 @@ async function fetchAuthCodeHeadlessForUser(
           .map((c) => c.split(";")[0])
           .find((c) => c.startsWith("JSESSIONID=")) ?? null;
       logger.info("Bullhorn: consent screen returned for per-user enrollment; approving headlessly");
-      return approveConsent(authorizeUrl, html, jsession);
+      try {
+        return await approveConsent(authorizeUrl, html, jsession);
+      } catch (err) {
+        const raw = err instanceof Error ? err.message : "Bullhorn enrollment failed.";
+        throw new Error(redactCredential(raw, password).slice(0, 300));
+      }
     }
-    const preview = html.replace(/\s+/g, " ").slice(0, 200);
+    const preview = redactCredential(html.replace(/\s+/g, " "), password).slice(0, 200);
     if (/invalid.*credential|incorrect.*password|login.*fail/i.test(html)) {
       throw new Error("Bullhorn credentials are incorrect. Check your username and password and try again.");
     }
@@ -1764,8 +1791,29 @@ export async function enrollUserHeadless(
   bhUsername: string,
   bhPassword: string,
 ): Promise<void> {
-  // Look up the user's firm so we can use the firm's stored endpoints rather
-  // than the service-account's data-center (which may differ for a second tenant).
+  // The password is sent only on the outbound authorize request. It is never
+  // stored, and enrollment errors are scrubbed before they can be logged.
+  try {
+    await enrollUserHeadlessUnsafe(userId, bhUsername, bhPassword);
+  } catch (err) {
+    if (
+      err instanceof BullhornOAuthAppMissingError ||
+      err instanceof BullhornDataCenterUnknownError
+    ) {
+      throw err;
+    }
+    const raw = err instanceof Error ? err.message : "Bullhorn enrollment failed.";
+    throw new Error(redactCredential(raw, bhPassword).slice(0, 300));
+  }
+}
+
+async function enrollUserHeadlessUnsafe(
+  userId: string,
+  bhUsername: string,
+  bhPassword: string,
+): Promise<void> {
+  // Look up the user's firm so we can use that firm's client and data center
+  // rather than the platform service account.
   const userRows = await db
     .select({ firmId: usersTable.firmId })
     .from(usersTable)
@@ -1777,11 +1825,28 @@ export async function enrollUserHeadless(
   if (!firmId) {
     throw new Error("Bullhorn user enrollment requires an active firm membership.");
   }
-  const firmTokenRow = firmId ? await loadTokenRow(firmId) : null;
-  const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
+  const firmTokenRow = await loadTokenRow(firmId);
+  const hadSwimlane = Boolean(firmTokenRow?.oauthUrl && firmTokenRow?.loginUrl);
+  // Resolve the client before any Bullhorn call so a customer firm with no
+  // stored client fails closed instead of authorizing against the env client.
+  const app = oauthAppFromTokenRow(firmTokenRow);
+  const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow, bhUsername);
+  if (
+    firmTokenRow &&
+    firmTokenRow.authMode !== "service" &&
+    !firmTokenRow.usesPlatformClient &&
+    !hadSwimlane
+  ) {
+    await saveFirmSwimlane(firmId, { oauthUrl, loginUrl });
+  }
 
-  const code = await fetchAuthCodeHeadlessForUser(oauthUrl, bhUsername, bhPassword);
-  const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const code = await fetchAuthCodeHeadlessForUser(
+    oauthUrl,
+    app.clientId,
+    bhUsername,
+    bhPassword,
+  );
+  const tokens = await exchangeCodeForToken(oauthUrl, code, app);
   const saved = await persistReconnectTokenBeforeLogin({
     kind: "user",
     id: userId,
@@ -1820,8 +1885,8 @@ export async function completeUserEnrollment(
   expectedGeneration?: number,
   claimedState?: { state: string; attemptId: string; expectedFirmId?: string | null },
 ): Promise<void> {
-  // Use the user's firm's stored endpoints so a second tenant on a different
-  // Bullhorn data-center gets the correct token exchange and login URLs.
+  // Use the user's firm's stored client and endpoints. A customer firm with no
+  // stored client fails closed here instead of exchanging with the env client.
   const userRows = await db
     .select({ firmId: usersTable.firmId })
     .from(usersTable)
@@ -1840,10 +1905,11 @@ export async function completeUserEnrollment(
   if (claimedState?.expectedFirmId !== undefined && firmId !== claimedState.expectedFirmId) {
     throw new Error("Bullhorn user enrollment callback is stale for this firm membership.");
   }
-  const firmTokenRow = firmId ? await loadTokenRow(firmId) : null;
+  const firmTokenRow = await loadTokenRow(firmId);
+  const app = oauthAppFromTokenRow(firmTokenRow);
   const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
 
-  const tokens = await exchangeCodeForToken(oauthUrl, code);
+  const tokens = await exchangeCodeForToken(oauthUrl, code, app);
   const saved = await persistReconnectTokenBeforeLogin({
     kind: "user",
     id: userId,
