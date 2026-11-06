@@ -2,12 +2,17 @@ import { randomBytes } from "node:crypto";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { pool } from "@workspace/db";
 import { runAppMigrations } from "@workspace/db/run-migrations";
+import express from "express";
+import request from "supertest";
 import { BullhornDataCenterUnknownError, BullhornOAuthAppMissingError } from "./bullhorn-oauth-app.js";
 import { logger } from "./logger.js";
 import { decryptToken, encryptToken } from "./token-crypto.js";
+import usersRouter from "../routes/users.js";
 
 const {
   __bullhornAuthTestHooks,
+  BullhornFirmNotConnectedError,
+  BullhornUserDataCenterMismatchError,
   completeUserEnrollment,
   enrollUserHeadless,
   getUserSession,
@@ -220,11 +225,21 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.startsWith(LOGIN_INFO)) {
-          loginInfoUsernames.push(new URL(url).searchParams.get("username"));
-          return json({
-            oauthUrl: "https://oauth.service.example/oauth",
-            restUrl: "https://rest.service.example/rest-services/svc",
-          });
+          const username = new URL(url).searchParams.get("username");
+          loginInfoUsernames.push(username);
+          if (username === "qualified.recruiter") {
+            return json({
+              oauthUrl: "https://auth-east.example/oauth",
+              restUrl: "https://rest45.example/rest-services",
+            });
+          }
+          if (username === "service-user") {
+            return json({
+              oauthUrl: "https://oauth.service.example/oauth",
+              restUrl: "https://rest.service.example/rest-services/svc",
+            });
+          }
+          throw new Error(`unexpected loginInfo username: ${username}`);
         }
         if (url.includes("/authorize")) {
           const parsed = new URL(url);
@@ -291,24 +306,24 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
       "qualified.recruiter",
       RECRUITER_PASSWORD,
     );
-    expect(loginInfoUsernames).toEqual([]);
+    expect(loginInfoUsernames).toEqual(["qualified.recruiter"]);
 
     await completeUserEnrollment("test_user_firm_qualified_browser", "browser-code");
-    expect(loginInfoUsernames).toEqual([]);
+    expect(loginInfoUsernames).toEqual(["qualified.recruiter"]);
 
     invalidateUserSession("test_user_firm_qualified_user");
     await expect(getUserSession("test_user_firm_qualified_user")).resolves.toMatchObject({
       BhRestToken: "qualified-bh-rest",
       restUrl: "https://rest45.example/rest-services/session",
     });
-    expect(loginInfoUsernames).toEqual([]);
+    expect(loginInfoUsernames).toEqual(["qualified.recruiter"]);
 
     const serviceCode = await __bullhornAuthTestHooks.serviceHeadlessAuthCode();
     expect(serviceCode).toMatchObject({
       oauthUrl: "https://oauth.service.example/oauth",
       code: "service-code",
     });
-    expect(loginInfoUsernames).toEqual(["service-user"]);
+    expect(loginInfoUsernames).toEqual(["qualified.recruiter", "service-user"]);
     expect(__bullhornAuthTestHooks.isDirectLoginCoolingDown()).toBe(false);
 
     const { rows } = await pool.query(
@@ -344,7 +359,7 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
     assertSecretAbsent(logLines.join("\n"), RECRUITER_PASSWORD);
   });
 
-  it("keeps a platform-client user on the env client and does not reuse that cache for a customer", async () => {
+  it("keeps a platform-client user on the env client and refuses an unconnected customer firm", async () => {
     const client = storedClient();
     await seedFirmToken({
       firmId: "test_user_firm_platform",
@@ -398,66 +413,24 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
               restUrl: "https://rest.platform.example/rest-services/svc",
             });
           }
-          if (username === "qualified.recruiter") {
-            return json({
-              oauthUrl: "https://auth-east.example/oauth",
-              restUrl: "https://rest45.example/rest-services/cluster",
-            });
-          }
           throw new Error(`unexpected loginInfo username: ${username}`);
         }
         if (url.includes("/authorize")) {
           const parsed = new URL(url);
-          const clientId = parsed.searchParams.get("client_id");
-          if (parsed.origin === "https://oauth.platform.example") {
-            expect(clientId).toBe("client-id");
-            expect(parsed.searchParams.get("username")).toBe("myticas.recruiter");
-            expect(parsed.searchParams.get("password")).toBe(PLATFORM_PASSWORD);
-            return redirect("platform-code");
-          }
-          expect(parsed.origin).toBe("https://auth-east.example");
-          expect(clientId).toBe(FIRM_CLIENT_ID);
-          expect(parsed.searchParams.get("username")).toBe("qualified.recruiter");
-          expect(parsed.searchParams.get("password")).toBe(RECRUITER_PASSWORD);
-          return redirect("swimlane-code");
+          expect(parsed.origin).toBe("https://oauth.platform.example");
+          expect(parsed.searchParams.get("client_id")).toBe("client-id");
+          expect(parsed.searchParams.get("username")).toBe("myticas.recruiter");
+          expect(parsed.searchParams.get("password")).toBe(PLATFORM_PASSWORD);
+          return redirect("platform-code");
         }
         if (url.endsWith("/token")) {
+          expect(url).toBe("https://oauth.platform.example/oauth/token");
           const body = bodyParams(init);
-          if (url === "https://oauth.platform.example/oauth/token") {
-            expect(body.get("client_id")).toBe("client-id");
-            expect(body.get("client_secret")).toBe("client-secret");
-            return json({
-              access_token: "platform-access",
-              refresh_token: "platform-user-refresh",
-              expires_in: 600,
-            });
-          }
-          expect(url).toBe("https://auth-east.example/oauth/token");
-          expect(body.get("client_id")).toBe(FIRM_CLIENT_ID);
-          expect(body.get("client_secret")).toBe(FIRM_CLIENT_SECRET);
-          if (body.get("grant_type") === "authorization_code") {
-            const saved = await pool.query(
-              `
-                SELECT oauth_url, login_url, auth_mode, uses_platform_client
-                FROM bullhorn_tokens WHERE firm_id = 'test_user_firm_swimlane'
-              `,
-            );
-            expect(saved.rows[0]).toMatchObject({
-              oauth_url: "https://auth-east.example/oauth",
-              login_url: "https://rest45.example/rest-services/cluster/login",
-              auth_mode: "oauth",
-              uses_platform_client: false,
-            });
-            return json({
-              access_token: "swimlane-access",
-              refresh_token: "swimlane-user-refresh",
-              expires_in: 600,
-            });
-          }
-          expect(body.get("refresh_token")).toBe("swimlane-user-refresh");
+          expect(body.get("client_id")).toBe("client-id");
+          expect(body.get("client_secret")).toBe("client-secret");
           return json({
-            access_token: "swimlane-access-2",
-            refresh_token: "swimlane-user-refresh-2",
+            access_token: "platform-access",
+            refresh_token: "platform-user-refresh",
             expires_in: 600,
           });
         }
@@ -465,12 +438,6 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
           return json({
             BhRestToken: "platform-bh-rest",
             restUrl: "https://rest.platform.example/rest-services/session",
-          });
-        }
-        if (url.startsWith("https://rest45.example/rest-services/cluster/login")) {
-          return json({
-            BhRestToken: "swimlane-bh-rest",
-            restUrl: "https://rest45.example/rest-services/session",
           });
         }
         if (url.includes("/ping")) {
@@ -498,18 +465,40 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
       uses_platform_client: true,
     });
 
-    await enrollUserHeadless(
-      "test_user_firm_swimlane_user",
-      "qualified.recruiter",
-      RECRUITER_PASSWORD,
-    );
-    expect(loginInfoUsernames).toEqual(["service-user", "qualified.recruiter"]);
-
-    invalidateUserSession("test_user_firm_swimlane_user");
-    await expect(getUserSession("test_user_firm_swimlane_user")).resolves.toMatchObject({
-      BhRestToken: "swimlane-bh-rest",
+    await expect(
+      enrollUserHeadless(
+        "test_user_firm_swimlane_user",
+        "qualified.recruiter",
+        RECRUITER_PASSWORD,
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringMatching(/ask your administrator to connect the firm first/i),
     });
-    expect(loginInfoUsernames).toEqual(["service-user", "qualified.recruiter"]);
+    expect(loginInfoUsernames).toEqual(["service-user"]);
+    const swimlaneFirm = await pool.query(
+      `
+        SELECT oauth_url, login_url, refresh_token, auth_mode, uses_platform_client
+        FROM bullhorn_tokens WHERE firm_id = 'test_user_firm_swimlane'
+      `,
+    );
+    expect(swimlaneFirm.rows[0]).toMatchObject({
+      oauth_url: null,
+      login_url: null,
+      refresh_token: "firm-refresh-not-used",
+      auth_mode: "oauth",
+      uses_platform_client: false,
+    });
+    const swimlaneUser = await pool.query(
+      `
+        SELECT refresh_token, bullhorn_refresh_generation
+        FROM users WHERE id = 'test_user_firm_swimlane_user'
+      `,
+    );
+    expect(swimlaneUser.rows[0]).toMatchObject({
+      refresh_token: "pre-enroll-refresh",
+      bullhorn_refresh_generation: 0,
+    });
 
     const dumped = [
       await dumpFirmAndUsers("test_user_firm_platform"),
@@ -596,6 +585,147 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
     assertSecretAbsent(logLines.join("\n"), PLATFORM_PASSWORD);
   });
 
+  it("refuses a recruiter in another data center and leaves the firm row unchanged", async () => {
+    const client = storedClient();
+    await seedFirmToken({
+      firmId: "test_user_firm_mismatch",
+      oauthUrl: "https://auth-east.example/oauth",
+      loginUrl: "https://rest45.example/rest-services/login",
+      oauthClientId: client.id,
+      oauthClientSecret: client.secret,
+    });
+    await seedUser("test_user_firm_mismatch_user", "test_user_firm_mismatch", null);
+    await pool.query(
+      `
+        UPDATE users
+        SET enroll_token = 'test_user_firm_mismatch_token',
+            enroll_token_expires_at = now() + interval '1 day'
+        WHERE id = 'test_user_firm_mismatch_user'
+      `,
+    );
+    const before = await pool.query(
+      `
+        SELECT oauth_url, login_url, refresh_token, auth_mode, uses_platform_client, updated_at
+        FROM bullhorn_tokens WHERE firm_id = 'test_user_firm_mismatch'
+      `,
+    );
+    const authorizeCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith(LOGIN_INFO)) {
+          expect(new URL(url).searchParams.get("username")).toBe("other.datacenter");
+          return json({
+            oauthUrl: "https://auth-west.example/oauth",
+            restUrl: "https://rest99.example/rest-services",
+          });
+        }
+        if (url.includes("/authorize")) authorizeCalls.push(url);
+        throw new Error(`unexpected fake fetch: ${url}`);
+      }),
+    );
+
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use(express.json());
+    app.use("/api", usersRouter);
+    const res = await request(app)
+      .post("/api/auth/user/enroll")
+      .type("form")
+      .send({
+        token: "test_user_firm_mismatch_token",
+        bhUsername: "other.datacenter",
+        bhPassword: RECRUITER_PASSWORD,
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.text).toMatch(/different data center than your firm/i);
+    assertSecretAbsent(res.text, RECRUITER_PASSWORD);
+    expect(authorizeCalls).toEqual([]);
+    const after = await pool.query(
+      `
+        SELECT oauth_url, login_url, refresh_token, auth_mode, uses_platform_client, updated_at
+        FROM bullhorn_tokens WHERE firm_id = 'test_user_firm_mismatch'
+      `,
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+    const user = await pool.query(
+      `
+        SELECT refresh_token, enroll_token, bullhorn_refresh_generation
+        FROM users WHERE id = 'test_user_firm_mismatch_user'
+      `,
+    );
+    expect(user.rows[0]).toMatchObject({
+      refresh_token: null,
+      enroll_token: "test_user_firm_mismatch_token",
+      bullhorn_refresh_generation: 0,
+    });
+    assertSecretAbsent(logLines.join("\n"), RECRUITER_PASSWORD);
+  });
+
+  it("leaves the firm row unchanged when authorize fails after a matching data center", async () => {
+    const client = storedClient();
+    await seedFirmToken({
+      firmId: "test_user_firm_authfail",
+      oauthUrl: "https://auth-east.example/oauth",
+      loginUrl: "https://rest45.example/rest-services/login",
+      oauthClientId: client.id,
+      oauthClientSecret: client.secret,
+    });
+    await seedUser("test_user_firm_authfail_user", "test_user_firm_authfail", null);
+    const before = await pool.query(
+      `
+        SELECT oauth_url, login_url, refresh_token, auth_mode, uses_platform_client, updated_at
+        FROM bullhorn_tokens WHERE firm_id = 'test_user_firm_authfail'
+      `,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith(LOGIN_INFO)) {
+          return json({
+            oauthUrl: "https://auth-east.example/oauth",
+            restUrl: "https://rest45.example/rest-services",
+          });
+        }
+        if (url.includes("/authorize")) {
+          return new Response(null, {
+            status: 302,
+            headers: {
+              location: "https://connect.fake/callback?error=access_denied&error_description=bad",
+            },
+          });
+        }
+        throw new Error(`unexpected fake fetch: ${url}`);
+      }),
+    );
+
+    await expect(
+      enrollUserHeadless(
+        "test_user_firm_authfail_user",
+        "qualified.recruiter",
+        RECRUITER_PASSWORD,
+      ),
+    ).rejects.toThrow(/authorization returned an error/i);
+    const after = await pool.query(
+      `
+        SELECT oauth_url, login_url, refresh_token, auth_mode, uses_platform_client, updated_at
+        FROM bullhorn_tokens WHERE firm_id = 'test_user_firm_authfail'
+      `,
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+    const user = await pool.query(
+      `
+        SELECT refresh_token, bullhorn_refresh_generation
+        FROM users WHERE id = 'test_user_firm_authfail_user'
+      `,
+    );
+    expect(user.rows[0]).toMatchObject({
+      refresh_token: null,
+      bullhorn_refresh_generation: 0,
+    });
+  });
+
   it("fails closed when a customer firm has no stored client", async () => {
     await seedFirmToken({
       firmId: "test_user_firm_noclient",
@@ -656,6 +786,12 @@ describe("recruiter enrollment uses the firm's Bullhorn client", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.startsWith(LOGIN_INFO)) {
+          return json({
+            oauthUrl: "https://auth-east.example/oauth",
+            restUrl: "https://rest45.example/rest-services",
+          });
+        }
         throw new Error(`network down ${url}`);
       }),
     );

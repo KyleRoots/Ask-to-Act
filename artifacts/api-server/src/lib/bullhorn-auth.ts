@@ -61,6 +61,32 @@ export class BullhornFirmConnectError extends Error {
 }
 
 /**
+ * The recruiter's Bullhorn username resolves to a different data center than
+ * the firm's stored swimlane. Enroll must not overwrite that swimlane.
+ */
+export class BullhornUserDataCenterMismatchError extends Error {
+  readonly statusCode = 409 as const;
+  constructor() {
+    super("This Bullhorn user belongs to a different data center than your firm.");
+    this.name = "BullhornUserDataCenterMismatchError";
+  }
+}
+
+/**
+ * A customer firm has no stored swimlane. Recruiter enroll must not discover
+ * or save one. An administrator connects the firm first.
+ */
+export class BullhornFirmNotConnectedError extends Error {
+  readonly statusCode = 409 as const;
+  constructor() {
+    super(
+      "This firm is not connected to Bullhorn yet. Ask your administrator to connect the firm first.",
+    );
+    this.name = "BullhornFirmNotConnectedError";
+  }
+}
+
+/**
  * Issues a fresh one-time enrollment/reconnect token for an existing user and
  * returns the absolute browser URL GPT/clients should present.
  *
@@ -511,26 +537,44 @@ function envOAuthApp(): BullhornOAuthApp {
 /**
  * Resolves the OAuth/login endpoints for a firm. Prefers the firm's own stored
  * endpoints (captured at connect time) so we never reuse one tenant's swimlane
- * for another. A customer row with no stored swimlane fails closed, unless the
- * caller passes that user's own Bullhorn username: loginInfo then runs for
- * that username only and does not fill the process-wide endpoint cache.
- * Service rows and platform-client rows (Myticas, STSI) still fall back to
- * discoverEndpoints(), which uses BULLHORN_USERNAME.
+ * for another. A customer row with no stored swimlane fails closed. Recruiter
+ * enroll does not discover or save a swimlane. Service rows and platform-client
+ * rows (Myticas, STSI) still fall back to discoverEndpoints(), which uses
+ * BULLHORN_USERNAME.
  */
-async function resolveFirmEndpoints(
-  row: FirmTokenRow | null,
-  username?: string,
-): Promise<Endpoints> {
+async function resolveFirmEndpoints(row: FirmTokenRow | null): Promise<Endpoints> {
   if (row?.oauthUrl && row?.loginUrl) {
     return { oauthUrl: row.oauthUrl, loginUrl: row.loginUrl };
   }
   // A customer firm must not discover its swimlane with the service username,
   // and must not reuse the process-wide cache from a previous service lookup.
   if (row && row.authMode !== "service" && !row.usesPlatformClient) {
-    if (username) return loginInfoForUsername(username);
     throw new BullhornDataCenterUnknownError();
   }
   return discoverEndpoints();
+}
+
+function endpointHost(url: string): string | null {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Same Bullhorn data center when both the OAuth host and the REST host match. */
+function sameDataCenter(
+  stored: { oauthUrl: string; loginUrl: string },
+  discovered: Endpoints,
+): boolean {
+  const oauth = endpointHost(stored.oauthUrl);
+  const login = endpointHost(stored.loginUrl);
+  return Boolean(
+    oauth &&
+      login &&
+      oauth === endpointHost(discovered.oauthUrl) &&
+      login === endpointHost(discovered.loginUrl),
+  );
 }
 
 async function discoverEndpoints(): Promise<Endpoints> {
@@ -1798,7 +1842,10 @@ export async function enrollUserHeadless(
   } catch (err) {
     if (
       err instanceof BullhornOAuthAppMissingError ||
-      err instanceof BullhornDataCenterUnknownError
+      err instanceof BullhornDataCenterUnknownError ||
+      err instanceof BullhornUserDataCenterMismatchError ||
+      err instanceof BullhornFirmNotConnectedError ||
+      err instanceof BullhornFirmConnectError
     ) {
       throw err;
     }
@@ -1826,19 +1873,31 @@ async function enrollUserHeadlessUnsafe(
     throw new Error("Bullhorn user enrollment requires an active firm membership.");
   }
   const firmTokenRow = await loadTokenRow(firmId);
-  const hadSwimlane = Boolean(firmTokenRow?.oauthUrl && firmTokenRow?.loginUrl);
   // Resolve the client before any Bullhorn call so a customer firm with no
   // stored client fails closed instead of authorizing against the env client.
   const app = oauthAppFromTokenRow(firmTokenRow);
-  const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow, bhUsername);
+  // Recruiter enroll never writes the firm swimlane. An administrator connect
+  // is the only path that stores oauthUrl and loginUrl. A stored swimlane is
+  // checked against this username and then used as-is.
   if (
     firmTokenRow &&
     firmTokenRow.authMode !== "service" &&
-    !firmTokenRow.usesPlatformClient &&
-    !hadSwimlane
+    !firmTokenRow.usesPlatformClient
   ) {
-    await saveFirmSwimlane(firmId, { oauthUrl, loginUrl });
+    if (!firmTokenRow.oauthUrl || !firmTokenRow.loginUrl) {
+      throw new BullhornFirmNotConnectedError();
+    }
+    const discovered = await loginInfoForUsername(bhUsername);
+    if (
+      !sameDataCenter(
+        { oauthUrl: firmTokenRow.oauthUrl, loginUrl: firmTokenRow.loginUrl },
+        discovered,
+      )
+    ) {
+      throw new BullhornUserDataCenterMismatchError();
+    }
   }
+  const { oauthUrl, loginUrl } = await resolveFirmEndpoints(firmTokenRow);
 
   const code = await fetchAuthCodeHeadlessForUser(
     oauthUrl,
