@@ -7,6 +7,9 @@ import {
   invalidateUserSession,
   enrollUserHeadless,
   getAuthorizeUrl,
+  BullhornFirmConnectError,
+  BullhornFirmNotConnectedError,
+  BullhornUserDataCenterMismatchError,
 } from "../lib/bullhorn-auth.js";
 import {
   disconnectUserMailbox,
@@ -1224,6 +1227,12 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
     );
   } catch (err) {
     const msg = (err as Error).message ?? "Unknown error";
+    const status =
+      err instanceof BullhornUserDataCenterMismatchError ||
+      err instanceof BullhornFirmNotConnectedError ||
+      err instanceof BullhornFirmConnectError
+        ? err.statusCode
+        : 400;
     logger.error({ err }, "Per-user headless enrollment failed");
     const userRows = await db
       .select({ name: usersTable.name, firmId: usersTable.firmId })
@@ -1238,7 +1247,7 @@ router.post("/auth/user/enroll", async (req: Request, res: Response) => {
       const [firm] = await db.select({ name: firmsTable.name }).from(firmsTable).where(eq(firmsTable.id, fId)).limit(1).catch(() => []);
       firmName = firm?.name ?? null;
     }
-    res.status(400).send(enrollForm(token, name, firmName, msg, isReconnect));
+    res.status(status).send(enrollForm(token, name, firmName, msg, isReconnect));
   }
 });
 

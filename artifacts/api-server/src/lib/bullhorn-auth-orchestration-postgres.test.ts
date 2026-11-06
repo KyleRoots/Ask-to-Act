@@ -144,7 +144,12 @@ afterEach(() => {
 
 describe("Bullhorn auth production orchestration safety", () => {
   it("does not clear credentials if a reconnect lands before invalid_grant reconnect URL minting", async () => {
-    await seedFirmToken({ firmId: "test_auth_orch_firm_race" });
+    // Platform-client firm: user refresh and the callback stay on the env client.
+    // A customer firm with no stored client now fails closed before exchange.
+    await seedFirmToken({
+      firmId: "test_auth_orch_firm_race",
+      usesPlatformClient: true,
+    });
     await seedUser("test_auth_orch_user_race", "test_auth_orch_firm_race", "old-refresh");
 
     vi.stubGlobal(
@@ -518,7 +523,10 @@ describe("Bullhorn auth production orchestration safety", () => {
   });
 
   it("persists callback refresh tokens before REST login and consumes claimed state atomically", async () => {
-    await seedFirmToken({ firmId: "test_auth_orch_firm_login_fail" });
+    await seedFirmToken({
+      firmId: "test_auth_orch_firm_login_fail",
+      usesPlatformClient: true,
+    });
     await seedUser("test_auth_orch_user_login_fail", "test_auth_orch_firm_login_fail", null);
     const state = "test-auth-orch-user-login-fail";
     await rememberState(state, "test_auth_orch_firm_login_fail", 0);
@@ -566,7 +574,10 @@ describe("Bullhorn auth production orchestration safety", () => {
   });
 
   it("completes user callback when claimed firm still matches membership", async () => {
-    await seedFirmToken({ firmId: "test_auth_orch_firm_match" });
+    await seedFirmToken({
+      firmId: "test_auth_orch_firm_match",
+      usesPlatformClient: true,
+    });
     await seedUser("test_auth_orch_user_match", "test_auth_orch_firm_match", null);
     const state = "test-auth-orch-user-firm-match";
     await rememberState(state, "test_auth_orch_firm_match", 0);
@@ -647,7 +658,10 @@ describe("Bullhorn auth production orchestration safety", () => {
   });
 
   it("rechecks user firm membership during atomic callback token save", async () => {
-    await seedFirmToken({ firmId: "test_auth_orch_firm_save_a" });
+    await seedFirmToken({
+      firmId: "test_auth_orch_firm_save_a",
+      usesPlatformClient: true,
+    });
     await seedFirmToken({ firmId: "test_auth_orch_firm_save_b" });
     await seedUser("test_auth_orch_user_save_race", "test_auth_orch_firm_save_a", "old-refresh");
     const state = "test-auth-orch-user-firm-save-race";
@@ -715,7 +729,10 @@ describe("Bullhorn auth production orchestration safety", () => {
   });
 
   it("allows a new-generation failure notice after accepted notice then reconnect", async () => {
-    await seedFirmToken({ firmId: "test_auth_orch_firm_notice" });
+    await seedFirmToken({
+      firmId: "test_auth_orch_firm_notice",
+      usesPlatformClient: true,
+    });
     await seedUser("test_auth_orch_user_notice", "test_auth_orch_firm_notice", "old-refresh");
 
     sendReconnectEmail.mockResolvedValueOnce(undefined);
