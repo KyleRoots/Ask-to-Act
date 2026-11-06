@@ -162,6 +162,13 @@
       "when": 1788993600000,
       "tag": "0022_bullhorn_refresh_generation",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0023_bullhorn_oauth_client",
+      "breakpoints": true
     }
   ]
 }

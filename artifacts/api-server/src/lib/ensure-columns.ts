@@ -40,7 +40,31 @@ export async function ensureColumns(): Promise<void> {
         ADD COLUMN IF NOT EXISTS reconnect_notice_attempt_id TEXT,
         ADD COLUMN IF NOT EXISTS reconnect_notice_claimed_at TIMESTAMP,
         ADD COLUMN IF NOT EXISTS reconnect_notice_completed_at TIMESTAMP,
-        ADD COLUMN IF NOT EXISTS reconnect_notice_error TEXT;
+        ADD COLUMN IF NOT EXISTS reconnect_notice_error TEXT,
+        ADD COLUMN IF NOT EXISTS oauth_client_id TEXT,
+        ADD COLUMN IF NOT EXISTS oauth_client_secret TEXT;
+    `);
+
+    // Backfill only when the column is new. A later startup must not flip
+    // rows created after this deploy back to the platform client.
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'bullhorn_tokens'
+            AND column_name = 'uses_platform_client'
+        ) THEN
+          ALTER TABLE bullhorn_tokens
+            ADD COLUMN uses_platform_client BOOLEAN NOT NULL DEFAULT false;
+          UPDATE bullhorn_tokens
+          SET uses_platform_client = true
+          WHERE oauth_client_id IS NULL
+            AND oauth_client_secret IS NULL;
+        END IF;
+      END $$;
     `);
 
     await client.query(`

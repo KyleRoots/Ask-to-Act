@@ -12,7 +12,9 @@ vi.mock("./emailService.js", () => ({
 
 const {
   __bullhornAuthTestHooks,
+  completeAuthorization,
   completeUserEnrollment,
+  getAuthorizeUrl,
   getSession,
   getUserSession,
 } = await import("./bullhorn-auth.js");
@@ -56,6 +58,9 @@ async function seedFirmToken(opts: {
   firmId: string;
   refreshToken?: string;
   authMode?: "service" | "oauth";
+  oauthClientId?: string | null;
+  oauthClientSecret?: string | null;
+  usesPlatformClient?: boolean;
 }): Promise<void> {
   await seedFirm(opts.firmId);
   await pool.query(
@@ -67,11 +72,21 @@ async function seedFirmToken(opts: {
         oauth_url,
         rest_url,
         login_url,
-        auth_mode
+        auth_mode,
+        oauth_client_id,
+        oauth_client_secret,
+        uses_platform_client
       )
-      VALUES ($1, $1, $2, 'https://oauth.fake', 'https://rest.fake/rest-services/original', 'https://rest.fake/rest-services/login', $3)
+      VALUES ($1, $1, $2, 'https://oauth.fake', 'https://rest.fake/rest-services/original', 'https://rest.fake/rest-services/login', $3, $4, $5, $6)
     `,
-    [opts.firmId, opts.refreshToken ?? "old-refresh", opts.authMode ?? "oauth"],
+    [
+      opts.firmId,
+      opts.refreshToken ?? "old-refresh",
+      opts.authMode ?? "oauth",
+      opts.oauthClientId ?? null,
+      opts.oauthClientSecret ?? null,
+      opts.usesPlatformClient ?? false,
+    ],
   );
 }
 
@@ -195,9 +210,13 @@ describe("Bullhorn auth production orchestration safety", () => {
         if (url === "https://oauth.fake/token") {
           const body = bodyParams(init);
           if (body.get("grant_type") === "refresh_token") {
+            expect(body.get("client_id")).toBe("client-id");
+            expect(body.get("client_secret")).toBe("client-secret");
             return new Response("invalid_grant", { status: 400 });
           }
           if (body.get("code") === "service-code") {
+            expect(body.get("client_id")).toBe("client-id");
+            expect(body.get("client_secret")).toBe("client-secret");
             return json({
               access_token: "service-access",
               refresh_token: "service-refresh-new",
@@ -206,12 +225,18 @@ describe("Bullhorn auth production orchestration safety", () => {
           }
         }
         if (url.startsWith("https://rest.bullhornstaffing.com/rest-services/loginInfo")) {
+          const loginInfo = new URL(url);
+          expect(loginInfo.searchParams.get("username")).toBe("service-user");
           return json({
             oauthUrl: "https://oauth.fake",
             restUrl: "https://rest.fake/rest-services",
           });
         }
         if (url.startsWith("https://oauth.fake/authorize")) {
+          const authorize = new URL(url);
+          expect(authorize.searchParams.get("client_id")).toBe("client-id");
+          expect(authorize.searchParams.get("username")).toBe("service-user");
+          expect(authorize.searchParams.get("password")).toBe("service-pass");
           return new Response(null, {
             status: 302,
             headers: { Location: "https://connect.fake/callback?code=service-code" },
@@ -259,13 +284,18 @@ describe("Bullhorn auth production orchestration safety", () => {
       firmId: "test_auth_orch_firm_invalid_grant",
       refreshToken: "old-firm-refresh",
       authMode: "oauth",
+      oauthClientId: "orch-client-id",
+      oauthClientSecret: "orch-client-secret",
     });
     sendFirmAuthFailureAlert.mockResolvedValueOnce(undefined);
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string) => {
+      vi.fn(async (url: string, init?: RequestInit) => {
         if (url === "https://oauth.fake/token") {
+          const body = bodyParams(init);
+          expect(body.get("client_id")).toBe("orch-client-id");
+          expect(body.get("client_secret")).toBe("orch-client-secret");
           return new Response("invalid_grant", { status: 400 });
         }
         throw new Error(`unexpected fake fetch: ${url}`);
@@ -305,6 +335,8 @@ describe("Bullhorn auth production orchestration safety", () => {
       firmId: "test_auth_orch_firm_ambiguous",
       refreshToken: "old-firm-refresh",
       authMode: "oauth",
+      oauthClientId: "orch-client-id",
+      oauthClientSecret: "orch-client-secret",
     });
     sendFirmAuthFailureAlert.mockRejectedValueOnce(new Error("support mail down"));
 
@@ -341,6 +373,111 @@ describe("Bullhorn auth production orchestration safety", () => {
     });
     expect(rows[0].refresh_attempt_id).toBeTruthy();
     expect(rows[0].refresh_uncertain_at).toBeInstanceOf(Date);
+  });
+
+  it("refreshes and reconnects a platform-client oauth row with the env client", async () => {
+    await seedFirmToken({
+      firmId: "test_auth_orch_platform_oauth",
+      refreshToken: "old-platform-refresh",
+      authMode: "oauth",
+      usesPlatformClient: true,
+    });
+
+    const authorizeUrl = new URL(
+      await getAuthorizeUrl("state-platform", "test_auth_orch_platform_oauth"),
+    );
+    expect(authorizeUrl.origin).toBe("https://oauth.fake");
+    expect(authorizeUrl.searchParams.get("client_id")).toBe("client-id");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "https://oauth.fake/token") {
+          const body = bodyParams(init);
+          expect(body.get("client_id")).toBe("client-id");
+          expect(body.get("client_secret")).toBe("client-secret");
+          if (body.get("grant_type") === "refresh_token") {
+            expect(body.get("refresh_token")).toBe("old-platform-refresh");
+            return json({
+              access_token: "platform-access",
+              refresh_token: "platform-refresh-new",
+              expires_in: 600,
+            });
+          }
+          if (body.get("grant_type") === "authorization_code") {
+            expect(body.get("code")).toBe("reconnect-code");
+            return json({
+              access_token: "reconnect-access",
+              refresh_token: "reconnect-refresh",
+              expires_in: 600,
+            });
+          }
+        }
+        if (url.startsWith("https://rest.fake/rest-services/login")) {
+          return json({
+            BhRestToken: "platform-bh-rest",
+            restUrl: "https://rest.fake/rest-services/session",
+          });
+        }
+        if (url.startsWith("https://rest.fake/rest-services/session/ping")) {
+          return json({ sessionExpires: Date.now() + 600_000 });
+        }
+        throw new Error(`unexpected fake fetch: ${url}`);
+      }),
+    );
+
+    await expect(getSession("test_auth_orch_platform_oauth")).resolves.toMatchObject({
+      BhRestToken: "platform-bh-rest",
+      refreshToken: "platform-refresh-new",
+    });
+
+    __bullhornAuthTestHooks.resetAuthState();
+    await completeAuthorization("reconnect-code", "test_auth_orch_platform_oauth");
+
+    const { rows } = await pool.query(
+      `
+        SELECT auth_mode, uses_platform_client, oauth_client_id, oauth_client_secret,
+               refresh_token
+        FROM bullhorn_tokens
+        WHERE firm_id = 'test_auth_orch_platform_oauth'
+      `,
+    );
+    expect(rows[0]).toMatchObject({
+      auth_mode: "oauth",
+      uses_platform_client: true,
+      oauth_client_id: null,
+      oauth_client_secret: null,
+      refresh_token: "reconnect-refresh",
+    });
+  });
+
+  it("fails closed for an oauth firm with no stored client and does not call Bullhorn", async () => {
+    await seedFirmToken({
+      firmId: "test_auth_orch_firm_no_client",
+      refreshToken: "old-firm-refresh",
+      authMode: "oauth",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getSession("test_auth_orch_firm_no_client")).rejects.toThrow(
+      /not stored for this firm/i,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendFirmAuthFailureAlert).not.toHaveBeenCalled();
+
+    const { rows } = await pool.query(
+      `
+        SELECT auth_healthy, refresh_outcome, refresh_token
+        FROM bullhorn_tokens
+        WHERE firm_id = 'test_auth_orch_firm_no_client'
+      `,
+    );
+    expect(rows[0]).toMatchObject({
+      auth_healthy: true,
+      refresh_outcome: "idle",
+      refresh_token: "old-firm-refresh",
+    });
   });
 
   it("does not send a stale firm failure alert after reconnect advances generation", async () => {
