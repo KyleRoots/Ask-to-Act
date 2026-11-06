@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
 import { getUserMailboxStatus } from "../lib/m365-auth.js";
 import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
-import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses, firmContext, saveFirmBullhornOAuthClient } from "../lib/bullhorn-auth.js";
+import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses, firmContext, saveFirmBullhornOAuthClient, connectFirmOAuth, BullhornFirmConnectError } from "../lib/bullhorn-auth.js";
 import { BullhornOAuthClientStoreError } from "../lib/bullhorn-oauth-app.js";
 import { syncNoteSnapshotForFirm } from "../lib/note-snapshot-sync.js";
 
@@ -689,6 +689,47 @@ router.post(
         "Failed to store Bullhorn OAuth client",
       );
       res.status(500).json({ error: "Could not store the Bullhorn OAuth client." });
+    }
+  },
+);
+
+/**
+ * POST /api/firms/:id/bullhorn-connect
+ * Admin-only one-time connect for a customer firm. Body: { username, password }.
+ * The password is taken from this body only. It is not read from the environment,
+ * not stored, and not logged. Service firms and uses_platform_client rows are
+ * refused. This is not the service-firm route at /api/auth/bullhorn/connect.
+ */
+router.post(
+  "/firms/:id/bullhorn-connect",
+  bearerAuth, requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { username?: unknown; password?: unknown } | undefined;
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    try {
+      const result = await connectFirmOAuth(id, body?.username, body?.password);
+      res.json({ ok: true, firmId: id, authMode: result.authMode });
+    } catch (err) {
+      if (err instanceof BullhornFirmConnectError) {
+        res.status(err.statusCode).json({ error: err.message });
+        return;
+      }
+      logger.error(
+        { firmId: id, error: err instanceof Error ? err.name : "Error" },
+        "Bullhorn firm connect failed",
+      );
+      res.status(500).json({ error: "Bullhorn connect failed." });
     }
   },
 );
