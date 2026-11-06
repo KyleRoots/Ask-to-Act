@@ -7,7 +7,7 @@ import { bearerAuth, requireService } from "../middlewares/bearer-auth.js";
 import { stripeStorage } from "../lib/stripe/storage.js";
 import { logger } from "../lib/logger.js";
 import { getBaseUrl } from "../lib/getBaseUrl.js";
-import { getUserMailboxStatus } from "../lib/m365-auth.js";
+import { getUserMailboxStatus, isMicrosoftTenantId } from "../lib/m365-auth.js";
 import { discoverFirmConfig, getFirmFieldMap } from "../lib/firm-config.js";
 import { isFirmConnected, getFirmAuthMode, listFirmBullhornHealthStatuses, firmContext, saveFirmBullhornOAuthClient, connectFirmOAuth, BullhornFirmConnectError } from "../lib/bullhorn-auth.js";
 import { BullhornOAuthClientStoreError } from "../lib/bullhorn-oauth-app.js";
@@ -211,6 +211,58 @@ router.patch("/firms/:id", bearerAuth, requireService, async (req: Request, res:
   logger.info({ firmId: id, status }, "Firm status updated");
   res.json({ id, status });
 });
+
+/**
+ * PATCH /api/firms/:id/microsoft-tenant
+ * Admin-only. Sets or clears the Microsoft 365 tenant used for mailbox
+ * authorize, token exchange, and refresh. Null clears it so the firm falls
+ * back to M365_TENANT_ID. This route does not choose a tenant for any firm.
+ * Body: { microsoftTenantId: string | null }
+ */
+router.patch(
+  "/firms/:id/microsoft-tenant",
+  bearerAuth,
+  requireService,
+  async (req: Request, res: Response) => {
+    const { id } = req.params as { id: string };
+    const body = req.body as { microsoftTenantId?: unknown };
+    if (!body || !("microsoftTenantId" in body)) {
+      res.status(400).json({
+        error: "microsoftTenantId is required. Pass a tenant GUID, or null to clear it.",
+      });
+      return;
+    }
+    const raw = body.microsoftTenantId;
+    let microsoftTenantId: string | null;
+    if (raw === null) {
+      microsoftTenantId = null;
+    } else if (typeof raw === "string" && isMicrosoftTenantId(raw)) {
+      microsoftTenantId = raw.trim().toLowerCase();
+    } else {
+      res.status(400).json({
+        error: "microsoftTenantId must be a GUID (8-4-4-4-12 hex) or null to clear it.",
+      });
+      return;
+    }
+
+    const [firm] = await db
+      .select({ id: firmsTable.id })
+      .from(firmsTable)
+      .where(eq(firmsTable.id, id));
+    if (!firm) {
+      res.status(404).json({ error: "Firm not found" });
+      return;
+    }
+
+    await db
+      .update(firmsTable)
+      .set({ microsoftTenantId, updatedAt: new Date() })
+      .where(eq(firmsTable.id, id));
+
+    logger.info({ firmId: id, microsoftTenantSet: microsoftTenantId !== null }, "Firm Microsoft tenant updated");
+    res.json({ id, microsoftTenantId });
+  },
+);
 
 /**
  * GET /api/firms

@@ -119,6 +119,13 @@ vi.mock("@workspace/db", () => ({
     _name: "users",
     id: "id",
     name: "name",
+    firmId: "firmId",
+    email: "email",
+  },
+  firmsTable: {
+    _name: "firms",
+    id: "id",
+    microsoftTenantId: "microsoftTenantId",
   },
 }));
 

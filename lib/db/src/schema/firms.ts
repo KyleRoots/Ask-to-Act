@@ -25,6 +25,9 @@ export const firmsTable = pgTable(
     status: text("status").notNull().default("active"),
     seatLimit: integer("seat_limit"),
     logoUrl: text("logo_url"),
+    // Microsoft 365 tenant for this firm's mailboxes. Null means authorize,
+    // token exchange, and refresh use M365_TENANT_ID (the platform default).
+    microsoftTenantId: text("microsoft_tenant_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
