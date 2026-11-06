@@ -75,9 +75,8 @@ function formatBullhornError(kind: string, status: number, body: string): Error 
   if (invalid) {
     return new Error(
       `Invalid field "${invalid[1]}" for this entity. Remove it or replace it, then retry. ` +
-        `Custom fields differ per entity (e.g. "Internal Department" is correlatedCustomText1 on ` +
-        `JobOrder/Placement but customText1 on Opportunity) — call describe_entity to list the ` +
-        `valid fields for this entity.`,
+        `Custom fields differ per firm and per entity. Call describe_entity and use ` +
+        `configuredCustomFields to map a label to this firm's API name.`,
     );
   }
   if (/badSearchQuery|Bad Query/i.test(`${errKey} ${errMsg}`)) {
@@ -1141,7 +1140,7 @@ export async function getNotes(args: {
   if (args.candidateId === undefined && args.jobId === undefined) {
     throw new Error(
       "get_notes requires candidateId and/or jobId. " +
-        "Bullhorn rejects /query/Note, and Lucene /search/Note returns 0 on this instance — " +
+        "Bullhorn rejects /query/Note, and Lucene /search/Note can return 0 — " +
         "notes must be loaded via the Candidate or JobOrder association.",
     );
   }
@@ -2142,7 +2141,7 @@ function applyMetricDefinitionGuard(
     return {
       query: andLockClause(query, additions.join(" AND ")),
       appliedDefinition: isOpenIntent
-        ? "open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (Archived requisitions AND soft-deleted records excluded to match the official open-jobs metric = 398; on-hold/filled/placed still included)"
+        ? "open jobs = isOpen:true AND NOT status:Archive AND isDeleted:false (Archived requisitions and soft-deleted records are excluded so the count matches this firm's open-jobs definition; on-hold, filled, and placed jobs stay included)"
         : "soft-deleted job records are excluded (operational truth); pass isDeleted:true to include them.",
     };
   }
@@ -2165,8 +2164,8 @@ function applyMetricDefinitionGuard(
       return {
         query: andLockClause(query, clause),
         appliedDefinition: hasExplicitDeleted
-          ? 'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted (the official active-pipeline metric = 23; your explicit isDeleted is honored, so soft-deleted records are NOT excluded here — drop isDeleted to get the canonical 23).'
-          : 'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false (the official active-pipeline metric = 23; soft-deleted and closed/converted are already excluded — do NOT subtract further).',
+          ? 'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted (your explicit isDeleted is honored, so soft-deleted records are not excluded here; drop isDeleted for this firm\'s active-pipeline definition).'
+          : 'active opportunities = isOpen:true AND NOT status:"Closed-Won" AND NOT status:"Closed-Lost" AND NOT status:Converted AND isDeleted:false (soft-deleted and closed or converted opportunities are already excluded; do not subtract further).',
       };
     }
     if (!hasExplicitDeleted) {
@@ -2182,7 +2181,7 @@ function applyMetricDefinitionGuard(
   // returns 0) and Placement search already excludes soft-deleted, so strip any supplied
   // isDeleted clause. (2) "Placements made" means CONFIRMED only — when the caller pins no
   // status, lock the base to confirmed so totals AND per-group breakdowns match the
-  // official metric (YTD 98 / all-time 2650), instead of the all-status 123/2775. A power
+  // confirmed placements only, instead of every status. A power
   // user wanting pending/canceled/all passes an explicit status filter to override.
   if (entity === "Placement") {
     let q = query;
@@ -2203,7 +2202,7 @@ function applyMetricDefinitionGuard(
       return {
         query: base,
         appliedDefinition:
-          `placements made = confirmed only ${CONFIRMED_PLACEMENT_CLAUSE} (the official metric: YTD 98 / all-time 2650; pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them.`,
+          `placements made = confirmed only ${CONFIRMED_PLACEMENT_CLAUSE} (pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them.`,
       };
     }
     if (q !== query) {
@@ -2267,8 +2266,8 @@ function applyMetricDefinitionGuardWhere(
     let appliedDefinition: string;
     if (isOpenIntent) {
       appliedDefinition = hasExplicitDeleted
-        ? `open jobs = isOpen=true AND ${JOBORDER_ARCHIVE_WHERE} (Archived requisitions excluded; your explicit isDeleted is honored — drop it to match the locked open-jobs metric = 398). query_entity returns at most a page of records — use count_entity for the total.`
-        : `open jobs = isOpen=true AND ${JOBORDER_ARCHIVE_WHERE} AND isDeleted=false (Archived requisitions AND soft-deleted records excluded to match the locked open-jobs metric = 398). query_entity returns at most a page of records — use count_entity for the total.`;
+        ? `open jobs = isOpen=true AND ${JOBORDER_ARCHIVE_WHERE} (Archived requisitions excluded; your explicit isDeleted is honored. Drop it to match this firm's open-jobs definition). query_entity returns at most a page of records. Use count_entity for the total.`
+        : `open jobs = isOpen=true AND ${JOBORDER_ARCHIVE_WHERE} AND isDeleted=false (Archived requisitions and soft-deleted records are excluded so the count matches this firm's open-jobs definition). query_entity returns at most a page of records. Use count_entity for the total.`;
     } else {
       appliedDefinition =
         "soft-deleted job records are excluded (operational truth); pass isDeleted=true to include them.";
@@ -2289,8 +2288,8 @@ function applyMetricDefinitionGuardWhere(
       return {
         where: andWhereClause(w, clause),
         appliedDefinition: hasExplicitDeleted
-          ? `active opportunities = isOpen=true AND ${OPP_ACTIVE_STATUS_WHERE} (the locked active-pipeline metric = 23; your explicit isDeleted is honored — drop it to get the canonical 23). Use count_entity for the total.`
-          : `active opportunities = isOpen=true AND ${OPP_ACTIVE_STATUS_WHERE} AND isDeleted=false (the locked active-pipeline metric = 23; soft-deleted and closed/converted are already excluded — do NOT subtract further). Use count_entity for the total.`,
+          ? `active opportunities = isOpen=true AND ${OPP_ACTIVE_STATUS_WHERE} (your explicit isDeleted is honored; drop it for this firm's active-pipeline definition). Use count_entity for the total.`
+          : `active opportunities = isOpen=true AND ${OPP_ACTIVE_STATUS_WHERE} AND isDeleted=false (soft-deleted and closed or converted opportunities are already excluded; do not subtract further). Use count_entity for the total.`,
       };
     }
     if (!hasExplicitDeleted) {
@@ -2353,7 +2352,7 @@ function applyMetricDefinitionGuardWhere(
           : andWhereClause(q, CONFIRMED_PLACEMENT_WHERE);
       return {
         where: base,
-        appliedDefinition: `placements made = confirmed only ${CONFIRMED_PLACEMENT_WHERE} (the official metric: YTD 98 / all-time 2650; pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them. Use count_entity for the total.`,
+        appliedDefinition: `placements made = confirmed only ${CONFIRMED_PLACEMENT_WHERE} (pending Submitted, Canceled and Archive are excluded). Pass an explicit status filter to include them. Use count_entity for the total.`,
       };
     }
     if (strippedDeleted) {
@@ -2526,7 +2525,7 @@ export async function countEntity(args: {
   }
   if (!GROUP_FIELD_NAME_RE.test(groupBy)) {
     throw new Error(
-      `Invalid groupBy field "${args.groupBy}". Use a single field name, e.g. "correlatedCustomText1".`,
+      `Invalid groupBy field "${args.groupBy}". Use a single field name, such as status or internalDepartment.`,
     );
   }
   if (isSensitiveField(groupBy)) {
@@ -2620,7 +2619,7 @@ export async function queryAnyEntity(args: {
     if (entry.canonical === "Note") {
       throw new Error(
         `Note cannot use query_entity — Bullhorn rejects /query/Note (indexed entity). ` +
-          `Lucene search_entity(Note) also returns 0 on this instance. ` +
+          `Lucene search_entity(Note) can also return 0. ` +
           `Use get_notes(candidateId|jobId) or get_entity(Candidate|JobOrder) with nested notes(...) fields.`,
       );
     }
@@ -3802,6 +3801,42 @@ async function mergeCurrentAddresses(
   }
 }
 
+/**
+ * Bullhorn ignores JSON null on text fields and still returns success, so
+ * `{ occupation: null }` used to report updated:true without clearing the value.
+ * Null on a confirmed text field is sent as "". Any other null is an error
+ * and nothing is written.
+ */
+export function applyNullClears(
+  entity: string,
+  body: Record<string, unknown>,
+  fieldMap: Map<string, { type?: string; dataType?: string }> | null,
+): void {
+  const nullKeys = Object.keys(body).filter((key) => body[key] === null);
+  if (nullKeys.length === 0) return;
+  const problems: string[] = [];
+  const clears: string[] = [];
+  for (const key of nullKeys) {
+    const meta = fieldMap?.get(key.toLowerCase());
+    const kind = `${meta?.type ?? ""} ${meta?.dataType ?? ""}`.toLowerCase();
+    if (meta && kind.includes("string")) {
+      clears.push(key);
+    } else if (!fieldMap || fieldMap.size === 0 || !meta) {
+      problems.push(
+        `null was passed for "${key}" on ${entity}, but its type could not be confirmed. Pass "" to clear a text field, or omit the field to leave it unchanged.`,
+      );
+    } else {
+      problems.push(
+        `null does not clear "${key}" on ${entity} (${meta.dataType ?? meta.type ?? "non-text"}). Omit the field to leave it unchanged. Pass "" only for text fields.`,
+      );
+    }
+  }
+  if (problems.length > 0) {
+    throw new BullhornFieldValidationError(problems.join(" "));
+  }
+  for (const key of clears) body[key] = "";
+}
+
 /** POST an update to an existing entity record. */
 async function updateEntityRecord(
   session: BullhornWriteSession,
@@ -3809,6 +3844,14 @@ async function updateEntityRecord(
   id: number,
   body: Record<string, unknown>,
 ): Promise<void> {
+  let fieldMap: Map<string, WriteFieldMeta> | null = null;
+  try {
+    const loaded = await getEntityFieldMeta(entity);
+    fieldMap = loaded.size > 0 ? loaded : null;
+  } catch {
+    fieldMap = null;
+  }
+  applyNullClears(entity, body, fieldMap);
   // Merge current address sub-fields before resolving country so Bullhorn
   // receives a complete composite (partial address = 500 persistence error).
   await mergeCurrentAddresses(session, entity, id, body);
@@ -3877,17 +3920,226 @@ async function writeSessionEntityGet(
  * On-Site work location by default, and HTML-normalized descriptions.
  * Explicit additionalFields always win. Remote/Hybrid do not clear address.
  */
+export interface OpenJobDuplicate {
+  id: number;
+  title: string;
+  status: string | null;
+  bullhornUrl: string | null;
+  owner: string | null;
+  dateLastModified: number | string | null;
+}
+
+export interface CompanyContactOption {
+  id: number;
+  name: string;
+  email: string | null;
+  occupation: string | null;
+}
+
+function personLabel(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as { firstName?: unknown; lastName?: unknown; name?: unknown };
+  if (typeof row.name === "string" && row.name.trim()) return row.name.trim();
+  const parts = [row.firstName, row.lastName].filter(
+    (part): part is string => typeof part === "string" && part.trim().length > 0,
+  );
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
+function quoteQueryLiteral(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+async function queryWithWriteSession(
+  session: BullhornWriteSession,
+  entity: string,
+  where: string,
+  fields: string,
+  count = 5,
+): Promise<Array<Record<string, unknown>>> {
+  const url = new URL(`query/${entity}`, session.restUrl);
+  url.searchParams.set("BhRestToken", session.BhRestToken);
+  url.searchParams.set("where", where);
+  url.searchParams.set("fields", fields);
+  url.searchParams.set("count", String(count));
+  let res: Response;
+  try {
+    res = await fetch(url.toString());
+  } catch (err) {
+    logger.warn({ err, entity }, "Bullhorn: lookup before create failed");
+    throw new BullhornFieldValidationError(
+      `Could not check for an existing ${entity} before creating. Nothing was created. Retry, or pass allowDuplicate=true only after the user confirms a duplicate is acceptable.`,
+    );
+  }
+  if (!res.ok) {
+    throw new BullhornFieldValidationError(
+      `Could not check for an existing ${entity} before creating (Bullhorn returned ${res.status}). Nothing was created. Retry, or pass allowDuplicate=true only after the user confirms a duplicate is acceptable.`,
+    );
+  }
+  const data = (await res.json()) as { data?: Array<Record<string, unknown>> };
+  return Array.isArray(data.data) ? data.data : [];
+}
+
+/** Lucene specials. Inside a quoted phrase, backslash and quote must be escaped; the rest are escaped so a value cannot change the query. */
+const LUCENE_SPECIAL = /[+\-!(){}[\]^"~*?:\\/|&]/g;
+
+export function escapeLuceneValue(value: string): string {
+  return value.replace(LUCENE_SPECIAL, "\\$&");
+}
+
+function luceneQuoted(value: string): string {
+  return `"${escapeLuceneValue(value)}"`;
+}
+
+async function searchWithWriteSession(
+  session: BullhornWriteSession,
+  entity: string,
+  query: string,
+  fields: string,
+  count = 5,
+): Promise<Array<Record<string, unknown>>> {
+  const url = new URL(`search/${entity}`, session.restUrl);
+  url.searchParams.set("BhRestToken", session.BhRestToken);
+  url.searchParams.set("query", query);
+  url.searchParams.set("fields", fields);
+  url.searchParams.set("count", String(count));
+  url.searchParams.set("start", "0");
+  let res: Response;
+  try {
+    res = await fetch(url.toString());
+  } catch (err) {
+    logger.warn({ err, entity }, "Bullhorn: search before create failed");
+    throw new BullhornFieldValidationError(
+      `Could not check for an existing ${entity} before creating. Nothing was created. Retry, or pass allowDuplicate=true only after the user confirms a duplicate is acceptable.`,
+    );
+  }
+  if (!res.ok) {
+    throw new BullhornFieldValidationError(
+      `Could not check for an existing ${entity} before creating (Bullhorn returned ${res.status}). Nothing was created. Retry, or pass allowDuplicate=true only after the user confirms a duplicate is acceptable.`,
+    );
+  }
+  const data = (await res.json()) as { data?: Array<Record<string, unknown>> };
+  return Array.isArray(data.data) ? data.data : [];
+}
+
+export async function findOpenJobsWithSameTitle(
+  session: BullhornWriteSession,
+  title: string,
+  clientCorporationId: number,
+): Promise<OpenJobDuplicate[]> {
+  const rows = await queryWithWriteSession(
+    session,
+    "JobOrder",
+    `title='${quoteQueryLiteral(title)}' AND clientCorporation.id=${clientCorporationId} AND isOpen=true AND isDeleted=false`,
+    "id,title,status,dateLastModified,owner(id,firstName,lastName)",
+  );
+  return rows.flatMap((row) => {
+    if (typeof row.id !== "number") return [];
+    const modified = row.dateLastModified;
+    return [{
+      id: row.id,
+      title: typeof row.title === "string" ? row.title : title,
+      status: typeof row.status === "string" ? row.status : null,
+      bullhornUrl: bullhornUrlForEntity("JobOrder", row.id),
+      owner: personLabel(row.owner),
+      dateLastModified:
+        typeof modified === "number" || typeof modified === "string" ? modified : null,
+    }];
+  });
+}
+
+export function isJobOrderPersistError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /error persisting an entity of type:\s*JobOrder/i.test(message);
+}
+
+export async function listCompanyContacts(
+  session: BullhornWriteSession,
+  clientCorporationId: number,
+): Promise<CompanyContactOption[] | null> {
+  let rows: Array<Record<string, unknown>>;
+  try {
+    rows = await queryWithWriteSession(
+      session,
+      "ClientContact",
+      `clientCorporation.id=${clientCorporationId} AND isDeleted=false`,
+      "id,firstName,lastName,name,email,occupation",
+      15,
+    );
+  } catch (err) {
+    logger.warn({ err, clientCorporationId }, "Bullhorn: company contact list failed");
+    return null;
+  }
+  return rows.flatMap((row) => {
+    if (typeof row.id !== "number") return [];
+    return [{
+      id: row.id,
+      name: personLabel(row) ?? `Contact ${row.id}`,
+      email: typeof row.email === "string" ? row.email : null,
+      occupation: typeof row.occupation === "string" ? row.occupation : null,
+    }];
+  });
+}
+
+export function missingJobContactMessage(
+  clientCorporationId: number,
+  contacts: CompanyContactOption[] | null,
+): string {
+  const listed = contacts === null
+    ? "The contact list could not be loaded. Ask the user for the hiring contact id."
+    : contacts.length === 0
+    ? "No contacts were found on this company. Create the contact first, then pass its id."
+    : contacts
+        .map((contact) => {
+          const bits = [`${contact.name} (id ${contact.id})`];
+          if (contact.occupation) bits.push(contact.occupation);
+          if (contact.email) bits.push(contact.email);
+          return bits.join(", ");
+        })
+        .join("; ");
+  return (
+    "Bullhorn refused to save this job (error persisting an entity of type: JobOrder). " +
+    "This firm requires a hiring contact. Ask the user which contact to use, then call create_job again with clientContactId. " +
+    `Company ${clientCorporationId} contacts: ${listed}`
+  );
+}
+
 export async function createJobOrder(
   session: BullhornWriteSession,
   args: {
     title: string;
     clientCorporationId: number;
     clientContactId?: number;
+    allowDuplicate?: boolean;
     additionalFields?: Record<string, unknown>;
     /** AskToAct portal user email — preferred Sales Rep when no owner override. */
     portalUserEmail?: string | null;
   },
-): Promise<{ jobOrderId: number; title: string }> {
+): Promise<
+  | {
+      created: false;
+      title: string;
+      possibleDuplicateJobs: OpenJobDuplicate[];
+      message: string;
+    }
+  | { created: true; jobOrderId: number; title: string; assignedUsersAdded?: number[] }
+> {
+  if (!args.allowDuplicate) {
+    const existing = await findOpenJobsWithSameTitle(
+      session,
+      args.title,
+      args.clientCorporationId,
+    );
+    if (existing.length > 0) {
+      return {
+        created: false,
+        title: args.title,
+        possibleDuplicateJobs: existing,
+        message:
+          "An open job with this title already exists at this client. Show the user each id, title, bullhornUrl, owner, and last modified date. Call create_job again with allowDuplicate=true only after they confirm another requisition.",
+      };
+    }
+  }
   const body = await buildCreateJobOrderBody(
     {
       title: args.title,
@@ -3950,7 +4202,18 @@ export async function createJobOrder(
   );
   const { fields: createBody, assignedUsers } = stripAssignedUsersFromFields(body);
   await validateWriteFields("JobOrder", createBody, { mode: "create" });
-  const jobOrderId = await createEntityRecord(session, "JobOrder", createBody);
+  let jobOrderId: number;
+  try {
+    jobOrderId = await createEntityRecord(session, "JobOrder", createBody);
+  } catch (err) {
+    if (!args.clientContactId && isJobOrderPersistError(err)) {
+      const contacts = await listCompanyContacts(session, args.clientCorporationId);
+      throw new BullhornFieldValidationError(
+        missingJobContactMessage(args.clientCorporationId, contacts),
+      );
+    }
+    throw err;
+  }
 
   let assignedUsersAdded: number[] | undefined;
   if (assignedUsers) {
@@ -3964,6 +4227,7 @@ export async function createJobOrder(
   }
 
   return {
+    created: true,
     jobOrderId,
     title: args.title,
     ...(assignedUsersAdded ? { assignedUsersAdded } : {}),
@@ -5198,6 +5462,124 @@ function guessContentType(fileName: string): string {
  * with any caller overrides, validates, creates the Candidate, then attaches the
  * original résumé file to the new record. `overrideFields` wins over parsed data.
  */
+export interface LikelyCandidateMatch {
+  id: number;
+  name: string;
+  bullhornUrl: string | null;
+  owner: string | null;
+  dateLastModified: number | string | null;
+  matchedOn: Array<"email" | "phone" | "name+city">;
+}
+
+function textField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function phoneNeedles(values: Array<string | undefined>): string[] {
+  const out = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    out.add(value);
+    const digits = value.replace(/\D/g, "");
+    if (digits.length >= 10 && digits !== value) out.add(digits);
+  }
+  return [...out];
+}
+
+export interface CandidateDuplicateQuery {
+  reason: "email" | "phone" | "name+city";
+  query: string;
+}
+
+/**
+ * Lucene clauses for /search/Candidate. Candidate rejects /query.
+ * Each value is a quoted phrase with Lucene specials escaped. isDeleted:0
+ * keeps soft-deleted records out of the match list.
+ */
+export function buildCandidateDuplicateLuceneQueries(identity: {
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  firstName?: string;
+  lastName?: string;
+  city?: string;
+}): CandidateDuplicateQuery[] {
+  const queries: CandidateDuplicateQuery[] = [];
+  const email = identity.email?.trim();
+  if (email) {
+    queries.push({
+      reason: "email",
+      query: `email:${luceneQuoted(email)} AND isDeleted:0`,
+    });
+  }
+  for (const phone of phoneNeedles([identity.phone, identity.mobile])) {
+    const quoted = luceneQuoted(phone);
+    queries.push({
+      reason: "phone",
+      query: `(phone:${quoted} OR mobile:${quoted}) AND isDeleted:0`,
+    });
+  }
+  const firstName = identity.firstName?.trim();
+  const lastName = identity.lastName?.trim();
+  const city = identity.city?.trim();
+  if (firstName && lastName && city) {
+    queries.push({
+      reason: "name+city",
+      query:
+        `firstName:${luceneQuoted(firstName)} AND lastName:${luceneQuoted(lastName)} ` +
+        `AND address.city:${luceneQuoted(city)} AND isDeleted:0`,
+    });
+  }
+  return queries;
+}
+
+/** Email, phone, or name plus city matches already in this firm's Candidate list. */
+export async function findLikelyCandidateDuplicates(
+  session: BullhornWriteSession,
+  identity: {
+    email?: string;
+    phone?: string;
+    mobile?: string;
+    firstName?: string;
+    lastName?: string;
+    city?: string;
+  },
+): Promise<LikelyCandidateMatch[]> {
+  const byId = new Map<number, LikelyCandidateMatch>();
+  const fields = "id,name,firstName,lastName,dateLastModified,owner(id,firstName,lastName)";
+  const absorb = (
+    rows: Array<Record<string, unknown>>,
+    reason: LikelyCandidateMatch["matchedOn"][number],
+  ) => {
+    for (const row of rows) {
+      if (typeof row.id !== "number") continue;
+      const modified = row.dateLastModified;
+      const match = byId.get(row.id) ?? {
+        id: row.id,
+        name: personLabel(row) ?? `Candidate ${row.id}`,
+        bullhornUrl: bullhornUrlForEntity("Candidate", row.id),
+        owner: personLabel(row.owner),
+        dateLastModified:
+          typeof modified === "number" || typeof modified === "string" ? modified : null,
+        matchedOn: [] as LikelyCandidateMatch["matchedOn"],
+      };
+      if (!match.matchedOn.includes(reason)) match.matchedOn.push(reason);
+      byId.set(row.id, match);
+    }
+  };
+  const lookup = async (lucene: string, reason: LikelyCandidateMatch["matchedOn"][number]) => {
+    try {
+      absorb(await searchWithWriteSession(session, "Candidate", lucene, fields), reason);
+    } catch (err) {
+      if (byId.size === 0) throw err;
+    }
+  };
+  for (const clause of buildCandidateDuplicateLuceneQueries(identity)) {
+    await lookup(clause.query, clause.reason);
+  }
+  return [...byId.values()];
+}
+
 export async function createCandidateFromResume(
   session: BullhornWriteSession,
   args: {
@@ -5206,13 +5588,18 @@ export async function createCandidateFromResume(
     fileBytes?: Buffer;
     contentType?: string;
     overrideFields?: Record<string, unknown>;
+    allowDuplicate?: boolean;
   },
-): Promise<{
-  candidateId: number;
-  fileId?: number;
-  parsedName?: string;
-  bullhornUrl: string | null;
-}> {
+): Promise<
+  | { created: false; matches: LikelyCandidateMatch[]; message: string }
+  | {
+      created: true;
+      candidateId: number;
+      fileId?: number;
+      parsedName?: string;
+      bullhornUrl: string | null;
+    }
+> {
   const format = resumeFormatFromName(args.fileName);
   const bytes = args.fileBytes
     ? args.fileBytes
@@ -5267,6 +5654,30 @@ export async function createCandidateFromResume(
     body.name = `${body.firstName ?? ""} ${body.lastName ?? ""}`.trim();
   }
 
+  if (!args.allowDuplicate) {
+    const address = body.address;
+    const city =
+      address && typeof address === "object" && !Array.isArray(address)
+        ? textField((address as { city?: unknown }).city)
+        : undefined;
+    const matches = await findLikelyCandidateDuplicates(session, {
+      email: textField(body.email),
+      phone: textField(body.phone),
+      mobile: textField(body.mobile),
+      firstName: textField(body.firstName),
+      lastName: textField(body.lastName),
+      city,
+    });
+    if (matches.length > 0) {
+      return {
+        created: false,
+        matches,
+        message:
+          "Likely existing candidates were found in this firm (same email, phone, or name and city). Show the user each name, id, bullhornUrl, owner, and last modified date. Do not create another record unless they confirm. Then call create_candidate_from_resume again with allowDuplicate=true.",
+      };
+    }
+  }
+
   await validateWriteFields("Candidate", body, { mode: "create" });
   const candidateId = await createEntityRecord(session, "Candidate", body);
 
@@ -5291,6 +5702,7 @@ export async function createCandidateFromResume(
   }
 
   return {
+    created: true,
     candidateId,
     fileId,
     parsedName: typeof body.name === "string" ? body.name : undefined,

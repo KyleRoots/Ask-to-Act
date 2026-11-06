@@ -84,7 +84,7 @@ import { sendSupportEmail } from "./emailService.js";
 import type { CallerIdentity } from "../middlewares/bearer-auth.js";
 import { trackSeatActivity, trackToolUsage } from "./seat-activity.js";
 import { logger } from "./logger.js";
-import { responseCache, stableKey } from "./cache.js";
+import { invalidateFirmReadCache, responseCache, stableKey } from "./cache.js";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import {
@@ -261,7 +261,7 @@ const SERVER_INSTRUCTIONS = [
   "PRESENTING RECORDS — make every Bullhorn record open in one click:",
   "- Each linkable record in a tool result has a `bullhornUrl`: a deep link that opens THAT record in Bullhorn.",
   "- ALWAYS make the record itself clickable: render the record's NAME (candidate/contact/company name or job title) — or its Bullhorn ID — as a Markdown link to its `bullhornUrl`.",
-  "  In a table, the NAME cell (or a Bullhorn ID cell) IS the link, e.g. `| [Joseph Arboleras](<bullhornUrl>) | FANUC America | ... |`.",
+  "  In a table, the NAME cell (or a Bullhorn ID cell) IS the link, e.g. `| [Alex Rivera](<bullhornUrl>) | Northwind Labs | ... |`.",
   "- Put the link ONLY on the record's own name/ID. Do NOT link email addresses or phone numbers — leave those as plain text.",
   "- This applies to EVERY row even when an email/phone column is shown: the record NAME is still the link; the email stays plain text. Never let an email be the only link in a row.",
   "- Never add a separate raw-URL column and never print the raw bullhornUrl as text.",
@@ -537,6 +537,20 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     await markStagedFileConsumed(requireStagedFileScope(), fileRef.trim(), sizeBytes);
   }
 
+  function collectRecordIds(value: unknown, into: Set<number>, depth = 0): void {
+    if (depth > 5 || value == null || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const item of value) collectRecordIds(item, into, depth + 1);
+      return;
+    }
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (/(^id$|Id$)/.test(key) && typeof child === "number" && Number.isInteger(child) && child > 0) {
+        into.add(child);
+      }
+      if (child && typeof child === "object") collectRecordIds(child, into, depth + 1);
+    }
+  }
+
   /** Runs a write tool: logs, executes, returns result. Writes are never cached. */
   async function runWriteTool(
     toolName: string,
@@ -545,6 +559,10 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
     try {
       const result = await withLogging(toolName, args, fn);
+      const ids = new Set<number>();
+      collectRecordIds(args, ids);
+      collectRecordIds(result, ids);
+      invalidateFirmReadCache(currentFirmContextId(), [...ids]);
       track(toolName, false);
       return { content: [{ type: "text", text: formatResult(result) }] };
     } catch (err) {
@@ -617,13 +635,13 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_candidates",
-    "Search candidates. PREFERRED for résumé/skills text: use `keywords` (searches description, skillSet, comments, occupation; AND/OR groups). Use `query` for structured filters only (status, dates, location). Workable pool: `AND NOT status:Archive` — not `status:Active`. Confirm skills/clearance with get_candidate_resume on shortlist. Full résumés: get_candidate_resume (~5 candidates). Link each NAME to bullhornUrl.",
+    "Search candidates. PREFERRED for résumé/skills text: use `keywords` (searches description, skillSet, comments, occupation; AND/OR groups). Use `query` for structured filters only (status, dates, location). Workable pool: `AND NOT status:Archive`, and confirm status names with list_field_options. Confirm skills/clearance with get_candidate_resume on shortlist. Full résumés: get_candidate_resume (~5 candidates). Link each NAME to bullhornUrl.",
     {
       query: z
         .string()
         .optional()
         .describe(
-          "Raw Lucene for STRUCTURED filters (status, willRelocate, desiredLocations, dates), e.g. 'willRelocate:true AND NOT status:Archive'. Field-qualify every term — bare keywords are rejected by Bullhorn. For free-text skills/résumé/clearance search, prefer the `keywords` argument (it searches all text fields for you). For 'active'/workable candidates exclude archived records with `AND NOT status:Archive` rather than `status:\"Active\"` (most workable candidates here are 'Online Applicant'/'New Lead', not 'Active'). Optional if `keywords` is provided.",
+          "Raw Lucene for STRUCTURED filters (status, willRelocate, desiredLocations, dates), e.g. 'willRelocate:true AND NOT status:Archive'. Field-qualify every term — bare keywords are rejected by Bullhorn. For free-text skills/résumé/clearance search, prefer the `keywords` argument (it searches all text fields for you). For a workable pool, exclude archived records with `AND NOT status:Archive` rather than assuming status:Active. Call list_field_options(Candidate, status) for this firm's status names. Optional if `keywords` is provided.",
         ),
       keywords: z
         .array(z.union([z.string(), z.array(z.string())]))
@@ -659,14 +677,14 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_jobs",
-    "Search job orders (Lucene). Internal Department = correlatedCustomText1 (NOT owner). Open jobs: isOpen:true AND NOT status:Archive AND isDeleted:false. For totals/by-dept use count_entity or open_jobs_report — not this list. Link job TITLE to bullhornUrl.",
+    "Search job orders (Lucene). Internal Department is a per-firm custom field (describe_entity configuredCustomFields), not owner. Open jobs: isOpen:true AND NOT status:Archive AND isDeleted:false. For totals/by-dept use count_entity or open_jobs_report, not this list. Link job TITLE to bullhornUrl.",
     {
       query: z
         .string()
         .describe(
-          "Lucene query string, e.g. 'isOpen:true AND title:\"Software Engineer\"'. NOTE: this instance has NO JobOrder status literally named \"Open\" (real statuses include \"Accepting Candidates\", \"Hold - Client Hold\", \"Filled\"); for open jobs use the boolean flag 'isOpen:true', NOT 'status:Open' (which always returns 0).",
+          "Lucene query string, e.g. 'isOpen:true AND title:\"Software Engineer\"'. Do not assume a status named \"Open\". For open jobs use isOpen:true, not status:Open. Call list_field_options(JobOrder, status) for this firm's real status names.",
         ),
-      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 job records per call — NOT a total). Do NOT use to count/total/aggregate jobs — use count_entity (set groupBy:correlatedCustomText1 for a per-department breakdown) or the open_jobs report tool, which return exact totals in a tiny payload. Page with 'start' for more records."),
+      count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 job records per call, not a total). Do NOT use to count/total/aggregate jobs. Use count_entity (groupBy the Internal Department field from describe_entity configuredCustomFields) or the open_jobs report tool, which return exact totals in a tiny payload. Page with 'start' for more records."),
       start: z.number().int().min(0).optional().describe("Pagination offset (default: 0)"),
       fields: z.string().optional().describe("Comma-separated fields to return"),
     },
@@ -695,7 +713,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_contacts",
-    "Search for client contacts (ClientContact) in Bullhorn ATS using a Lucene query. This instance stores each contact's \"Internal Department\" (owning office/branch, e.g. \"MYT-Ottawa\") in field customText1 — use it to filter/group contacts by department. For any 'how many contacts' total or by-group breakdown use count_entity — do NOT count or rank from a returned record page (it is a truncated sample). DISPLAY RULE (REQUIRED): each record includes a `bullhornUrl` — render the contact's NAME as a markdown hyperlink to it in prose, lists, AND tables; never show the name as plain text when a `bullhornUrl` is present.",
+    "Search client contacts (ClientContact) with a Lucene query. Department is per firm (describe_entity configuredCustomFields). For any 'how many contacts' total or by-group breakdown use count_entity — do NOT count or rank from a returned page (it is a truncated sample). DISPLAY RULE (REQUIRED): each record includes a `bullhornUrl` — render the contact NAME as a markdown link to it.",
     {
       query: z
         .string()
@@ -903,7 +921,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "list_placements",
-    "List placements (page, not a total). Internal Department = correlatedCustomText1. Time scope via dateAddedStart/End. Confirmed = Approved/Completed/Ended. For how-many / by-dept use count_entity or placements_report — not this list. Link candidate NAME (or placement id) to bullhornUrl.",
+    "List placements (page, not a total). Internal Department is a per-firm custom field (describe_entity configuredCustomFields). Time scope via dateAddedStart/End. Confirmed = Approved/Completed/Ended. For how-many / by-dept use count_entity or placements_report, not this list. Link candidate NAME (or placement id) to bullhornUrl.",
     {
       candidateId: z.number().int().positive().optional().describe("Filter by candidate Bullhorn ID"),
       jobId: z.number().int().positive().optional().describe("Filter by job order Bullhorn ID"),
@@ -935,7 +953,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
   tool(
     "get_notes",
     "Retrieve notes for a candidate and/or job order (requires at least one of candidateId or jobId), optionally within a dateAdded range. " +
-      "Loads notes via the Candidate/JobOrder association — Lucene Note search returns 0 and /query/Note is not supported on this Bullhorn instance. " +
+      "Loads notes via the Candidate/JobOrder association. Lucene Note search can return 0, and /query/Note is rejected. " +
       "Scout-style notes usually live on the candidate with jobOrder null; when comments contain 'Job ID: N', results include parsedJobOrderIds. " +
       "Pass both candidateId and jobId to keep only notes that reference that job (association or parsed comment ID). " +
       "Note.action may include custom values (e.g. 'Scout Screen - Qualified') absent from list_field_options — never reject those for filtering. " +
@@ -977,7 +995,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_entity",
-    `Full-text Lucene search over indexed Bullhorn entities when no dedicated tool fits. Prefer search_candidates/search_jobs/search_companies/search_contacts when applicable. Searchable: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. NOTE caveat: /search/Note returns 0 here and /query/Note is rejected — use get_notes(candidateId|jobId) or nested notes on get_entity(Candidate|JobOrder). For Appointment, Task, CorporateUser, Sendout, Tearsheet use query_entity. Use describe_entity for valid fields; configuredCustomFields maps labels to API names. Internal Department varies: JobOrder/Placement=correlatedCustomText1; ClientContact/Lead/Opportunity=customText1; Candidate=customText3. categories is mostly empty; never group by it. Do NOT rank, pick superlatives, or draw by-group conclusions from a returned page — it is a truncated sample; use count_entity or a report tool. Returned Candidate/Contact/Company/Job/Lead/Opportunity rows include bullhornUrl.`,
+    `Full-text Lucene search over indexed Bullhorn entities when no dedicated tool fits. Prefer search_candidates/search_jobs/search_companies/search_contacts when applicable. Searchable: Candidate, ClientContact, ClientCorporation, JobOrder, JobSubmission, Placement, Note, Lead, Opportunity. NOTE caveat: /search/Note can return 0 and /query/Note is rejected — use get_notes(candidateId|jobId) or nested notes on get_entity(Candidate|JobOrder). For Appointment, Task, CorporateUser, Sendout, Tearsheet use query_entity. Use describe_entity configuredCustomFields for this firm's department field. categories is mostly empty; never group by it. Do NOT rank or draw by-group conclusions from a returned page; use count_entity or a report tool. Returned Candidate/Contact/Company/Job/Lead/Opportunity rows include bullhornUrl.`,
     {
       entityType: z.string().describe(entityTypeDescribe),
       query: z
@@ -997,7 +1015,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "query_entity",
-    "Structured SQL-like query for query-capable entities (NOT Note). Use count_entity for totals. Internal Department: correlatedCustomText1 on JobOrder/Placement; customText1 on Contact/Lead/Opp. Dates = epoch ms. Pages cap at 50 — not for ranking. Link names to bullhornUrl.",
+    "Structured SQL-like query for query-capable entities (NOT Note). Use count_entity for totals. Internal Department is per firm: call describe_entity and read configuredCustomFields. Dates = epoch ms. Pages cap at 50 and are not for ranking. Link names to bullhornUrl.",
     {
       entityType: z.string().describe(entityTypeDescribe),
       where: z
@@ -1023,7 +1041,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "count_entity",
-    "Exact Lucene counts (and optional groupBy). Use for how-many / by-department — not record lists. Internal Department: correlatedCustomText1 (JobOrder/Placement), customText1 (Contact/Lead/Opp). Open jobs: isOpen:true AND NOT status:Archive. Placements made: Approved/Completed/Ended. Note entity NOT supported — use get_notes or scout_dept_report.",
+    "Exact Lucene counts (and optional groupBy). Use for how-many / by-department, not record lists. Internal Department is per firm (describe_entity configuredCustomFields). Open jobs: isOpen:true AND NOT status:Archive. Placements made: Approved/Completed/Ended. Note entity is NOT supported: use get_notes or scout_dept_report.",
     {
       entityType: z.string().describe(entityTypeDescribe),
       query: z
@@ -1036,7 +1054,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .string()
         .optional()
         .describe(
-          "Optional field to break the count down by, e.g. 'correlatedCustomText1' (Internal Department).",
+          "Optional field to break the count down by. For Internal Department, use this firm's API name from describe_entity configuredCustomFields.",
         ),
       groupValues: z
         .array(z.string())
@@ -1069,7 +1087,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "describe_entity",
-    "List the available fields (name + type) for a Bullhorn entity. The response also includes `configuredCustomFields`: this instance's admin-configured custom fields with their human-readable labels (e.g. \"Internal Department\" -> correlatedCustomText1/customText1), so you can map a label you see in Bullhorn to the real API field name. Use this to discover valid field names before building a query_entity 'where' clause or requesting specific fields.",
+    "List the available fields (name + type) for a Bullhorn entity. The response also includes `configuredCustomFields`: this firm's admin-configured custom fields with their human-readable labels and API names, so you can map a label you see in Bullhorn (such as Internal Department) to this firm's field name. Use this before building a query_entity where clause or requesting specific fields. Do not assume another firm's custom field names.",
     {
       entityType: z.string().describe(entityTypeDescribe),
     },
@@ -1204,7 +1222,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_leads",
-    "Search Bullhorn CRM leads (sales prospects) with a Lucene query. This instance stores each lead's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the lead directly in Bullhorn. For any 'how many leads' total or by-group breakdown use count_entity — do NOT count or rank from a returned record page (it is a truncated sample). Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    "Search CRM leads with a Lucene query. Department is per firm (describe_entity configuredCustomFields). Each record includes a bullhornUrl. For any 'how many leads' total or by-group breakdown use count_entity, not a returned page. Requires Lead tracking, or Bullhorn returns an error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Active AND companyName:\"Acme*\"'"),
       count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
@@ -1219,7 +1237,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "search_opportunities",
-    "Search Bullhorn CRM opportunities (sales deals) with a Lucene query. This instance stores each opportunity's \"Internal Department\" (office/branch) in field customText1. Each record includes a `bullhornUrl` deep link to open the opportunity directly in Bullhorn. To COUNT/total opportunities — including \"how many active / open / in-the-pipeline opportunities\" — do NOT tally records from this list; use count_entity with `isOpen:true` (the server applies the official active exclusion of Closed-Won/Closed-Lost/Converted AND soft-deleted records) or the sales_pipeline_report tool. Do NOT rank offices/stages or pick a 'most/top/largest' from a returned record page — it is a truncated sample; use count_entity or the sales_pipeline_report for any ranking, total, or by-group breakdown. Note: requires Lead & Opportunity tracking to be enabled in the Bullhorn instance; if it is not, this will return a Bullhorn error.",
+    "Search CRM opportunities with a Lucene query. Department is per firm (describe_entity configuredCustomFields). Each record includes a bullhornUrl. For totals, including active pipeline, use count_entity with isOpen:true or sales_pipeline_report. Do not rank from a returned page. Requires Opportunity tracking, or Bullhorn returns an error.",
     {
       query: z.string().describe("Lucene query string, e.g. 'status:Open AND title:\"Managed Services\"'"),
       count: z.number().int().min(1).optional().transform(capFetch).describe("Records to return per call (default: 20; the server returns AT MOST 50 per call — NOT a total). For ANY count/total use count_entity; page with 'start' for more."),
@@ -1325,12 +1343,12 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "scout_dept_report",
-    "Screening/Scout notes by Internal Department — NL-ready. Resolves nicknames (STSI→STS-STSI). Defaults OPEN jobs. For 'N most recent' pass limit=N (pages until jobs exhausted or gateway soft wall). Soft walls are channel realism (~95s) — never a dead end. Read stopReason + confirmedComplete + asyncContinuation: on wall_time call start_scout_dept_report_job (same args) then poll get_report_job. Never date-window fan-out. Never give up solely because of wall_time or an arbitrary search cap. 0+incomplete → clarify or async/broader retry. Link NAME to bullhornUrl.",
+    "Scout notes by this firm's department. Pass the department name stored on its jobs. Defaults OPEN jobs. For 'N most recent' pass limit=N. On wall_time call start_scout_dept_report_job (same args) then poll get_report_job. Never date-window fan-out. Never give up solely because of wall_time. Link NAME to bullhornUrl.",
     {
       department: z
         .string()
         .min(1)
-        .describe('Internal Department or nickname, e.g. "STS-STSI", "STSI", "MYT-Ottawa".'),
+        .describe("Internal Department name as stored on this firm's jobs. Call describe_entity if you need the field, not a guessed office code."),
       noteAction: z
         .string()
         .min(1)
@@ -1424,7 +1442,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     department: z
       .string()
       .min(1)
-      .describe('Internal Department or nickname, e.g. "STS-STSI", "STSI", "MYT-Ottawa".'),
+      .describe("Internal Department name as stored on this firm's jobs. Call describe_entity if you need the field, not a guessed office code."),
     noteAction: z
       .string()
       .min(1)
@@ -1609,7 +1627,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "open_jobs_report",
-    "Report: open jobs by department (correlatedCustomText1 — NOT owner) and employment type. Open = isOpen AND NOT Archive AND not soft-deleted.",
+    "Report: open jobs by this firm's Internal Department (not owner) and employment type. Open = isOpen AND NOT Archive AND not soft-deleted.",
     {},
     async () => rt("open_jobs_report", {}, () => openJobsReport()),
   );
@@ -1623,7 +1641,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   tool(
     "job_aging_report",
-    "Report: open-job age buckets (0-30/31-90/91-180/180+) and stale (>90d) by department (correlatedCustomText1, not owner).",
+    "Report: open-job age buckets (0-30/31-90/91-180/180+) and stale (>90d) by this firm's Internal Department, not owner.",
     {},
     async () => rt("job_aging_report", {}, () => jobAgingReport()),
   );
@@ -1826,12 +1844,12 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
     "update_candidate_status",
     "WRITE: Updates a candidate's status field in Bullhorn. " +
       "Requires a personal Bullhorn account — the update is performed as YOU and respects your Bullhorn edit permissions. " +
-      "Common status values in this instance: 'Active', 'New Lead', 'Online Applicant', 'Placed', 'Archive'. " +
+      "Call list_field_options(Candidate, status) and pass an exact value from that list. Do not assume another firm's status names. " +
       "ALWAYS confirm the candidateId and new status with the user before calling this tool — status changes are visible to all recruiters. " +
       "Use get_candidate first to verify the current status before changing it.",
     {
       candidateId: z.number().int().positive().describe("Bullhorn candidate ID to update."),
-      status: z.string().min(1).describe("New status value, e.g. 'Active', 'New Lead', 'Archive'. Must match a valid Bullhorn status exactly (case-sensitive)."),
+      status: z.string().min(1).describe("New status value from list_field_options(Candidate, status). Must match exactly (case-sensitive)."),
     },
     async ({ candidateId, status }) =>
       runWriteTool("update_candidate_status", { candidateId, status }, async () => {
@@ -2033,19 +2051,20 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
 
   writeTool(
     "create_job",
-    "WRITE: Creates a JobOrder. Sales Rep (`owner`) defaults to YOU from portal email; Recruiter(s) (`assignedUsers`) is separate — pass in additionalFields as [{ id: userId }] or { add: [userId] }. Requires title + clientCorporationId. " +
-      "Defaults: company address; Internal Department (correlatedCustomText1) from Sales Rep primary department; onSite=On-Site " +
-      "(override Remote/Hybrid via additionalFields.onSite — Remote keeps address). " +
-      "Pass description text with headings/bullets — server formats Bullhorn HTML. " +
-      "list_field_options for status/employmentType; extras in additionalFields. Confirm before creating.",
+    "WRITE: Creates a JobOrder. Sales Rep (owner) defaults to you. Recruiter assignedUsers go in additionalFields as [{ id }] or { add: [id] }. Requires title + clientCorporationId. " +
+      "Ask the user for the hiring contact and pass clientContactId. Many firms reject a job with no contact and Bullhorn only says it could not persist a JobOrder. " +
+      "If possibleDuplicateJobs is returned, show id, title, bullhornUrl, owner, and last modified. Pass allowDuplicate=true only after the user confirms. " +
+      "Defaults: company address, onSite=On-Site, and this firm's department from the Sales Rep when that field exists. Description text is stored as Bullhorn HTML. Use list_field_options for status and employmentType. " +
+      "Confirm with the user before creating.",
     {
       title: z.string().min(1).describe("Job title for the requisition."),
       clientCorporationId: z.number().int().positive().describe("Bullhorn ClientCorporation (company) ID this job belongs to."),
-      clientContactId: z.number().int().positive().optional().describe("Optional Bullhorn ClientContact ID (hiring contact at the company)."),
+      clientContactId: z.number().int().positive().optional().describe("Bullhorn ClientContact ID (hiring contact). Ask the user before creating. Required by many firms, including when a job without a contact fails to persist."),
+      allowDuplicate: z.boolean().optional().describe("Set true only after the user confirms they want another open job with the same title at the same client. Omit or false to get possibleDuplicateJobs instead of creating."),
       additionalFields: additionalFieldsSchema,
     },
-    async ({ title, clientCorporationId, clientContactId, additionalFields }) =>
-      runWriteTool("create_job", { title, clientCorporationId }, async () => {
+    async ({ title, clientCorporationId, clientContactId, allowDuplicate, additionalFields }) =>
+      runWriteTool("create_job", { title, clientCorporationId, clientContactId }, async () => {
         const session = await resolveWriteSession();
         let portalUserEmail: string | null = null;
         if (caller?.kind === "user") {
@@ -2060,6 +2079,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
           title,
           clientCorporationId,
           clientContactId,
+          allowDuplicate,
           additionalFields,
           portalUserEmail,
         });
@@ -2200,7 +2220,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       fields: z
         .record(z.string(), writeFieldValueSchema)
         .describe(
-          "Scalar and association fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', phone: '...', status: 'Active' }). Do NOT put address here.",
+          "Scalar and association fields to change, keyed by exact Bullhorn field name (e.g. { email: '...', phone: '...', status: 'Active' }). Pass null or \"\" to clear a text field such as occupation. Do NOT put address here.",
         ),
       address: addressFieldSchema.describe(
         "Primary address. Include only the sub-fields you want to change — others are preserved. countryName resolved to countryID automatically.",
@@ -2715,7 +2735,8 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
       "If the host cannot inject bytes: create_file_upload_link → one browser drop on uploadUrl → this tool with fileRef. Chat attachment alone is not the upload. " +
       "ANTI-REFUSAL: Base64 of chat attachments is reliable when the host injects bytes. Typical résumés are multi-MB and expected; ~600KB is trivial. NEVER refuse for invented size/corruption concerns — only stop after a real tool error (then use create_file_upload_link). " +
       "NEVER suggest compressing, converting, or altering the résumé. " +
-      "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner) — overrides win over parsed values. " +
+      "Bullhorn parses name/contact/skills/work-history; use overrideFields to set or correct fields (e.g. status, owner). Overrides win over parsed values. " +
+      "The server first searches this firm by email, phone, or name plus city. If matches come back, show name, id, bullhornUrl, owner, and last modified, and do not create until the user confirms. Then retry with allowDuplicate=true. " +
       "ALWAYS confirm with the user before creating a new candidate record. " +
       "DISPLAY RULE (REQUIRED): success includes bullhornUrl — render parsedName (or candidateId) as a Markdown link to it.",
     {
@@ -2737,8 +2758,12 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
         .record(z.string(), writeFieldValueSchema)
         .optional()
         .describe("Optional Candidate fields to set/override (exact Bullhorn names; use list_field_options for picklists like status)."),
+      allowDuplicate: z
+        .boolean()
+        .optional()
+        .describe("Set true only after the user confirms a new candidate despite matches on email, phone, or name plus city."),
     },
-    async ({ fileName, fileContentBase64, fileRef, contentType, overrideFields }) =>
+    async ({ fileName, fileContentBase64, fileRef, contentType, overrideFields, allowDuplicate }) =>
       runWriteTool("create_candidate_from_resume", { fileName, fileRef }, async () => {
         const session = await resolveWriteSession();
         const resolved = await resolveToolUploadBytes({
@@ -2752,6 +2777,7 @@ export function createMcpServer(caller?: CallerIdentity): McpServer {
           fileBytes: resolved.bytes,
           contentType: contentType ?? resolved.contentType,
           overrideFields,
+          allowDuplicate,
         });
         await consumeToolFileRef(fileRef, resolved.bytes.length);
         return created;

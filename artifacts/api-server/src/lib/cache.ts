@@ -33,6 +33,13 @@ export function cacheGet<T>(key: string): T | undefined {
   return structuredClone(entry.value) as T;
 }
 
+/** Drops every generic-cache entry whose key matches. Used after a write so the next read is fresh. */
+export function cacheDeleteWhere(predicate: (key: string) => boolean): void {
+  for (const key of store.keys()) {
+    if (predicate(key)) store.delete(key);
+  }
+}
+
 /** Stores an independent copy of the value with a TTL, evicting the oldest entry when full. */
 export function cacheSet(key: string, value: unknown, ttlMs: number = DEFAULT_TTL_MS): void {
   if (!store.has(key) && store.size >= MAX_ENTRIES) {
@@ -88,6 +95,28 @@ class ResponseCache {
     }
     this.store.set(key, { text, expires: Date.now() + ttlMs });
   }
+
+  deleteWhere(predicate: (key: string) => boolean): void {
+    for (const key of this.store.keys()) {
+      if (predicate(key)) this.store.delete(key);
+    }
+  }
+}
+
+/**
+ * Drops cached Bullhorn reads and formatted tool responses for this firm when
+ * the key contains one of the record ids (entity GET, that record's notes, or
+ * a get_* tool call). Other firms' entries are left in place.
+ */
+export function invalidateFirmReadCache(firmId: string | null, ids: number[]): void {
+  const prefix = `${firmId ?? "no-firm"}:`;
+  const patterns = ids
+    .filter((id) => Number.isInteger(id) && id > 0)
+    .map((id) => new RegExp(`(^|[^0-9])${id}([^0-9]|$)`));
+  if (patterns.length === 0) return;
+  const hit = (key: string) => key.startsWith(prefix) && patterns.some((re) => re.test(key));
+  cacheDeleteWhere(hit);
+  responseCache.deleteWhere(hit);
 }
 
 export const responseCache = new ResponseCache();
